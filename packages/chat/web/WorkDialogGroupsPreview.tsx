@@ -880,7 +880,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     () => new Map(eligibleRows.map((r) => [r.key, r])),
     [eligibleRows]
   );
-  const defaultFocusedKey = useMemo(() => {
+  // 当前路由上真实打开的那一行（无回退）：供「空间外」分组自动展开使用，
+  // 也作为侧栏焦点行的首选，避免同一判据写两遍。
+  const activeRowKey = useMemo(() => {
     for (const row of eligibleRows) {
       if (
         isRoutableContentActive({
@@ -894,8 +896,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         return row.key;
       }
     }
-    return eligibleRows[0]?.key ?? null;
+    return null;
   }, [eligibleRows, userId, currentSpaceId, location.pathname]);
+  const defaultFocusedKey = activeRowKey ?? eligibleRows[0]?.key ?? null;
 
   const canDeleteRow = useCallback(
     (key: string) => {
@@ -1194,6 +1197,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
             homeScope={homeScope}
             onSelectHomeScope={onSelectHomeScope}
             onSpaceRecordUpdate={handleSpaceRecordUpdate}
+            activeRowKey={activeRowKey}
           >
             {renderSpace}
           </WorkDialogSpaceGroups>

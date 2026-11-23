@@ -1,4 +1,69 @@
 
+## 0.252.0-alpha.1 (2026-11-23)
+
+### Features
+
+* **agent-form:** rework the edit page and make model discovery honest ([e96f6e8](https://github.com/nolotus/bun-nolo/commit/e96f6e8da9a3c3d552aa3dc8e32912efb9ab7d8b))
+* **ai:** 按 AA 2026-11-21 实测重校档位表、按计费口径排价并放宽跨 1 档拦截 ([b8493ad](https://github.com/nolotus/bun-nolo/commit/b8493ad451f0853370294adcf21273c1936d0f9f))
+* **ai:** 支持主 Agent 强弱姿态自适应与单模型多实例精简模式 ([bf5fcb3](https://github.com/nolotus/bun-nolo/commit/bf5fcb37f2a71d837880db36bcb2ec3efa5d6369))
+* **ai:** 补全模型档位正则、隔离跨通道 quota 并补充 roleHint 与 tierHints ([4212cab](https://github.com/nolotus/bun-nolo/commit/4212cab70d07e69a4a72f1f3e1b71c7a9b058be9))
+* **ai:** 补齐 min 档主动拆派触发条件、小改动复核降档引导与子任务 need_escalation 熔断 ([02e9688](https://github.com/nolotus/bun-nolo/commit/02e9688428e3dc5cb611f28b407f912818cb3614))
+* **auth:** App 预算预留与实时语音按秒计费 ([04dda8f](https://github.com/nolotus/bun-nolo/commit/04dda8f07dad548153d5528bd09169f8c9ca7c87))
+* **cli:** 升级用户消息紧凑中性底色气泡并支持 VTE 滚轮加速与滚动条拖拽 ([37658d4](https://github.com/nolotus/bun-nolo/commit/37658d4d9beb5231757f7dc7b7edddd967c54a86))
+* **cli:** 在 RunRecord 中补记可信宿主来源的 callerAgentKey ([666281e](https://github.com/nolotus/bun-nolo/commit/666281e38e4fa4b48edb6eea26e0f54b98b3403d))
+* **cli:** 实现 reasoningEffort 随任务难度自动联动与生产 fail-closed 护栏 ([3fdea5f](https://github.com/nolotus/bun-nolo/commit/3fdea5f71b6707cf0fcb15a5d336c09582a880df))
+* **cli:** 宿主审批卡改成可选中的交互，覆盖浏览器与 MCP 审批 ([8cdd03d](https://github.com/nolotus/bun-nolo/commit/8cdd03d19b2ee6025fbfe2e39848ed920f70c638))
+* **cli:** 新增 24h 快败坏通道标注 healthContext 并补齐 CLI listAgents tierHints 透传 ([f7c5baa](https://github.com/nolotus/bun-nolo/commit/f7c5baaa2aaf1a5f30af3bacae97eb9bbf3ce19d))
+* **cli:** 补全 RunRecord 终态观测字段与服务端可信派发 callerAgentKey 归因 ([0845baa](https://github.com/nolotus/bun-nolo/commit/0845baadc382970ed55dcb87fb735386f3cf0f86))
+* **database:** 批量换签接口，签名绑定实际命中的文件主键 ([dba911b](https://github.com/nolotus/bun-nolo/commit/dba911bed997761f366889e4848ce3b1265fd34d))
+* **database:** 无状态短效签名读取 URL，给带不了 Authorization 的消费方用 ([547e06c](https://github.com/nolotus/bun-nolo/commit/547e06cdbed57d69356dd4aae16d0fcebd5d1030))
+* **rn:** 媒体接入公开确认与签名 URL ([01cadaf](https://github.com/nolotus/bun-nolo/commit/01cadaf2fc9e13123dd61bdffcb576e84bc05ea1))
+* **scripts:** read-only runtime resource inventory (Phase S0) ([5b9eac2](https://github.com/nolotus/bun-nolo/commit/5b9eac2987e74b3ef886bbc8994a6b15ba531fc2))
+* **server:** materialize built-in skill assets into the sandbox workspace ([90c8dd0](https://github.com/nolotus/bun-nolo/commit/90c8dd02009538774c8d94b9a2caeaaead622c24))
+* **share:** 公开发布面补 accessPolicy public，切 enforce 的前置 ([b44d3c6](https://github.com/nolotus/bun-nolo/commit/b44d3c64cdffe9dbbcb863e5f9375c58fb6c160a))
+* **sidebar:** add space-scoped creation and tidy workspace groups ([634da07](https://github.com/nolotus/bun-nolo/commit/634da078982b9958b26d550d71c0d3303a971299))
+* **tui:** animate thinking spinner in terminal window title ([3b0e83b](https://github.com/nolotus/bun-nolo/commit/3b0e83b500f465bceefbfc944a853d5ef0a9bc97))
+* **web:** 3D viewer for GLB artifacts in the file preview page ([5d637a2](https://github.com/nolotus/bun-nolo/commit/5d637a2dc36116865f79c15e5b13df1b3e38aeb4))
+* **web:** 媒体接入短时签名 URL ([6294262](https://github.com/nolotus/bun-nolo/commit/6294262f18b3179a4e968b7d41032ed356b955d5))
+
+### Bug Fixes
+
+* **agent-create:** derive the subscription footnote from the registry ([b426a94](https://github.com/nolotus/bun-nolo/commit/b426a945b7601b4cedee72abd62d8726f4314108))
+* **agent-create:** keep local-only keys off nolo and say what sharing does ([69b321d](https://github.com/nolotus/bun-nolo/commit/69b321d45804eaf9e36143463ee1f23c8903a4ed))
+* **agent-create:** tighten the quick-create first screen ([fad96f3](https://github.com/nolotus/bun-nolo/commit/fad96f35b1089d789b4c44586b0ea0587ace1bb0))
+* **agent-create:** translate remaining hardcoded copy and split plan keys ([940743d](https://github.com/nolotus/bun-nolo/commit/940743db7555e0351f76f78ba28a402589190c86))
+* **agent-form:** unify the thinking control and stop legacy flag overrides ([30c8ad5](https://github.com/nolotus/bun-nolo/commit/30c8ad56dbafff6fe4b9d1429a05743b58a0347f))
+* **agent-runtime:** refine confirm boundary and task continuity guidance ([7a0d8e7](https://github.com/nolotus/bun-nolo/commit/7a0d8e7480774b279014957f4b84b5b7f053ccf0))
+* **auth:** 登录页 GitHub 按钮补上品牌图标 ([30ed2eb](https://github.com/nolotus/bun-nolo/commit/30ed2ebf8537498f247332cd8be78a505f66d74e))
+* **cli:** 补上审批测试的类型缺口，过 typecheckCli 基线门 ([98d5e67](https://github.com/nolotus/bun-nolo/commit/98d5e677d602d776820eaf2fe7d6c147fd9b3aac))
+* **codex-oauth:** actually enable the 6.2 developer-prefix layout ([47f0db7](https://github.com/nolotus/bun-nolo/commit/47f0db73983388761180aaa04e6101984499b0eb))
+* **codex-oauth:** stop sending the agent prompt twice over the OAuth hop ([233f6f3](https://github.com/nolotus/bun-nolo/commit/233f6f35c80fbd7fda3bfaceb6a04f5ad74248f3))
+* **database:** 公开 metadata 字段白名单与匿名公开确认端点 ([1e5fc78](https://github.com/nolotus/bun-nolo/commit/1e5fc78b186fd745c7855d47c2b4f9f8144c0b17))
+* **db:** 拒绝通用 HTTP 路径写/改/删 sp: 命名空间，堵住跨 Space 越权 ([d8e9a16](https://github.com/nolotus/bun-nolo/commit/d8e9a1661f2318e8abcf2634833d909d33df6611))
+* **i18n:** add ja/de/es copy for the agent-create page ([44561cd](https://github.com/nolotus/bun-nolo/commit/44561cda3f6d7d1735a900dac6542cce1b2a405e))
+* **memory:** prepare local dialog before first work memory query ([d3b3fdf](https://github.com/nolotus/bun-nolo/commit/d3b3fdf93210321e5f76b70877a33c255a6b4581))
+* **render:** 文件页改接公开确认端点，恢复匿名公开媒体 ([97632aa](https://github.com/nolotus/bun-nolo/commit/97632aa014589a125ae4b9ec34cf614e36e02a29))
+* **server:** bind sandbox artifacts to the execution that produced them ([e7916b3](https://github.com/nolotus/bun-nolo/commit/e7916b38ce3ce54289046fed89850e288e52e917))
+* **server:** make Space uploads a Space asset and keep bookmarking out of authorization ([eb05fe3](https://github.com/nolotus/bun-nolo/commit/eb05fe3be120b63045d180d8bacafcb393b3feaf))
+* **server:** make upload ownership server-authoritative ([2dc70fc](https://github.com/nolotus/bun-nolo/commit/2dc70fcf3c4754afab9459e96ab37cba21adf114))
+* **server:** unify file-read authorization across metadata, content, HEAD and replicas ([ffb2889](https://github.com/nolotus/bun-nolo/commit/ffb288935084c3b707561ea7b301e9b44a793e8a))
+* **server:** 内联图只接受显式公开且来源可信的文件 ([d87900d](https://github.com/nolotus/bun-nolo/commit/d87900d88b46a4300f00df06cf60c9bc9e77e79d))
+* **server:** 模型看图不再绕过文件归属校验，堵住跨用户读取与 URL 外泄 ([8160405](https://github.com/nolotus/bun-nolo/commit/8160405576f3f9bc76b91d452e5cd9601adf119b))
+* **thinking:** align Hosted Kimi effort mapping and stop guessing wire values ([97b37df](https://github.com/nolotus/bun-nolo/commit/97b37df215a9532b10814e6a89e0da2720fbcfd6))
+* **tui:** preserve drafts during image path copying ([a4391e2](https://github.com/nolotus/bun-nolo/commit/a4391e2bf4d5945967234574444458955a335dcd))
+* **tui:** read the canvas from Ptyxis instead of its lying VTE reply ([ed50f58](https://github.com/nolotus/bun-nolo/commit/ed50f58a2932e1db4461fead07aeba9017495393))
+* **tui:** stop late rendering after terminal teardown ([fba1d98](https://github.com/nolotus/bun-nolo/commit/fba1d98105ff5f342319b5001a1edb67d8a9ef0a))
+* **tui:** treat trusted host canvas brightness as canvas evidence ([df96a36](https://github.com/nolotus/bun-nolo/commit/df96a362ff16fbb6e7ec7eeced1724ec0f9a66e8))
+* **types:** parameterise the MCP preset link slot so typecheck:web is green again ([9b61b0b](https://github.com/nolotus/bun-nolo/commit/9b61b0b9b0943f969afa7e8838fd2b85b9030fff))
+* **web:** preserve guest loading and restore eager signed-in create menu ([f25c809](https://github.com/nolotus/bun-nolo/commit/f25c80975fdf9482d09859f20be01755d8870e35))
+* **web:** restore sidebar workspace scrolling and short-column fallback ([5353081](https://github.com/nolotus/bun-nolo/commit/5353081e41d0e6bd97447b6cc2de2fd234ae440d))
+
+### Performance Improvements
+
+* **auth:** 账本审计改分页批读，默认仍串行，并发修掉共享事务竞争 ([d577c41](https://github.com/nolotus/bun-nolo/commit/d577c41b993f3fff714dd06a62083f51341213c8))
+* **codex-oauth:** cache the 6.2 system-prompt prefix from input ([484ba08](https://github.com/nolotus/bun-nolo/commit/484ba08d1306533f9639e816c839b2a06ad50480))
+
+
 ## 0.251.0-alpha.1 (2026-11-20)
 
 ### Features

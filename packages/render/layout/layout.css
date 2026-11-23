@@ -2763,6 +2763,9 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
 .ChatSidebar__work-content [data-hook="space-workspaces-scroll"] {
   flex: 1 1 0;
   min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
   /* Keep the final heading clear of the scroll edge and pagination footer. */
   box-sizing: border-box;
   padding-bottom: var(--space-3, 12px);
@@ -2796,4 +2799,19 @@ html[data-nolo-route-view-transition="1"]::view-transition-group(main-topbar) {
   min-height: 0;
   overflow-y: auto;
   padding-bottom: var(--space-3, 12px);
+}
+
+/* Match navigationRail.css's short-column degradation: once the context slot is
+   <= 460px tall, .navigation-v2-context--fixed becomes the sole scroll host and
+   these higher-specificity work-content wrappers must release their own scroll locks. */
+@container navigation-v2-context-slot (max-height: 460px) {
+  .ChatSidebar.navigation-v2-context--fixed .ChatSidebar__work-content,
+  .ChatSidebar__work-content [data-hook="work-dialog-groups"],
+  .ChatSidebar__work-content .home-work-dialog-list,
+  .ChatSidebar__work-content [data-hook="space-workspaces-scroll"],
+  .ChatSidebar__work-content .home-work-dialog-list > [aria-label="最近活动对话"],
+  .ChatSidebar__work-content .home-work-dialog-list > [data-hook="work-dialog-categories"] {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
 }

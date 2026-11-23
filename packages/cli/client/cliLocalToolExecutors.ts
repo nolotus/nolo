@@ -237,6 +237,10 @@ export function pickAgentRunResolverDeps(args: {
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentRuntimeBindingMachineId?: (agentKey: string) => Promise<string | undefined>;
   resolveLocalMachineId?: () => Promise<string | undefined>;
+  /** 推理档自动联动的输入（真实 provider + 显式 reasoning_effort）；缺省即 fail-closed。 */
+  resolveAgentReasoningProfile?: (
+    agentKey: string
+  ) => Promise<{ provider?: string; reasoningEffort?: string } | undefined>;
 }) {
   return {
     ...(args.resolveAgentCredentialGroup
@@ -252,6 +256,9 @@ export function pickAgentRunResolverDeps(args: {
       ? { resolveAgentRuntimeBindingMachineId: args.resolveAgentRuntimeBindingMachineId }
       : {}),
     ...(args.resolveLocalMachineId ? { resolveLocalMachineId: args.resolveLocalMachineId } : {}),
+    ...(args.resolveAgentReasoningProfile
+      ? { resolveAgentReasoningProfile: args.resolveAgentReasoningProfile }
+      : {}),
   };
 }
 
@@ -332,6 +339,10 @@ export function buildLocalToolExecutors(args: {
   resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
+  /** 推理档自动联动的输入（真实 provider + 显式 reasoning_effort）；缺省即 fail-closed。 */
+  resolveAgentReasoningProfile?: (
+    agentKey: string
+  ) => Promise<{ provider?: string; reasoningEffort?: string } | undefined>;
   /** 本机 machineId（判定「绑定机就是本机」用；未知 → binding 判定 fail-closed）。 */
   resolveLocalMachineId?: () => Promise<string | undefined>;
   /** Current executing agent key; used for memory policy. */
@@ -547,6 +558,11 @@ export function buildLocalToolExecutors(args: {
     }),
     controlAgentRun: createCliControlAgentRunExecutor({
       source: { parentDialogId: args.sourceParentDialogId, agentKey: args.agentKey },
+      // 终态续跑（append）要按原 run 的 difficulty 重新算档，因此与 startAgentRun
+      // 共用同一套可信解析器：漏转发会让续跑静默掉回记录默认档。
+      ...pickAgentRunResolverDeps(args),
+      // 派发者身份同样只由宿主注入（controlAgentRun 触发的续跑也要落 callerAgentKey）。
+      currentAgentKey: args.agentKey,
       shellApprovalHostForAgent: args.shellApprovalHostForAgent,
       mcpApprovalHostForAgent: args.mcpApprovalHostForAgent,
       cwd: args.workspaceRoot,

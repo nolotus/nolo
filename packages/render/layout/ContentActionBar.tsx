@@ -261,7 +261,7 @@ const ContentActionBar: React.FC<ContentActionBarProps> = ({
     )}
 
 
-    {s.isFileContent && s.pageKey && (
+    {s.showFileDetailsButton && s.pageKey && (
       <Tooltip
         content={
           s.isFileDetailsOpen
@@ -346,7 +346,7 @@ const ContentActionBar: React.FC<ContentActionBarProps> = ({
     s.contentKeyType === "dialog" ||
     s.contentKeyType === "app" ||
     (s.contentKeyType === "meta" && !!s.tableMeta) ||
-    (s.isFileContent && !!s.pageKey);
+    (s.showFileDetailsButton && !!s.pageKey);
   const showsObjectActions =
     s.showObjectAssistantAction || reserveOverflowSlot;
 

@@ -18,6 +18,8 @@ import { type ApiSourceType } from "./PersonaSection";
 import PersonaSection from "./PersonaSection";
 import KnowledgeToolsSection from "./KnowledgeToolsSection";
 import AdvancedSettingsTab from "./AdvancedSettingsTab";
+import { resolveNewAgentThinkingSelection } from "../modelReasoningCapability";
+import { useThinkingControl } from "./useModelReasoningCapability";
 import AgentCreateSourceStep, {
   CREATE_RUN_MODE_LABELS,
   PLATFORM_QUICK_CREATE_MODEL,
@@ -267,11 +269,12 @@ const AgentForm: React.FC<AgentFormProps> = ({
   ]);
 
   const handleQuickCreate = useCallback(
-    async (draft: AgentCreateQuickDraft) => {
+    async (draft: AgentCreateQuickDraft, attempt?: import("./useAgentCreateSourceState").QuickCreateAttempt) => {
       // 统一守卫：快捷创建与表单提交走同一个身份守卫，未就绪时坚决拦截
       if (!checkBaselineReady()) return;
-      await handleQuickCreateAction({
+      return handleQuickCreateAction({
         draft,
+        attempt,
         onSubmit,
         t,
         setIsQuickCreating,
@@ -337,7 +340,8 @@ const AgentForm: React.FC<AgentFormProps> = ({
           hasVision: sanitizedDraft.hasVision ?? false,
           disabledTools: sanitizedDraft.disabledTools ?? [],
           enabledPacks: sanitizedDraft.enabledPacks ?? [],
-          enableThinking: sanitizedDraft.enableThinking ?? false,
+          ...(sanitizedDraft.enableThinking != null ? { enableThinking: sanitizedDraft.enableThinking } : {}),
+          ...(sanitizedDraft.thinkingBudget != null ? { thinkingBudget: sanitizedDraft.thinkingBudget } : {}),
           linkedSpaces: sanitizedDraft.linkedSpaces ?? [],
           temperature: sanitizedDraft.temperature,
           top_p: sanitizedDraft.top_p,
@@ -416,6 +420,8 @@ const AgentForm: React.FC<AgentFormProps> = ({
         const normRefs = normalizeReferences(fullAgent.references || []);
         const normalizedAuthoritative: any = {
           ...fullAgent,
+          // Normalize historical camelCase without writing it back on an unrelated edit.
+          reasoning_effort: fullAgent.reasoning_effort === undefined ? fullAgent.reasoningEffort : fullAgent.reasoning_effort,
           dbKey: agentKey,
           references: normRefs,
           tags: Array.isArray(fullAgent.tags)
@@ -589,12 +595,24 @@ const AgentForm: React.FC<AgentFormProps> = ({
     setApiSource((hydratedInitialValues.apiSource as ApiSourceType | undefined) ?? "platform");
   }, [hydratedInitialValues, isCreate, reset]);
 
-  const buildSubmitPayload = (data: any) =>
-    buildSubmitPayloadAction(data, {
+  const thinkingControl = useThinkingControl(apiSource === "cli" ? {} : formValues);
+  const createThinkingSelection = isCreate ? resolveNewAgentThinkingSelection(thinkingControl, {
+    reasoningEffort: formValues.reasoning_effort,
+    enableThinking: formValues.enableThinking,
+  }) : undefined;
+  const buildSubmitPayload = (data: any) => {
+    const selection = isCreate ? resolveNewAgentThinkingSelection(thinkingControl, {
+      reasoningEffort: data.reasoning_effort,
+      enableThinking: data.enableThinking,
+    }) : undefined;
+    return buildSubmitPayloadAction(selection ? {
+      ...data, reasoning_effort: selection.reasoningEffort, enableThinking: selection.enableThinking,
+    } : data, {
       isCreate,
-      dirtyFields,
+      dirtyFields: selection ? { ...dirtyFields, reasoning_effort: true, enableThinking: true } : dirtyFields,
       initialValues: hydratedInitialValues,
     });
+  };
 
   const handleFormSubmit = async (data: any) => {
     if (!checkBaselineReady()) return;
@@ -632,13 +650,22 @@ const AgentForm: React.FC<AgentFormProps> = ({
   };
 
   // 过滤 Tabs：只读模式下仅展示“基础信息”，隐藏 Prompt/Tools/Knowledge 等敏感配置
-  const allTabs = TABS;
+  const combineRoleAndModel = !isCreate && !readOnly;
+  const allTabs = combineRoleAndModel
+    ? TABS.filter(({ id }) => id !== 1).map((tab) => tab.id === 0
+        ? { ...tab, key: "editRoleModel.tab" }
+        : tab)
+    : TABS;
+  // Only a saved connection may use the caller's stored provider copy.
+  const discoveryConnectionSaved = combineRoleAndModel && isBaselineReady &&
+    !["apiSource", "apiKey", "apiKeyRef", "provider", "customProviderUrl"].some((field) => dirty.has(field));
+  const settingsProps = { errors, values: formValues, set: setAny, apiSource, setApiSource, readOnly, thinkingControl, createThinkingSelection };
   const tabs = allTabs.flatMap((tab) =>
     readOnly && tab.id !== 0
       ? []
-      : [{ ...tab, label: t(tab.key) }],
+      : [{ ...tab, label: tab.key === "editRoleModel.tab" ? t(tab.key, "角色与模型") : t(tab.key) }],
   );
-  const activeTab = activeTabState;
+  const activeTab = combineRoleAndModel && activeTabState === 1 ? 0 : activeTabState;
   const showVersionHistoryButton = !readOnly && !isCreate && initialValues?.id;
   const showCloseButton = Boolean(onClose);
 
@@ -658,20 +685,14 @@ const AgentForm: React.FC<AgentFormProps> = ({
             values={formValues}
             set={setAny as any}
             readOnly={readOnly}
+            afterIdentity={combineRoleAndModel ? (
+              <AdvancedSettingsTab {...settingsProps} discoveryConnectionSaved={discoveryConnectionSaved} />
+            ) : undefined}
           />
         );
 
       case 1:
-        return (
-          <AdvancedSettingsTab
-            errors={errors}
-            values={formValues}
-            set={setAny}
-            apiSource={apiSource}
-            setApiSource={setApiSource}
-            readOnly={readOnly}
-          />
-        );
+        return <AdvancedSettingsTab {...settingsProps} />;
       case 2:
         return <KnowledgeToolsSection {...sharedProps} />;
       default:

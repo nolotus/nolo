@@ -191,6 +191,7 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
   const showMetaDeleteButton = showEdit && contentKeyType === "meta";
   const isFileContent = contentKeyType === "file" || contentKeyType === "image";
   const showFileDeleteButton = showEdit && isFileContent;
+  const showFileDetailsButton = isFileContent && !!token?.trim();
   const showAgentDeleteButton =
     showEdit && contentKeyType === "agent";
   const objectAssistantKind = resolveObjectAssistantKind(contentKeyType);
@@ -537,7 +538,7 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
   ]);
 
   const handleToggleFileDetails = useCallback(() => {
-    if (!pageKey || !isFileContent) return;
+    if (!pageKey || !showFileDetailsButton) return;
     if (isFileDetailsOpen) {
       close();
       return;
@@ -546,7 +547,7 @@ export const useTopBarState = (toggleSidebar?: () => void) => {
       closeOnRouteChange: true,
       id: "fileDetails",
     });
-  }, [pageKey, isFileContent, isFileDetailsOpen, open, close]);
+  }, [pageKey, showFileDetailsButton, isFileDetailsOpen, open, close]);
 
 
   // ponytail: topbar 删除按钮直接走删除 + 回收站 toast，不再弹确认。
@@ -695,6 +696,7 @@ const handleOpenDeleteConfirm = useCallback(async () => {
     showFavoriteButton,
     showShareButton,
     isFileContent,
+    showFileDetailsButton,
     objectAssistantLabels,
     isObjectAssistantOpen,
     isAgentFavorited,

@@ -179,7 +179,11 @@ const uploadOnce = async (
         });
 
         const fileMetadata = await uploadFileAction(
-            { file, customKey: dbKey, userId },
+            // 这是「上传为 Space 资产」，不是「把个人文件收录进 Space」：
+            // 明确声明 Space 归属，服务端校验成员身份后落库
+            // `ownerType:"space"` + `ownerId:<spaceId>`，其他成员据此可读原件。
+            // 声明只是请求，服务端（uploadOwnership.ts）才是归属权威。
+            { file, customKey: dbKey, userId, ownerType: "space", spaceId },
             thunkAPI
         );
         if (!fileMetadata) {
@@ -223,7 +227,6 @@ const uploadOnce = async (
                     title,
                     spaceId,
                     fileCategory,
-                    mimeType: file.type || undefined,
                     fileSize,
                     originalName: file.name,
                 },

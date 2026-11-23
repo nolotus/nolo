@@ -13,6 +13,7 @@ import type { ExecShellApprovalAuthority } from "../../agent-runtime/capabilitie
 
 import { isLoopbackUrl } from "../../core/localOrigins";
 import { CLI_PROVIDER_VALUES, isCliProvider } from "../../ai/agent/cliProviders";
+import type { ReasoningEffort } from "../../ai/agent/createAgentSchema";
 import type { CollapsedPasteStore } from "core/collapsedPaste";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
@@ -363,6 +364,12 @@ export type RunAgentTurnOptions = {
    * local 模式在 adapter 读出 tier 配置后本地应用。
    */
   modelOverride?: ModelLayerOverride | null;
+  /**
+   * 本次 run 的推理档覆盖（`--reasoning-effort`）：只在 adapter 读出 agent 配置后
+   * 于**内存**里覆盖有效 `reasoning_effort`，绝不写回磁盘/DB 的 agent 记录。
+   * 缺省 = 沿用 agent 记录里的既有配置。
+   */
+  reasoningEffortOverride?: ReasoningEffort | null;
   /**
    * Optional hook / override for post-turn heap release (testing and custom runtimes).
    */

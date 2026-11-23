@@ -1,7 +1,15 @@
+import {
+  hostedKimiLegacyThinkingOverride,
+  isPlatformKimiProviderModel,
+  PLATFORM_HOSTED_KIMI_PROVIDER,
+} from "ai/llm/kimi";
+import { resolvePlatformEffectiveModel } from "ai/llm/platformHostedRoutingTable";
+import { clampReasoningEffort } from "ai/llm/reasoningModels";
+import { isAgentCredentialShared, resolveOutboundProxyApiKey } from "../shared/providerSecrets";
 import { estimateTokenCount } from "../ai/context/tokenUtils";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { getUsageRequestOptions } from "ai/llm/usageRequestOptions";
-import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
+import { usesMimoThinkingWire } from "ai/llm/platformHosted";
 import { extractUsageFromSsePayload, hasUsageTokens } from "ai/token/sseUsageExtract";
 import {
   createProviderCallTimingTracker,
@@ -151,7 +159,9 @@ export type PlatformChatProviderConfig = {
   endpoint: string;
   hasVision?: boolean;
   requestOptions: Record<string, number | string>;
+  enableThinking?: boolean;
   apiKey?: string;
+  credentialSynced?: true;
   apiKeyHeader?: string;
   apiSource?: string;
   /**
@@ -173,15 +183,9 @@ export type PlatformChatProviderConfig = {
 type PlatformChatTool = Record<string, unknown>;
 
 function shouldDisableThinking(providerConfig: PlatformChatProviderConfig) {
-  return (
-    providerConfig.provider.toLowerCase() === "mimo" ||
-    /xiaomimimo\.com/i.test(providerConfig.endpoint) ||
-    // 平台托管 MiMo（provider=nolo + mimo-v2.6-*）：endpoint 通常已解析成
-    // api.xiaomimimo.com/...（上面的正则已命中），但 transport=direct 时
-    // endpoint 是 nolo 服务器地址——模型 id 判据保证两跳都关掉 thinking
-    // （上游 thinking 默认 enabled）。
-    isPlatformMimoProviderModel(providerConfig.provider, providerConfig.model)
-  );
+  if (!usesMimoThinkingWire(providerConfig.provider, providerConfig.model, providerConfig.endpoint)) return false;
+  const effort = providerConfig.requestOptions.reasoning_effort;
+  return effort === "none" || effort === "off" || (!effort && providerConfig.enableThinking !== true);
 }
 
 function isResponsesEndpoint(endpoint: string) {
@@ -235,7 +239,9 @@ export async function resolvePlatformChatProviderConfig(args: {
       provider: plan.provider,
       endpoint: plan.endpoint,
       requestOptions: plan.requestOptions,
+      enableThinking: args.agentConfig.enableThinking,
       ...(plan.apiKey ? { apiKey: plan.apiKey } : {}),
+      ...(isAgentCredentialShared(args.agentConfig) ? { credentialSynced: true as const } : {}),
       ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
       ...(args.agentConfig.apiSource ? { apiSource: args.agentConfig.apiSource } : {}),
       ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
@@ -253,7 +259,9 @@ export async function resolvePlatformChatProviderConfig(args: {
     provider: plan.provider,
     endpoint: plan.endpoint,
     requestOptions: plan.requestOptions,
+    enableThinking: args.agentConfig.enableThinking,
     ...(plan.apiKey ? { apiKey: plan.apiKey } : {}),
+    ...(plan.credentialSynced === true ? { credentialSynced: true as const } : {}),
     ...(plan.apiKeyHeader ? { apiKeyHeader: plan.apiKeyHeader } : {}),
     ...(plan.apiSource ? { apiSource: plan.apiSource } : {}),
     ...(plan.usageProvider ? { usageProvider: plan.usageProvider } : {}),
@@ -283,7 +291,24 @@ export function buildPlatformChatCompletionRequest(args: {
   const usesResponsesApi = isResponsesEndpoint(args.providerConfig.endpoint);
   const requestOptions = usesResponsesApi
     ? toResponsesRequestOptions(args.providerConfig.requestOptions)
-    : args.providerConfig.requestOptions;
+    : { ...args.providerConfig.requestOptions };
+  const { provider, model, usageProvider } = args.providerConfig;
+  const effort = requestOptions.reasoning_effort;
+  if (
+    !usesResponsesApi &&
+    typeof effort === "string" && effort &&
+    provider === PLATFORM_HOSTED_KIMI_PROVIDER && usageProvider === "baseten" &&
+    isPlatformKimiProviderModel(provider, resolvePlatformEffectiveModel(model))
+  ) {
+    // The route resolves the Kimi alias; use the same inputs and clamp as server agent-run.
+    const clamped = clampReasoningEffort(effort, provider, model);
+    if (clamped) requestOptions.reasoning_effort = clamped;
+    else delete requestOptions.reasoning_effort;
+  }
+  const disableThinking = !usesResponsesApi && shouldDisableThinking(args.providerConfig);
+  if (disableThinking && ["none", "off"].includes(String(requestOptions.reasoning_effort))) {
+    delete requestOptions.reasoning_effort;
+  }
   // Responses accepts reasoning items; only Chat Completions strips strings.
   const shouldStripReasoning = !usesResponsesApi && shouldStripReasoningContentForOutbound(
     args.providerConfig.provider,
@@ -305,6 +330,7 @@ export function buildPlatformChatCompletionRequest(args: {
   // it is a wire-specific concern applied by the converters below
   // (toOpenAiCompatibleMessages / convertMessagesToResponsesInput).
   const sanitizedMessages = sanitizeForOutbound(args.messages, args.tools);
+  const proxyApiKey = resolveOutboundProxyApiKey(args.providerConfig);
   const body = {
     model: args.providerConfig.model,
     ...(usesResponsesApi
@@ -362,7 +388,11 @@ export function buildPlatformChatCompletionRequest(args: {
           ...(usesResponsesApi ? {} : { tool_choice: "auto" }),
         }
       : {}),
-    ...(shouldDisableThinking(args.providerConfig) ? { thinking: { type: "disabled" } } : {}),
+    ...(disableThinking ? { thinking: { type: "disabled" } } : {}),
+    ...(!usesResponsesApi ? hostedKimiLegacyThinkingOverride(
+      args.providerConfig.provider, args.providerConfig.model,
+      args.providerConfig.enableThinking, args.providerConfig.requestOptions.reasoning_effort as string | undefined,
+    ) : undefined),
     // 缓存路由亲和提示：托管上游是多副本共享池，前缀缓存是节点本地的，
     // 请求落到另一副本就整条 miss（实测占该线全部 miss token 的 52%，
     // 依据见 promptCacheKey.ts）。键只取跨轮稳定的部分（model + system 稳定
@@ -385,7 +415,8 @@ export function buildPlatformChatCompletionRequest(args: {
     agentKey: args.providerConfig.agentKey,
     ...(args.dialogId?.trim() ? { dialogId: args.dialogId.trim() } : {}),
     ...(args.providerConfig.apiSource ? { apiSource: args.providerConfig.apiSource } : {}),
-    ...(args.providerConfig.apiKey ? { KEY: args.providerConfig.apiKey } : {}),
+    // Overwrite any same-named request option; undefined is omitted on the wire.
+    KEY: proxyApiKey,
     ...(args.providerConfig.apiKeyHeader ? { apiKeyHeader: args.providerConfig.apiKeyHeader } : {}),
   };
 

@@ -1,5 +1,21 @@
 /** User-facing CLI surface; structured output and diagnostics stay untranslated. */
 export const cliSurfaceStrings = {
+  hostApprovalCancel: { en: "Cancel", zh: "取消" },
+  hostApprovalAllowOnce: { en: "Allow once", zh: "仅允许一次" },
+  hostApprovalKeys: {
+    en: "Empty input only · ↑/↓ move · Enter confirm · 1/2 choose · Esc cancel",
+    zh: "输入为空时可操作 · ↑/↓ 移动 · Enter 确认 · 1/2 快选 · Esc 取消",
+  },
+  hostApprovalMcpHeading: {
+    en: "Call a read tool (callMcpTool)",
+    zh: "调用一个只读工具（callMcpTool）",
+  },
+  hostApprovalMcpImpact: {
+    en: "A connected service will receive the shown arguments.",
+    zh: "一个已连接的服务会收到上面显示的参数。",
+  },
+  hostApprovalUnknownTool: { en: "Unknown tool", zh: "未知工具" },
+  hostApprovalConfirmHint: { en: "Enter confirms", zh: "Enter 确认" },  hostApprovalUnknownScope: { en: "Unknown scope", zh: "未知范围" },
   "cliHelpTitle": {
     "en": "nolo — Agent-first terminal workspace",
     "zh": "nolo — 以 Agent 为核心的终端工作空间"

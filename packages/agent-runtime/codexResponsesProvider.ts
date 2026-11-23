@@ -1,4 +1,5 @@
-import { hasAssembledAgentPrompt } from "./types";
+import { usesCodexDeveloperPrefix } from "./codexOAuthPure";
+import { AGENT_PROMPT_IN_MESSAGES } from "./types";
 import { resolveToolImagePolicy } from "../ai/llm/agentCapabilities";
 import { createHash } from "node:crypto";
 import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
@@ -206,34 +207,78 @@ export function buildCodexCompatibilityHeaders(
   };
 }
 
+function getInstructionText(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return asOptionalTrimmedString(content);
+  const text = content
+    .filter((part): part is { type: "text"; text: string } =>
+      part?.type === "text" && typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("\n");
+  return asOptionalTrimmedString(text);
+}
+
+function hasCodexAssembledPrompt(messages: readonly unknown[]): boolean {
+  // The Codex translation caller owns the complete instructions when it sets this
+  // JSON flag on a nonempty system message. This is a request contract, not proof
+  // that the server's current configured prompt appears in the supplied text.
+  return messages.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    const message = raw as Record<PropertyKey, unknown>;
+    return message.role === "system" &&
+      (message[AGENT_PROMPT_IN_MESSAGES] === true || message.agent_prompt_in_messages === true) &&
+      getInstructionText(message.content) !== undefined;
+  });
+}
+
 function collectInstructions(
   messages: unknown[],
   agentPrompt: string | undefined,
-): string {
+  splitPrefix: boolean,
+): { instructions: string; developerPrefix: string } {
   const systemTexts: string[] = [];
+  // Only text sourced from messages counts here: the config prompt is handled
+  // in its existing position and may legitimately precede a marked system
+  // message, while earlier message text must block the boundary (see below).
+  let messageTexts = 0;
+  let prefixEnd: number | undefined;
   const prompt = agentPrompt?.trim();
   if (prompt) systemTexts.push(prompt);
   for (const raw of messages) {
     if (!raw || typeof raw !== "object") continue;
     const role = String((raw as { role?: unknown }).role ?? "");
     if (role !== "system" && role !== "developer") continue;
-    const content = (raw as { content?: unknown }).content;
-    const stringContent = asOptionalTrimmedString(content);
-    if (stringContent) {
-      systemTexts.push(stringContent);
-    } else if (Array.isArray(content)) {
-      const text = content
-        .filter(
-          (p): p is { type: "text"; text: string } =>
-            !!p && (p as { type?: unknown }).type === "text",
-        )
-        .map((p) => p.text)
-        .join("\n")
-        .trim();
-      if (text) systemTexts.push(text);
+    const { content, stable_prefix_chars: boundary } = raw as Record<string, unknown>;
+    const text = getInstructionText(content);
+    if (text) {
+      // The assembler owns the boundary; never infer it from prompt text. A
+      // boundary only proves the *first* message-sourced system text is stable,
+      // so accept it only when no earlier message text was collected —
+      // otherwise per-turn text would be promoted into the cached prefix.
+      if (splitPrefix && prefixEnd === undefined && messageTexts === 0 &&
+          typeof content === "string" &&
+          typeof boundary === "number" && Number.isInteger(boundary) &&
+          boundary >= 0 && boundary <= content.length) {
+        const stable = content.slice(0, boundary).trim();
+        if (stable) systemTexts.push(stable);
+        prefixEnd = systemTexts.length;
+        const dynamic = content.slice(boundary).trim();
+        if (dynamic) systemTexts.push(dynamic);
+      } else {
+        systemTexts.push(text);
+        messageTexts += 1;
+      }
     }
   }
-  return systemTexts.join("\n\n");
+  // No assembler-supplied boundary means stable and per-turn text cannot be
+  // told apart. Keep the legacy all-`instructions` layout in that case: moving
+  // a possibly-changing prompt to input[0] would invalidate the cache for the
+  // whole conversation prefix behind it (worse than the current no-cache state).
+  const split = splitPrefix ? (prefixEnd ?? 0) : 0;
+  return {
+    developerPrefix: systemTexts.slice(0, split).join("\n\n"),
+    instructions: systemTexts.slice(split).join("\n\n"),
+  };
 }
 
 
@@ -272,7 +317,7 @@ export function buildCodexRequestBody(
   const rawMessages = Array.isArray(args.openAiBody.messages)
     ? (args.openAiBody.messages as unknown[])
     : [];
-  // system/developer messages become `instructions`; the rest become `input`.
+  // Render system/developer separately, preserving their existing relative order.
   const nonSystem = rawMessages.filter((m) => {
     const role = m && typeof m === "object" ? String((m as { role?: unknown }).role) : "";
     return role !== "system" && role !== "developer";
@@ -288,10 +333,20 @@ export function buildCodexRequestBody(
     routeKind: "codex/responses",
     legacySupportsToolImages: false,
   }));
-  // Local message assembly owns the prompt. Only legacy/unassembled callers need
-  // the config fallback; textual overlap is not provenance (it may be user prose).
-  const fallbackPrompt = hasAssembledAgentPrompt(rawMessages) ? undefined : args.agentConfig.prompt;
-  const instructions = collectInstructions(rawMessages, fallbackPrompt);
+  const fallbackPrompt = hasCodexAssembledPrompt(rawMessages) ? undefined : args.agentConfig.prompt;
+  const splitPrefix = usesCodexDeveloperPrefix(args.agentConfig, model);
+  const { instructions, developerPrefix } = collectInstructions(rawMessages, fallbackPrompt, splitPrefix);
+  // Codex always replays the full input (no previous_response_id). Keep the
+  // stable prefix first and resend the dynamic instructions on every request.
+  if (developerPrefix) {
+    input.unshift({
+      type: "message", role: "developer",
+      content: [{ type: "input_text", text: developerPrefix }],
+    });
+  }
+  // Layout and routing key are decided separately: the key must keep its old
+  // meaning (full prompt when the assembler marked no boundary), otherwise
+  // distinct unmarked prompts would collapse onto one cache routing key.
   const stableInstructions = collectStablePromptPrefix(rawMessages, fallbackPrompt);
   const tools = toResponsesTools(
     Array.isArray(args.openAiBody.tools) ? (args.openAiBody.tools as any[]) : undefined,

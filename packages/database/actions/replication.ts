@@ -11,6 +11,7 @@ import {
   noloWriteRequest,
   syncWithServers,
   type UploadProgressHandler,
+  type UploadRequestConfig,
 } from "../requests";
 import { planServersForTenant } from "../tenantPlacement";
 import {
@@ -213,11 +214,7 @@ export const resolveUploadReplicationServers = ({
   currentServer: string | undefined;
   syncServers: string[] | undefined;
   tenantId: string | null | undefined;
-  uploadConfig: {
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: Omit<UploadRequestConfig, "file">;
   state: any;
 }): string[] => {
   const allServers = resolveReplicationServers(currentServer, syncServers);
@@ -406,12 +403,7 @@ export const scheduleUploadReplication = ({
   currentServer: string | undefined;
   syncServers: string[] | undefined;
   tenantId: string | null | undefined;
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: UploadRequestConfig;
   state: any;
   excludeServers?: string[];
 }): string[] => {
@@ -456,12 +448,7 @@ export const uploadToCurrentServer = async ({
   onProgress,
 }: {
   currentServer: string | undefined;
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: UploadRequestConfig;
   state: any;
   signal?: AbortSignal;
   onProgress?: UploadProgressHandler;

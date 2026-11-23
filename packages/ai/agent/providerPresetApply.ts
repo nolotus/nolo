@@ -172,11 +172,35 @@ export function applyProviderPresetFields(
 }
 
 /** Full registry UI groups matching AdvancedSettingsTab historical layout. */
-export function listProviderPresetGroups(): ProviderPresetListGroup[] {
+// The edit picker already groups these by billing type. Use short product names,
+// not registry labels that embed Simplified Chinese plan/category descriptions.
+const EDIT_PRESET_NAMES: Readonly<Record<string, string>> = {
+  "qwen-token-plan": "Qwen Token Plan",
+  "step-plan": "StepFun Step Plan",
+  "bigmodel-coding-plan": "BigModel Coding Plan",
+  "mistral-plan": "Mistral Vibe / Pro",
+  "opendesign": "OpenDesign",
+  "openrouter-api": "OpenRouter API",
+  "deepseek-api": "DeepSeek API",
+  "qwen-api": "Qwen API",
+  "mimo-api": "MiMo API",
+  "kimi-api": "Kimi API",
+  "stepfun-api": "StepFun API",
+  "together-api": "Together AI API",
+  "lithosai-api": "LithosAI API",
+};
+
+export function listProviderPresetGroups(
+  translate: (key: string, fallback: string) => string = (_key, fallback) => fallback,
+): ProviderPresetListGroup[] {
+  const templates = CUSTOM_API_KEY_TEMPLATES.map((p) => ({
+    commercialKind: p.commercialKind,
+    item: { id: p.id, label: EDIT_PRESET_NAMES[p.id] ?? p.label, description: p.description, provider: p.provider },
+  }));
   return [
     {
       id: "subscription_oauth",
-      label: "Subscription OAuth",
+      label: translate("editModelSource.oauthGroup", "订阅 OAuth"),
       items: SUBSCRIPTION_OAUTH_PROVIDERS.map((p) => ({
         id: p.id,
         label: p.label,
@@ -186,19 +210,19 @@ export function listProviderPresetGroups(): ProviderPresetListGroup[] {
       })),
     },
     {
+      id: "subscription_token_plan",
+      label: translate("providerGroup.subscriptionTokenPlan", "订阅专用 Key"),
+      items: templates.filter((p) => p.commercialKind === "subscription").map((p) => p.item),
+    },
+    {
       id: "metered_api",
-      label: "Custom API Key",
-      items: CUSTOM_API_KEY_TEMPLATES.map((p) => ({
-        id: p.id,
-        label: p.label,
-        description: p.description,
-        provider: p.provider,
-      })),
+      label: translate("providerGroup.meteredApi", "API 用量计费"),
+      items: templates.filter((p) => p.commercialKind !== "subscription").map((p) => p.item),
     },
     {
       id: "manual",
-      label: "Manual",
-      items: [{ id: MANUAL_PROVIDER_PRESET_ID, label: "Manual / Other" }],
+      label: translate("editModelSource.manualProvider", "手动 / 其他"),
+      items: [{ id: MANUAL_PROVIDER_PRESET_ID, label: translate("editModelSource.manualProvider", "手动 / 其他") }],
     },
   ];
 }

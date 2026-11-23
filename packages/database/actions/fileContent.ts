@@ -39,7 +39,8 @@ export const readFileContentAction = async (
     {
         fileId,
         useServerFallback = true,
-    }: { fileId: string; useServerFallback?: boolean },
+        localFileId,
+    }: { fileId: string; useServerFallback?: boolean; localFileId?: string },
     thunkApi: DbThunkApi
 ): Promise<{ fileId: string; blob: Blob; source: "local" | "remote" }> => {
     if (!fileId || typeof fileId !== "string") {
@@ -47,7 +48,8 @@ export const readFileContentAction = async (
     }
 
     // IndexedDB 以裸 ULID 为 key 存储文件
-    const localId = resolveLocalFileId(fileId);
+    // A validated record can carry a different ID for the bytes cached by upload.
+    const localId = localFileId || resolveLocalFileId(fileId);
 
     // 1. 先尝试从 IndexedDB 读取（使用裸 ULID）
     const localRecord: StoredFileRecord | null =

@@ -26,6 +26,7 @@ import {
 import type { CredentialBroker } from "../../agent-runtime/credentialBroker";
 import {
   applyAgentSecretMigrationUpdates,
+  buildAgentApiKeyCredentialRef,
   migrateAgentSecrets,
 } from "../../agent-runtime/migrateAgentSecrets";
 import { normalizeAgentRuntimeToolPolicy } from "../../agent-runtime/runtimeToolPolicy";
@@ -123,8 +124,12 @@ interface RunAgentArgs {
   billingDialogKey?: string;
 }
 
+// A form-scoped retry handle is never written to the Agent record.
+const pendingCreateIds = new WeakMap<object, { owner: string; id: string; usesPerAgentRef: boolean }>();
+
 /** createAgent 参数（新建 Agent） */
 interface CreateAgentArgs {
+  createAttempt?: object;
   userId: string;
   formData: AgentFormData; // 已通过表单或 Tool 构造的完整数据
   spaceId?: string; // 可选的空间 ID，如果提供，则将 Agent 添加到该空间
@@ -259,6 +264,9 @@ const processAgentUpdateChanges = (
   }
 
   // 简单标志位
+  if (data.enableThinking !== undefined) {
+    changes.enableThinking = data.enableThinking;
+  }
   if ("hasVision" in data && data.hasVision !== undefined) {
     changes.hasVision = !!data.hasVision;
   }
@@ -465,12 +473,18 @@ export const slice = createSliceWithThunks({
      * - 返回完整 Agent 对象（包含 id / meta 字段）
      */
     createAgent: create.asyncThunk(
-      async ({ userId, formData, spaceId }: CreateAgentArgs, thunkApi) => {
+      async ({ userId, formData, spaceId, createAttempt }: CreateAgentArgs, thunkApi) => {
         const effectiveUserId = asOptionalTrimmedString(userId) ?? "local";
         const processed = processAgentCreateForm(formData, effectiveUserId);
 
         const now = Date.now();
-        const id = ulid();
+        const previous = createAttempt && pendingCreateIds.get(createAttempt);
+        const pending = previous?.owner === effectiveUserId ? previous : {
+          owner: effectiveUserId, id: ulid(), usesPerAgentRef: false,
+        };
+        pending.usesPerAgentRef ||= formData.credentialSynced === true;
+        if (createAttempt) pendingCreateIds.set(createAttempt, pending);
+        const { id } = pending;
 
         const privateKey = createAgentKey.private(effectiveUserId, id);
         const publicKey = createAgentKey.public(id);
@@ -513,8 +527,21 @@ export const slice = createSliceWithThunks({
             agentKey: privateKey,
             apiKey: createRawApiKey,
             apiKeyRef: (agent as any).apiKeyRef,
-            credentialRef: (agent as any).credentialRef,
+            credentialRef: pending.usesPerAgentRef ? buildAgentApiKeyCredentialRef(privateKey) : agent.credentialRef,
           })) as Agent;
+        }
+
+        // Keep the key in the device broker even if the cloud write fails. Do not
+        // publish an Agent with a sync marker until the per-Agent copy is confirmed.
+        if (agent.credentialSynced === true) {
+          const ctx = getRuntimeServerContext(thunkApi.getState() as RootState);
+          const ref = agent.credentialRef;
+          if (!createRawApiKey || !ctx.currentServer || !ctx.currentToken || !ref?.startsWith("api-key:") ||
+              !await pushServerSyncedCredential(
+                { currentServer: ctx.currentServer, authToken: ctx.currentToken }, ref, createRawApiKey,
+              )) {
+            throw new Error("agent_credential_sync_failed");
+          }
         }
 
         // 写入私有副本
@@ -547,24 +574,6 @@ export const slice = createSliceWithThunks({
             .unwrap();
         }
 
-        // credentialSynced: push raw key to server encrypted store using the
-        // same token the DB write uses (getRuntimeServerContext), not a UI
-        // hook. Best-effort: never blocks agent creation.
-        if (agent.credentialSynced && createRawApiKey) {
-          const ctx = getRuntimeServerContext(thunkApi.getState() as RootState);
-          const credentialRef = (agent as Agent & { credentialRef?: string }).credentialRef;
-          if (ctx.currentToken && credentialRef) {
-            try {
-              await pushServerSyncedCredential(
-                { currentServer: ctx.currentServer ?? "", authToken: ctx.currentToken },
-                credentialRef,
-                createRawApiKey,
-              );
-            } catch (error) {
-              console.error("[agent-credential-sync] push failed", error instanceof Error ? error.message : "unknown error");
-            }
-          }
-        }
         try {
           const { localFirstLog } = await import("app/localFirst/localFirstLog");
           localFirstLog("agent.create.done", {
@@ -581,6 +590,7 @@ export const slice = createSliceWithThunks({
           /* diagnostics best-effort */
         }
 
+        if (createAttempt) pendingCreateIds.delete(createAttempt);
         return agent;
       }
     ),

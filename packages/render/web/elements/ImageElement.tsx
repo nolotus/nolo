@@ -14,6 +14,8 @@ import { useAppDispatch, useAppSelector } from "app/store";
 import { selectRuntimeCurrentServer } from "app/stateViews/runtime";
 import { readFileContent } from "database/dbSlice";
 import { buildDatabaseFileContentUrl } from "database/fileUrl";
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
+import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import ImagePreviewModal from "render/web/ui/modal/ImagePreviewModal";
 
 interface ImageElementProps {
@@ -70,30 +72,13 @@ export const ImageElement: React.FC<ImageElementProps> = ({
 
   const baseUrl = currentServer || "";
 
-  // 原始 HTTP 直链作为回退方案
-  const httpFallbackSrc =
-    element.url ||
-    buildDatabaseFileContentUrl(baseUrl, element.fileId) ||
-    "";
-
-  // 通过 readFileContent 解析后的 src，初始用 httpFallbackSrc
-  const [fileContentSrc, setFileContentSrc] = useState<string | null>(
-    httpFallbackSrc || null
-  );
-
-  // 优先级：
-  // 1. element.url（已是可用 URL，不需要读取文件内容）
-  // 2. 通过 readFileContent 从 IndexedDB / 服务器拿到 Blob → objectURL
-  // 3. 回退到 httpFallbackSrc（直接访问远程内容接口）
+  const originalSrc = element.url || buildDatabaseFileContentUrl(baseUrl, element.fileId);
+  const spaceId = useCurrentSpaceId();
+  const remoteSrc = useWebMediaSrc(originalSrc, { spaceId });
+  const [localImage, setLocalImage] = useState<{ fileId: string; src: string } | null>(null);
   useEffect(() => {
-    // 每次依赖变化先同步回退到 httpFallbackSrc，保证始终有一个兜底 src
-    setFileContentSrc(httpFallbackSrc || null);
-
-    // 有 url 时直接用，不再读文件内容
-    if (element.url) return;
-
-    // 没有 fileId 无法读取文件内容
-    if (!element.fileId) return;
+    const fileId = element.fileId;
+    if (element.url || !fileId) return;
 
     let cancelled = false;
     let objectUrl: string | null = null;
@@ -101,19 +86,19 @@ export const ImageElement: React.FC<ImageElementProps> = ({
     const loadFileContent = async () => {
       try {
         const data = (await dispatch(
-          readFileContent({ fileId: element.fileId as string })
+          readFileContent({ fileId, useServerFallback: false })
         ).unwrap()) as FileContentResult;
 
+        if (cancelled) return;
         const { src, objectUrl: nextObjectUrl } =
           resolveImageSrcFromFileContent(data);
 
-        if (!cancelled && src) {
-          setFileContentSrc(src);
+        if (src) {
+          setLocalImage({ fileId, src });
           objectUrl = nextObjectUrl;
         }
-        // 解析失败则保持 httpFallbackSrc，不做额外处理
       } catch {
-        // 读取失败时保持 httpFallbackSrc，不额外报错
+        // Missing from IndexedDB: use the render-time remote source.
       }
     };
 
@@ -125,9 +110,10 @@ export const ImageElement: React.FC<ImageElementProps> = ({
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [dispatch, element.fileId, element.url, httpFallbackSrc]);
+  }, [dispatch, element.fileId, element.url]);
 
-  const imgSrc = fileContentSrc || "";
+  const localSrc = !element.url && localImage && localImage.fileId === element.fileId ? localImage.src : null;
+  const imgSrc = localSrc || remoteSrc;
 
   // 去掉 ElementWrapper 注入的 textAlign，其他继续用
   const baseStyle: React.CSSProperties = (style || {}) as React.CSSProperties;
@@ -181,7 +167,7 @@ export const ImageElement: React.FC<ImageElementProps> = ({
   // 打开预览
   const openPreview = () => {
     if (!imgSrc) return;
-    setPreviewUrl(imgSrc);
+    setPreviewUrl(localSrc || originalSrc);
   };
 
   // 图片本身的点击行为：
@@ -300,6 +286,7 @@ export const ImageElement: React.FC<ImageElementProps> = ({
       {/* 大图预览 Modal */}
       <ImagePreviewModal
         imageUrl={previewUrl}
+        spaceId={spaceId}
         alt={element.alt || ""}
         onClose={() => setPreviewUrl(null)}
         contentKey={element.fileId} 

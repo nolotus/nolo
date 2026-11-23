@@ -1,3 +1,4 @@
+import { isAgentCredentialShared } from "../shared/providerSecrets";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
@@ -149,6 +150,7 @@ export type ProxyProviderExecutionPlan = ProviderExecutionPlanBase & {
   agentKey: string;
   apiSource?: string;
   apiKey?: string;
+  credentialSynced?: true;
   apiKeyHeader?: string;
   /** 同 DirectProviderExecutionPlan.usageProvider。 */
   usageProvider?: string;
@@ -399,7 +401,7 @@ export async function buildProviderExecutionPlan(args: {
 
     // Prefer local broker (migrated API keys) before raw record fields / OAuth resolver.
     if (args.credentialBroker) {
-      const brokerRefs = [credentialRef, apiKeyRef].filter(
+      const brokerRefs = [credentialRef, ...(!credentialRef || !apiKeyRef?.startsWith("provider-key:") ? [apiKeyRef] : [])].filter(
         (ref): ref is string => Boolean(ref),
       );
       for (const ref of brokerRefs) {
@@ -412,7 +414,7 @@ export async function buildProviderExecutionPlan(args: {
     }
 
     // broker miss → server sync fallback (only when opted in)
-    if (!apiKey && agentConfig.credentialSynced && args.syncFetcher && credentialRef) {
+    if (!apiKey && isAgentCredentialShared(agentConfig) && args.syncFetcher && credentialRef) {
       let synced: string | null = null;
       try {
         synced = await args.syncFetcher(credentialRef);
@@ -427,14 +429,10 @@ export async function buildProviderExecutionPlan(args: {
       }
     }
 
-    // Provider-level shared key (provider-key:xxx): lives in the user-secrets
-    // store, not the agent-credentials store. Try syncFetcher with the ref
-    // itself — the caller's syncFetcher implementation is expected to detect
-    // the provider-key: prefix and route to /api/user-secrets/get.
-    // No credentialSynced opt-in required here: the user explicitly checked
-    // "记住此服务商密钥" when creating the agent, which is the consent for
-    // storing and retrieving this shared key from the server.
-    if (!apiKey && apiKeyRef && apiKeyRef.startsWith("provider-key:") && args.syncFetcher) {
+    // Legacy provider-only records may resolve the account copy only with explicit
+    // sharing consent. Never substitute it for a missing explicit per-Agent ref.
+    if (!apiKey && isAgentCredentialShared(agentConfig) && !credentialRef &&
+      apiKeyRef?.startsWith("provider-key:") && args.syncFetcher) {
       try {
         const shared = await args.syncFetcher(apiKeyRef);
         const trimmed = asTrimmedString(shared);
@@ -448,13 +446,13 @@ export async function buildProviderExecutionPlan(args: {
     }
 
     if (!apiKey && apiKeyRef && args.apiKeyRefResolver) {
-      const resolved = await args.apiKeyRefResolver(apiKeyRef);
+      const resolved = apiKeyRef.startsWith("provider-key:") ? null : await args.apiKeyRefResolver(apiKeyRef);
       if (resolved) {
         apiKey = resolved;
       } else if (!agentConfig.apiKey?.trim() && !agentConfig.apiKeyFromAgentKey?.trim()) {
-        const isApiKeyRef = apiKeyRef.startsWith("api-key:");
+        const isApiKeyRef = /^(api-key|provider-key):/.test(apiKeyRef);
         const hint = isApiKeyRef
-          ? (agentConfig.credentialSynced
+          ? (isAgentCredentialShared(agentConfig)
             ? `Local credential for "${apiKeyRef}" not found. It is synced to your account — run this agent once on a device that has the key, or re-enter it in agent settings.`
             : `Local credential for "${apiKeyRef}" not found. Re-enter the API key in agent settings, or enable cross-device sync.`)
           : `OAuth credential for "${apiKeyRef}" not found locally. Run \`nolo auth ${apiKeyRef}\` (and \`--sync-to-server\` for server-side agent runs).`;
@@ -486,6 +484,7 @@ export async function buildProviderExecutionPlan(args: {
         agentKey: agentConfig.key,
         ...(agentConfig.apiSource ? { apiSource: agentConfig.apiSource } : {}),
         ...(apiKey ? { apiKey } : {}),
+        ...(isAgentCredentialShared(agentConfig) ? { credentialSynced: true as const } : {}),
         ...(apiKeyHeader ? { apiKeyHeader } : {}),
       };
     }
@@ -570,7 +569,7 @@ export async function buildProviderExecutionPlan(args: {
     }
   }
   // broker miss → server sync fallback (only when opted in)
-  if (!apiKey && agentConfig.credentialSynced && args.syncFetcher && credentialRef) {
+  if (!apiKey && isAgentCredentialShared(agentConfig) && args.syncFetcher && credentialRef) {
     let synced: string | null = null;
     try {
       synced = await args.syncFetcher(credentialRef);

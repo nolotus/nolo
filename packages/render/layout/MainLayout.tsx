@@ -64,8 +64,9 @@ import "./sidebarContextToggle.css";
 
 // 页脚只出现在内容型路由，懒加载避免拖累工作区首屏
 // GuestPageChrome stays lazy-only: eager import races layout unit tests (mock.restore timing)
+// 引游客 chrome 模块（不含创建入口），访客首页因此不必下载登录态菜单依赖。
 const GuestPageChrome = lazy(() =>
-  import("./PageTopChrome").then((module) => ({ default: module.GuestPageChrome })),
+  import("./GuestPageChrome").then((module) => ({ default: module.GuestPageChrome })),
 );
 const SiteFooter = lazy(() => import("./SiteFooter"));
 const chatSidebarImport = () => import("chat/web/ChatSidebar");

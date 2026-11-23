@@ -7,9 +7,11 @@ import {
   LuEllipsis,
   LuFolderPlus,
   LuLayoutGrid,
+  LuPlus,
   LuSettings,
   LuUsers,
 } from "react-icons/lu";
+import CreateMenuButtonContainer from "render/layout/CreateMenuButtonContainer";
 import { Menu, MenuItem, Separator } from "render/web/ui/Menu";
 import { MenuPopover } from "render/web/ui/MenuPopover";
 import React, { useRef, useState } from "react";
@@ -30,6 +32,7 @@ import {
   canManageSpaceCategories,
   isWorkDialogSpaceGroupExpanded,
   projectWorkDialogSpacePreferences,
+  realSpaceOrdinalAt,
   type WorkCategoryGroup,
   type WorkDialogSpaceGroup,
   type WorkSpaceRecord,
@@ -43,6 +46,7 @@ export function WorkDialogSpaceGroups({
   homeScope,
   onSelectHomeScope,
   onSpaceRecordUpdate,
+  activeRowKey,
   children,
 }: {
   groups: readonly WorkDialogSpaceGroup[];
@@ -61,6 +65,8 @@ export function WorkDialogSpaceGroups({
     newCategoryId?: string,
     newCategory?: { name: string; order: number },
   ) => void;
+  /** 当前路由上打开的内容键；用于把「空间外」分组按需自动展开。 */
+  activeRowKey?: string | null;
   children: (group: WorkDialogSpaceGroup) => React.ReactNode;
 }) {
   const navigate = useNavigate();
@@ -102,9 +108,8 @@ export function WorkDialogSpaceGroups({
     }
     return ids.size;
   }, [memberSpaces]);
-  const hasRenderedMemberSpace = groups.some(
-    (group) => group.spaceId && group.spaceId !== OTHER_SPACES_GROUP,
-  );
+  const isRealSpaceGroup = (candidate: WorkDialogSpaceGroup) =>
+    Boolean(candidate.spaceId) && candidate.spaceId !== OTHER_SPACES_GROUP;
   return (
     <div
       aria-label={t("workspace_workspaces", "空间工作区")}
@@ -120,18 +125,28 @@ export function WorkDialogSpaceGroups({
         const defaultExpanded =
           group.spaceId === null && homeScope?.kind === "noSpace";
         // Keep unassociated content reachable without inventing a second workspace.
-        // 仅当存在已渲染的成员空间标题行（可承载更多菜单内的「空间外」切换入口）时，才隐藏空间外独立标题条；
-        // 若单成员空间因无名称被忽略未渲染，必须保留「空间外」标题条中的可见切换入口，绝不只留不可点状态。
+        // 仅当存在**排在它前面**的成员空间标题行（可承载更多菜单内的「空间外」切换入口）时，
+        // 才隐藏空间外独立标题条；「空间外」分区排在第一位时没有更早的标题行可依附，
+        // 必须保留自己的标题条，不能让顶部内容变成「无标题展开」。
+        // 若单成员空间因无名称被忽略未渲染，同样必须保留「空间外」标题条中的可见切换入口，
+        // 绝不只留不可点状态。
         const ungrouped =
           group.spaceId === null &&
           normalizedMemberSpaceCount === 1 &&
-          hasRenderedMemberSpace;
+          groups.slice(0, index).some(isRealSpaceGroup);
+        // 当前打开的内容已确认在空间外时自动展开该分组：否则置顶的空间外内容默认折叠、
+        // 当前打开的行反而不可见。显式的手动折叠仍优先（见 isWorkDialogSpaceGroupExpanded）。
+        const holdsActiveRow =
+          group.spaceId === null &&
+          activeRowKey != null &&
+          group.rows.some((row) => row.key === activeRowKey);
         const expanded =
           ungrouped ||
           isWorkDialogSpaceGroupExpanded(
             group.spaceId,
-            index,
-            activePreferences[key] ?? (defaultExpanded ? true : undefined),
+            realSpaceOrdinalAt(groups, index),
+            activePreferences[key] ??
+              (defaultExpanded || holdsActiveRow ? true : undefined),
           );
         const record = group.spaceId ? records?.get(group.spaceId) : undefined;
         const canManage = canManageSpaceCategories({
@@ -254,7 +269,7 @@ export function WorkDialogSpaceGroups({
                     {group.label}
                   </span>
                 )}
-                {group.rows.length > 0 && (
+                {(!group.spaceId || group.spaceId === OTHER_SPACES_GROUP) && group.rows.length > 0 && (
                   <span
                     {...withLiteralClass(
                       "WorkSpaceGroup__badge",
@@ -264,6 +279,25 @@ export function WorkDialogSpaceGroups({
                     {group.rows.length}
                   </span>
                 )}
+                {group.spaceId &&
+                  group.spaceId !== OTHER_SPACES_GROUP &&
+                  canManage && (
+                    // 只有真实可写空间提供本地「新建」：scopeSpace 锁定本行空间，
+                    // 与当前路由所在空间无关；空间外 / 其他空间没有确定的目标空间。
+                    <CreateMenuButtonContainer
+                      variant="header"
+                      showLabel={false}
+                      scopeSpace={{ id: group.spaceId, name: group.label }}
+                      title={t("workspace_create_in_space", {
+                        name: group.label,
+                        defaultValue: "在{{name}}中新建",
+                      })}
+                      {...withLiteralClass(
+                        "WorkSpaceGroup__create",
+                        sidebarStyles.workSpaceRowAction,
+                      )}
+                    />
+                  )}
                 {group.spaceId && group.spaceId !== OTHER_SPACES_GROUP && (
                   <button
                     type="button"
@@ -284,7 +318,7 @@ export function WorkDialogSpaceGroups({
                     }}
                     {...withLiteralClass(
                       "WorkSpaceGroup__more",
-                      sidebarStyles.workSpaceMore,
+                      sidebarStyles.workSpaceRowAction,
                     )}
                   >
                     <LuEllipsis size={16} aria-hidden="true" />

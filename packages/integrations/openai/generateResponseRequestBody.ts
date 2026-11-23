@@ -8,6 +8,7 @@ import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
 import { OPENAI_RESPONSES_ENDPOINT } from "../../agent-runtime/platformProviderEndpoints";
 import { Contexts } from "ai/types";
 import { convertMessagesToResponsesInput } from "./responsesHelpers";
+import { isGpt62DeveloperPrefixModel } from "./responsesPromptLayout";
 import {
     selectResponsesConversationState,
     supportsResponsesConversationState,
@@ -16,8 +17,7 @@ import type { ResponsesConversationState } from "../../agent-runtime/types";
 
 const DEFAULT_RESPONSES_COMPACTION_THRESHOLD = 200_000;
 
-// This is a prompt-layout rule for the public Responses wire, not a state
-// capability. Codex OAuth translates chat.completions in its own adapter.
+// Keep the public Responses route checks separate from the shared model policy.
 function usesGpt62DeveloperPrefix(agentConfig: Agent): boolean {
   const provider = asTrimmedLowercaseString(agentConfig.provider);
   // A custom endpoint can retain either provider label without using the public wire.
@@ -32,7 +32,7 @@ function usesGpt62DeveloperPrefix(agentConfig: Agent): boolean {
   } else if (provider !== "openai") {
     return false;
   }
-  return /^gpt-6\.2-(astra|sol)$/.test(model);
+  return isGpt62DeveloperPrefixModel(model);
 }
 
 function resolveResponsesCompactionThreshold(agentConfig: Agent): number {

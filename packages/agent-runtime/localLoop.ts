@@ -1059,6 +1059,10 @@ export async function runLocalAgentTurn(
         typeof input.input === "string" ? input.input : undefined
       ),
     runKind: input.runKind,
+    // 主 Agent 强弱姿态：本地宿主能直读当前会话模型（agentConfig.model，会话内
+    // 恒定），显式透传后由 resolveToolGuidedSections 按档位追加一句短指引；
+    // 模型缺失/推不出档位时不追加文本，前缀缓存稳定性不受影响。
+    callerModel: agentConfig.model,
   });
   // 宿主自己注入过记忆使用指引吗？CLI/TUI/desktop 在本函数之前用
   // `buildMemoryUseGuidanceLayer({ promptBlock })` 按「有 overlay 就注入」放过一份

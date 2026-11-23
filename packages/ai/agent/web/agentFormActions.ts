@@ -11,6 +11,7 @@ export const ADVANCED_FIELD_NAMES = [
   "frequency_penalty",
   "presence_penalty",
   "reasoning_effort",
+  "enableThinking",
 ] as const;
 
 type PlatformQuickCreateModel = {
@@ -184,7 +185,7 @@ export const AGENT_FIELD_DISPLAY_LABELS: Record<string, string> = {
   max_tokens: "最大 Token 数",
   presence_penalty: "存在惩罚",
   frequency_penalty: "频率惩罚",
-  reasoning_effort: "推理强度",
+  reasoning_effort: "思考深度",
 };
 
 /**
@@ -410,13 +411,13 @@ export function handleAdvancedEdit({
   }
 
   setValue("hasVision", draft.hasVision, { shouldValidate: true });
-  // 把快速创建面板选的推理强度灌进 RHF，必须 shouldDirty:true，
-  // 否则 RHF 默认 shouldDirty=false → dirtyFields 仍为空 →
-  // buildSubmitPayload 会把 reasoning_effort 当「未编辑」删掉，
-  // 高级编辑路径落库会丢回 schema medium 兜底（agy-flash review blocker）。
   setValue("reasoning_effort", draft.reasoningEffort, {
     shouldValidate: true,
-    shouldDirty: true,
+    shouldDirty: draft.reasoningEffort != null,
+  });
+  setValue("enableThinking", draft.enableThinking, {
+    shouldValidate: true,
+    shouldDirty: draft.enableThinking != null,
   });
   setValue("name", name.slice(0, 50), { shouldValidate: true });
   setValue("prompt", draft.prompt.trim(), { shouldValidate: true });
@@ -427,29 +428,22 @@ export function handleAdvancedEdit({
 
 export type HandleQuickCreateParams = {
   draft: AgentCreateQuickDraft;
-  onSubmit: (data: any) => Promise<unknown> | unknown;
+  attempt?: import("./useAgentCreateSourceState").QuickCreateAttempt;
+  onSubmit: (data: any, createAttempt?: object) => Promise<unknown> | unknown;
   t: (...args: any[]) => any;
   setIsQuickCreating: (value: boolean) => void;
   platformQuickCreateModel: PlatformQuickCreateModel;
-  /**
-   * Optional cross-device key push: invoked after a successful create when the
-   * user opted into credentialSynced. Caller binds server + auth token.
-   * Best-effort: failures are logged, never block the created agent.
-   */
-  onPushCredential?: (args: {
-    credentialRef: string;
-    apiKey: string;
-  }) => Promise<boolean>;
+
 }
 
 export async function handleQuickCreate({
   draft,
+  attempt,
   onSubmit,
   t,
   setIsQuickCreating,
   platformQuickCreateModel,
-  onPushCredential,
-}: HandleQuickCreateParams): Promise<void> {
+}: HandleQuickCreateParams): Promise<boolean | void> {
   if (draft.requiresDesktopOAuth && !draft.oauthConnected) {
     toast.error(
       t(
@@ -475,11 +469,8 @@ export async function handleQuickCreate({
     hasVision: draft.hasVision,
     inputPrice: 0,
     outputPrice: 0,
-    enableThinking: false,
-    // 推理强度：快速创建面板的可选值，platform 走 schema 默认 medium，
-    // subscription/api 走 draft（订阅按 preset 差异化，api 走 medium）。
-    reasoning_effort: draft.reasoningEffort,
-    cliProvider: "",
+    ...(draft.enableThinking != null ? { enableThinking: draft.enableThinking } : {}),
+    ...(draft.reasoningEffort != null ? { reasoning_effort: draft.reasoningEffort } : {}),
     machineId: "",
   };
 
@@ -518,16 +509,16 @@ export async function handleQuickCreate({
             useServerProxy: false,
             customProviderUrl: draft.customProviderUrl.trim(),
             apiKey: draft.apiKey.trim(),
-            // credentialSynced 只丢弃 provider-key: 指针（同步后由服务端凭据取代）；
-            // provider OAuth 通道引用（chatgpt/claude/xai/antigravity）必须保留，
-            // 否则同步到 CLI/TUI 的 agent 会拿不到订阅通道而 HTTP 401。
-            apiKeyRef:
-              draft.credentialSynced && (draft.apiKeyRef || "").startsWith("provider-key:")
-                ? ""
-                : (draft.apiKeyRef || ""),
-            credentialRef: draft.credentialSynced ? undefined : ((draft.apiKeyRef ?? "").startsWith("provider-key:") ? draft.apiKeyRef : undefined),
+            // Keep the provider pointer (or OAuth channel) independently of sync.
+            apiKeyRef: draft.apiKeyRef || "",
             apiKeyHeader: draft.apiKeyHeader || "",
-            credentialSynced: draft.credentialSynced,
+            ...(draft.credentialSynced
+              // The per-agent sync endpoint only accepts an api-key: broker ref.
+              // Let the existing create thunk allocate it; keep provider-key: as apiKeyRef.
+              ? { credentialSynced: true }
+              : draft.apiKeyRef?.startsWith("provider-key:")
+                ? { credentialRef: draft.apiKeyRef }
+                : {}),
           };
 
   // 交互模式由模型倒推：语音模型 → live_audio，其余 → text
@@ -547,15 +538,16 @@ export async function handleQuickCreate({
 
   setIsQuickCreating(true);
   try {
-    const created = await onSubmit(formData as any) as
-      | { agentDbKey?: string; credentialRef?: string }
-      | undefined;
-
-    // Credential sync is handled inside the createAgent thunk (agentSlice),
-    // which uses the same token as the DB write — no UI-layer push needed.
+    if (attempt) await onSubmit(formData, attempt);
+    else await onSubmit(formData);
+    return true;
   } catch (err) {
     console.error("Quick create agent failed:", err);
-    toast.error(t("createAgent.quickCreate.failed", "创建失败，请重试"));
+    toast.error(err && typeof err === "object" && "message" in err && err.message === "agent_credential_sync_failed"
+      ? (attempt?.providerCopyUploaded
+        ? t("form.credentialSyncPartial", "部分成功：服务商级密钥副本已上传，Agent 未创建。本机密钥已保留，请重试，或关闭跨设备后创建。")
+        : t("form.credentialSyncFailed", "密钥已保存在本机，但未能完成跨设备同步。未创建 AI，请重试，或关闭跨设备后创建。"))
+      : t("createAgent.quickCreate.failed", "创建失败，请重试"));
   } finally {
     setIsQuickCreating(false);
   }

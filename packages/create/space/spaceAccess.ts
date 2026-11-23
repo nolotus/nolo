@@ -283,7 +283,13 @@ export const fetchAuthoritativeSpaceDirectory = async ({
       continue;
     }
     if (outcome.record) {
-      return outcome.record;
+      // A directory scan is not a membership snapshot. Keep its contents, but
+      // take the member list from the space body on the same replica.
+      const body = await fetchRemoteSpace(server, token, normalizedSpaceId);
+      return {
+        ...outcome.record,
+        members: body && !isTombstoneRecord(body) && Array.isArray(body.members) ? body.members : [],
+      };
     }
   }
 

@@ -142,3 +142,15 @@ export const shouldHideKimiAliasFromPricing = (
   model?: string | null
 ): boolean => provider === "fireworks" && model === FIREWORKS_KIMI_LATEST_MODEL;
 
+
+/** Hosted Kimi still honors an explicit legacy opt-out when no depth was selected. */
+export function hostedKimiLegacyThinkingOverride(
+  provider: string | null | undefined,
+  model: string | null | undefined,
+  enableThinking: boolean | null | undefined,
+  effort: string | null | undefined,
+) {
+  return enableThinking === false && !effort && isPlatformKimiProviderModel(provider, model)
+    ? { thinking: { type: "disabled" }, reasoning: { enabled: false } }
+    : undefined;
+}

@@ -30,6 +30,7 @@ import {
   themeColorSequence,
   themeText,
   tuiRenderThemeFingerprint,
+  userBubbleSurfaceBackgroundSequence,
 } from "./theme";
 import { toolFamilyOf, toolLabelVariants } from "./i18n";
 import { formatAssistantDisplay, polishBreathInsertsBlankBetween } from "../client/assistantOutput";
@@ -90,6 +91,8 @@ export type TurnLayoutRow = {
   softWrapJoiner?: string;
   /** 仅图片占位行携带；文字行与分隔行没有该字段。 */
   image?: TurnImageRowInfo;
+  /** 局部紧凑底色（如用户气泡）：renderHistory 不做全宽背景延展，也不向相邻空行传染。 */
+  compactSurface?: boolean;
 };
 
 export type TurnHistory = {
@@ -489,10 +492,12 @@ function styleAssistantTurn(content: string, colorEnabled: boolean, state = assi
   return styledLines.join("\n");
 }
 
+const USER_BUBBLE_RIGHT_PAD = 2;
+
 function gutterForRole(role: TurnRole, colorEnabled: boolean) {
   if (role === "user") {
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
-    const prefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
+    const prefix = colorEnabled ? `${accentSeq}\x1b[1m▌  \x1b[0m` : "▌  ";
     return { prefix, prefixWidth: 3 };
   }
   if (role === "local") {
@@ -560,12 +565,15 @@ function layoutTextRows(
   if (role === "user") {
     const logicalLines = content.split("\n");
     const accentSeq = colorEnabled ? themeColorSequence("accent") : "";
-    const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m┃  \x1b[0m` : "┃  ";
-    // Body text: clean primary terminal foreground + bold, paired with the
-    // accent ┃  gutter. Keeping prose on default foreground prevents multi-line
-    // user prompts from turning into a wall of saturated blue on dark/light canvases.
+    const surfaceSeq = colorEnabled ? userBubbleSurfaceBackgroundSequence() : "";
+    const firstPrefix = colorEnabled ? `${accentSeq}\x1b[1m▌  \x1b[0m` : "▌  ";
+    const multilinePrefix = colorEnabled ? `${accentSeq}\x1b[1m▌  \x1b[0m` : "▌  ";
+    const hangingIndent = colorEnabled ? `${accentSeq}\x1b[1m▌  \x1b[0m` : "▌  ";
+    // Body text: clean primary terminal foreground + bold on a compact neutral
+    // bubble surface, anchored by the heavy accent ▌  bar. Keeping prose on
+    // default foreground avoids a saturated blue wall while the content-fit
+    // neutral card keeps user prompts immediately scannable without stretching
+    // a full-width banner across short messages.
     const boldOn = colorEnabled ? "\x1b[1m" : "";
     const boldOff = colorEnabled ? "\x1b[22m" : "";
     const fgOff = colorEnabled ? "\x1b[39m" : "";
@@ -599,9 +607,25 @@ function layoutTextRows(
       }
       lineSourceStart += line.length + 1;
     }
-    return rows.length > 0
+    const baseRows: TurnLayoutRow[] = rows.length > 0
       ? rows
       : [{ rendered: firstPrefix, sourceStart: 0, sourceEnd: 0, prefixWidth: 3 }];
+    if (!surfaceSeq) return baseRows;
+    let maxRowWidth = 0;
+    for (const row of baseRows) {
+      const width = visibleWidth(row.rendered);
+      if (width > maxRowWidth) maxRowWidth = width;
+    }
+    const bubbleWidth = Math.min(contentWidth, maxRowWidth + USER_BUBBLE_RIGHT_PAD);
+    return baseRows.map((row) => ({
+      ...row,
+      rendered: renderSurfaceLine({
+        text: row.rendered,
+        surface: surfaceSeq,
+        padTo: bubbleWidth,
+      }),
+      compactSurface: true,
+    }));
   }
 
   if (role === "local") {
@@ -861,6 +885,7 @@ function layoutLayoutRowEqual(a: TurnLayoutRow, b: TurnLayoutRow): boolean {
   if (a.prefixWidth !== b.prefixWidth) return false;
   if ((a.softWrapped ?? false) !== (b.softWrapped ?? false)) return false;
   if ((a.softWrapJoiner ?? "") !== (b.softWrapJoiner ?? "")) return false;
+  if ((a.compactSurface ?? false) !== (b.compactSurface ?? false)) return false;
   const ma = a.sourceMapping;
   const mb = b.sourceMapping;
   if (ma || mb) {
@@ -1222,8 +1247,8 @@ export type TurnOffsets = {
  * 轮间垂直间距的唯一判定点。终端只能以整行为单位，所以返回「这一轮上方
  * 插入几行空行」而不是布尔值。规则：
  * - 第一轮上方 0 行；
- * - user 轮上方 1 行（与上一轮的任何内容隔开）；
- * - assistant 紧跟在 user / local 之后 1 行（不与带背景色的用户气泡糊在一起）；
+ * - user 轮上方 2 行（与上一轮的任何内容拉开明显轮次层级，区别于回复内 1 行换段）；
+ * - assistant 紧跟在 user / local 之后 1 行（不与用户气泡糊在一起）；
  * - local 轮（slash 回显 / 系统提示）上方有任何轮时 1 行，自成一段；
  * - 其余（assistant 续写、assistant 接 assistant）0 行。
  * 行数统计（buildTurnOffsets）、滚动度量（computeScrollMetrics）与可视窗口
@@ -1231,7 +1256,8 @@ export type TurnOffsets = {
  */
 export function turnSeparatorRows(prevRole: TurnRole | null, role: TurnRole): number {
   if (prevRole === null) return 0;
-  if (role === "user" || role === "local") return 1;
+  if (role === "user") return 2;
+  if (role === "local") return 1;
   if (role === "assistant") {
     return prevRole === "user" || prevRole === "local" ? 1 : 0;
   }
@@ -1591,16 +1617,18 @@ export function renderHistory(
 
   const { entries, totalLines: finalizedLines } = buildTurnOffsets(history, contentWidth);
 
+  let currentLayoutRows: TurnLayoutRow[] = [];
   let currentLines: string[] = [];
   let currentStart = -1;
   if (history.currentRole !== null && history.currentContent) {
-    currentLines = getStreamingTurnLines(
+    currentLayoutRows = computeStreamingTurnLayoutRows(
       history.currentRole,
       history.currentContent,
       contentWidth,
       colorEnabled,
       themeFingerprint,
     );
+    currentLines = currentLayoutRows.map((r) => r.rendered);
     const sep = currentTurnSeparator(history);
     currentStart = finalizedLines + sep;
   }
@@ -1622,6 +1650,7 @@ export function renderHistory(
   const winStart = history.scrollTop;
   const winEnd = Math.min(totalLines, winStart + visibleHeight);
   let visibleLines: string[] = new Array(visibleHeight).fill("");
+  const visibleCompactSurface: boolean[] = new Array(visibleHeight).fill(false);
   const visibleImages: HistoryVisibleImage[] = [];
 
   // Paint ONLY the turns overlapping the visible window.
@@ -1631,6 +1660,7 @@ export function renderHistory(
       const sepRow = entry.startRow - s;
       if (sepRow >= winStart && sepRow < winEnd) {
         visibleLines[sepRow - winStart] = "";
+        visibleCompactSurface[sepRow - winStart] = false;
       }
     }
     const turnStart = entry.startRow;
@@ -1661,6 +1691,7 @@ export function renderHistory(
     const interEnd = Math.min(turnEnd, winEnd);
     for (let r = interStart; r < interEnd; r++) {
       visibleLines[r - winStart] = lines[r - turnStart] ?? "";
+      visibleCompactSurface[r - winStart] = layoutRows[r - turnStart]?.compactSurface === true;
     }
     if (options?.onVisibleImages) {
       collectVisibleImageRows(layoutRows, i, turnStart, winStart, winEnd, visibleImages);
@@ -1672,6 +1703,7 @@ export function renderHistory(
       const sepRow = currentStart - s;
       if (sepRow >= winStart && sepRow < winEnd) {
         visibleLines[sepRow - winStart] = "";
+        visibleCompactSurface[sepRow - winStart] = false;
       }
     }
     const currentEnd = currentStart + currentLines.length;
@@ -1680,6 +1712,8 @@ export function renderHistory(
       const interEnd = Math.min(currentEnd, winEnd);
       for (let r = interStart; r < interEnd; r++) {
         visibleLines[r - winStart] = currentLines[r - currentStart] ?? "";
+        visibleCompactSurface[r - winStart] =
+          currentLayoutRows[r - currentStart]?.compactSurface === true;
       }
     }
   }
@@ -1711,33 +1745,53 @@ export function renderHistory(
 
   // Resolve blank seams against absolute transcript rows, not the clipped
   // viewport. Fetch only the neighboring turns needed at a viewport edge.
-  const outsideRows = new Map<number, string[]>();
-  const transcriptRow = (row: number): string => {
-    if (row >= winStart && row < winEnd) return visibleLines[row - winStart] ?? "";
-    if (currentStart >= 0 && row >= currentStart) return currentLines[row - currentStart] ?? "";
-    const index = entries.findIndex(entry => row >= entry.startRow && row < entry.startRow + entry.lineCount);
-    if (index < 0) return ""; // semantic separator between turns
-    let lines = outsideRows.get(index);
-    if (!lines) {
-      lines = getTurnLayoutRows(history.turns[index]!, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled)
-        .map(line => line.rendered);
-      outsideRows.set(index, lines);
+  const outsideRows = new Map<number, TurnLayoutRow[]>();
+  const transcriptRowInfo = (row: number): { line: string; compactSurface: boolean } => {
+    if (row >= winStart && row < winEnd) {
+      return {
+        line: visibleLines[row - winStart] ?? "",
+        compactSurface: visibleCompactSurface[row - winStart] === true,
+      };
     }
-    return lines[row - entries[index]!.startRow] ?? "";
+    if (currentStart >= 0 && row >= currentStart) {
+      const layoutRow = currentLayoutRows[row - currentStart];
+      return {
+        line: currentLines[row - currentStart] ?? "",
+        compactSurface: layoutRow?.compactSurface === true,
+      };
+    }
+    const index = entries.findIndex(entry => row >= entry.startRow && row < entry.startRow + entry.lineCount);
+    if (index < 0) return { line: "", compactSurface: false }; // semantic separator between turns
+    let layoutRows = outsideRows.get(index);
+    if (!layoutRows) {
+      layoutRows = getTurnLayoutRows(history.turns[index]!, contentWidth, colorEnabled, themeFingerprint, graphicsEnabled);
+      outsideRows.set(index, layoutRows);
+    }
+    const layoutRow = layoutRows[row - entries[index]!.startRow];
+    return {
+      line: layoutRow?.rendered ?? "",
+      compactSurface: layoutRow?.compactSurface === true,
+    };
   };
-  const surfaceOf = (line: string): string => colorEnabled
-    ? line.match(/\x1b\[(?:48;2;[0-9;]+|100)m/)?.[0] ?? "" : "";
-  const rowSurfaces = visibleLines.map(surfaceOf);
+  const surfaceOf = (line: string, compactSurface: boolean): string =>
+    colorEnabled && !compactSurface
+      ? line.match(/\x1b\[(?:48;2;[0-9;]+|100)m/)?.[0] ?? ""
+      : "";
+  const rowSurfaces = visibleLines.map((line, i) =>
+    surfaceOf(line, visibleCompactSurface[i] === true),
+  );
   for (let start = 0; colorEnabled && start < winEnd - winStart; start++) {
     if (stripAnsi(visibleLines[start] ?? "").trim()) continue;
     let end = start;
     while (end < winEnd - winStart && !stripAnsi(visibleLines[end] ?? "").trim()) end++;
     let before = winStart + start - 1;
-    while (before >= 0 && !stripAnsi(transcriptRow(before)).trim()) before--;
+    while (before >= 0 && !stripAnsi(transcriptRowInfo(before).line).trim()) before--;
     let after = winStart + end;
-    while (after < totalLines && !stripAnsi(transcriptRow(after)).trim()) after++;
-    const preceding = before >= 0 ? surfaceOf(transcriptRow(before)) : "";
-    const following = after < totalLines ? surfaceOf(transcriptRow(after)) : "";
+    while (after < totalLines && !stripAnsi(transcriptRowInfo(after).line).trim()) after++;
+    const beforeInfo = before >= 0 ? transcriptRowInfo(before) : null;
+    const afterInfo = after < totalLines ? transcriptRowInfo(after) : null;
+    const preceding = beforeInfo ? surfaceOf(beforeInfo.line, beforeInfo.compactSurface) : "";
+    const following = afterInfo ? surfaceOf(afterInfo.line, afterInfo.compactSurface) : "";
     if (preceding && following) rowSurfaces.fill(preceding, start, end);
     start = end - 1;
   }

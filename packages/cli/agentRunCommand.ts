@@ -1120,6 +1120,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
       ...buildRunOptions(effectiveAgentKey),
       ...(parsed.freshDialog ? { freshDialog: true } : {}),
       ...(modelOverride ? { modelOverride } : {}),
+      // `--reasoning-effort`：本次 run 的有效推理档覆盖（内存生效，不写回记录）。
+      ...(parsed.reasoningEffort ? { reasoningEffortOverride: parsed.reasoningEffort } : {}),
     }),
   );
   clearWatchdogs();
@@ -1214,6 +1216,8 @@ async function runAgentRunCommandImpl(args: string[], deps: AgentRunCommandDeps)
             ...buildRunOptions(effectiveAgentKey, nextEntry.text),
             continueDialogId: result.dialogId,
             ...(modelOverride ? { modelOverride } : {}),
+      // `--reasoning-effort`：本次 run 的有效推理档覆盖（内存生效，不写回记录）。
+      ...(parsed.reasoningEffort ? { reasoningEffortOverride: parsed.reasoningEffort } : {}),
           })
         );
         clearWatchdogs();

@@ -77,6 +77,80 @@ export function autoScrollStepForTicks(ticks: number): number {
   return 1;
 }
 
+export type ScrollbarGeometry = {
+  trackHeight: number;
+  thumbSize: number;
+  thumbTop: number;
+  thumbBottom: number;
+  maxScrollTop: number;
+};
+
+/**
+ * 计算垂直滚动条轨道与滑块的几何尺寸（单源真值，供渲染与鼠标点击/拖动共用）。
+ * 当 totalLines <= visibleHeight（无需滚动条）时返回 null。
+ */
+export function computeScrollbarGeometry(
+  visibleHeight: number,
+  totalLines: number,
+  scrollTop: number,
+): ScrollbarGeometry | null {
+  if (visibleHeight <= 0 || totalLines <= visibleHeight) return null;
+  const trackHeight = visibleHeight;
+  const thumbSize = Math.max(
+    1,
+    Math.floor((visibleHeight * visibleHeight) / totalLines),
+  );
+  const maxScrollTop = totalLines - visibleHeight;
+  const clampedScrollTop = Math.max(0, Math.min(maxScrollTop, scrollTop));
+  const thumbTop = Math.floor(
+    (clampedScrollTop / maxScrollTop) * (trackHeight - thumbSize),
+  );
+  return {
+    trackHeight,
+    thumbSize,
+    thumbTop,
+    thumbBottom: thumbTop + thumbSize,
+    maxScrollTop,
+  };
+}
+
+/**
+ * 判定 0-based 屏幕列 screenCol 是否落在右侧滚动条交互热区内。
+ * 视觉滚动条绘制在第 columns - 1 列；当右侧留有 marginRight 空白边距时，
+ * 空白边距列（无任何正文字符）一并纳入热区，解决终端 1 列过细难点击的问题。
+ */
+export function isScrollbarColumnHit(
+  screenCol: number,
+  columns: number,
+  marginRight = 0,
+): boolean {
+  if (columns <= 0) return false;
+  const firstHitCol = Math.max(0, columns - 1 - Math.max(0, marginRight));
+  return screenCol >= firstHitCol && screenCol < columns;
+}
+
+/**
+ * 根据鼠标当前视口行 rowIndex 与按下时的滑块内偏移 grabOffset，反推对应的 scrollTop。
+ */
+export function scrollTopFromScrollbarDrag(
+  rowIndex: number,
+  grabOffset: number,
+  visibleHeight: number,
+  totalLines: number,
+): number {
+  const geom = computeScrollbarGeometry(visibleHeight, totalLines, 0);
+  if (!geom) return 0;
+  const movableTrack = geom.trackHeight - geom.thumbSize;
+  if (movableTrack <= 0) {
+    return rowIndex <= 0 ? 0 : geom.maxScrollTop;
+  }
+  const desiredThumbTop = Math.max(
+    0,
+    Math.min(movableTrack, rowIndex - grabOffset),
+  );
+  return Math.round((desiredThumbTop / movableTrack) * geom.maxScrollTop);
+}
+
 /**
  * 渲染滚动条的单行缩略字符。totalLines <= visibleHeight 时返回空格（无滚动条）。
  */
@@ -86,18 +160,9 @@ export function renderScrollbarRow(
   totalLines: number,
   scrollTop: number
 ): string {
-  if (totalLines <= visibleHeight) return " ";
-  const trackHeight = visibleHeight;
-  const thumbSize = Math.max(
-    1,
-    Math.floor((visibleHeight * visibleHeight) / totalLines)
-  );
-  const maxScrollTop = totalLines - visibleHeight;
-  const thumbTop = Math.floor(
-    (scrollTop / maxScrollTop) * (trackHeight - thumbSize)
-  );
-  const thumbBottom = thumbTop + thumbSize;
-  if (rowIndex >= thumbTop && rowIndex < thumbBottom) {
+  const geom = computeScrollbarGeometry(visibleHeight, totalLines, scrollTop);
+  if (!geom) return " ";
+  if (rowIndex >= geom.thumbTop && rowIndex < geom.thumbBottom) {
     return "█";
   }
   return "│";

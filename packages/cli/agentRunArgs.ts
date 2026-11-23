@@ -22,6 +22,10 @@ import { HIGH_RISK_MUTATION_TOOL_NAMES } from "../agent-runtime/runtimeToolSurfa
 // 唯一能力表：CLI 参数校验与派发守卫、localDockerWorkload 共用同一份真值，
 // 避免「两处各写一份 runtimeKey 合法性」再分叉。
 import { resolveCliLocalRuntimeKeyCapability } from "../ai/tools/agent/cliLocalRuntimeCapability";
+import {
+  REASONING_EFFORT_OPTIONS,
+  type ReasoningEffort,
+} from "../ai/agent/createAgentSchema";
 
 // Re-export the local-CLI key check so orchestration files can stay
 // decoupled from `./agentAliases` for the small set of helpers they need.
@@ -80,6 +84,12 @@ export type ParsedAgentRunArgs = {
   ephemeral: boolean;
   cwd?: string;
   timeoutMs?: number;
+  /**
+   * `--reasoning-effort <level>`：仅覆盖**本次 run** 的有效推理档（在内存里
+   * 覆盖 agent 记录的 reasoning_effort），不写回磁盘/DB 的 agent 配置。
+   * 合法值来自 `REASONING_EFFORT_OPTIONS`，非法值在解析期直接报错。
+   */
+  reasoningEffort?: ReasoningEffort;
   traceTools: boolean;
   eventsMode?: "jsonl";
   injectFeatureWorktreeInstruction: boolean;
@@ -152,9 +162,13 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--local": true,
   "--server": true,
   "--auto": true,
+  "--auto-route": true,
+  "--allow-host-writes": true,
   "--dangerously-allow-shell": true,
   "--trace-tools": true,
   "--bg": true,
+  "--fresh": true,
+  "--fresh-dialog": true,
   "--strict-continue-history": true,
   "--no-stream": true,
   "--debug": true,
@@ -163,6 +177,7 @@ const VALUELESS_FLAGS: Record<string, true> = {
   "--read-only": true,
   "--machine-shell": true,
   "--instabox-allow-remote-release": true,
+  "--instabox-allow-paid": true,
 };
 
 function isValuelessFlag(arg: string): boolean {
@@ -429,6 +444,37 @@ export function parseAgentRunArgs(
     .filter(Boolean);
   const cwd = readFlagValue(args, "--cwd");
   const timeoutMs = parsePositiveInteger(readFlagValue(args, "--timeout-ms"));
+  // 推理档只作用于本次 run：解析期就校验枚举，非法值明确报错而不是静默丢弃
+  // （静默丢弃会让调用方以为降过档，实际仍烧高档成本）。重复参数同样拒绝：
+  // 只取第一个 `readFlagValue` 会让第二个（可能带非法值或缺值）被静默吞掉。
+  //
+  // 重复计数必须与 positionalArgs 同一套「`--x` 吃掉下一个 token 作为值」的遍历
+  // 语义：直接把 argv 里每个 `"--reasoning-effort"` 都当成选项，会把
+  // `--msg --reasoning-effort --reasoning-effort low` 里作为 `--msg` 值的那个
+  // token 误判成重复选项。
+  const reasoningEffortHits: Array<{ index: number; value?: string }> = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (isValuelessFlag(arg)) continue;
+    if (arg === "--reasoning-effort") {
+      reasoningEffortHits.push({ index, value: args[index + 1] });
+      index += 1; // 该选项的值不参与后续选项识别
+      continue;
+    }
+    if (arg.startsWith("--")) index += 1; // 其它选项的值同样跳过
+  }
+  if (reasoningEffortHits.length > 1) {
+    throw new Error("--reasoning-effort 只能出现一次（重复参数不会被静默取第一个）");
+  }
+  const rawReasoningEffort = reasoningEffortHits[0]?.value?.trim().toLowerCase();
+  if (reasoningEffortHits.length === 1 && !(REASONING_EFFORT_OPTIONS as readonly string[]).includes(rawReasoningEffort ?? "")) {
+    throw new Error(
+      `--reasoning-effort 必须是 ${REASONING_EFFORT_OPTIONS.join("|")} 之一`,
+    );
+  }
+  const reasoningEffort = rawReasoningEffort
+    ? (rawReasoningEffort as ReasoningEffort)
+    : undefined;
   const rawEventsMode = readFlagValue(args, "--events");
   const eventsMode: ParsedAgentRunArgs["eventsMode"] =
     rawEventsMode === "jsonl" ? "jsonl" : undefined;
@@ -521,6 +567,7 @@ export function parseAgentRunArgs(
     ...(blockedToolNames.length ? { blockedToolNames } : {}),
     ...(dodCommands.length ? { dodCommands } : {}),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(queueFile ? { queueFile } : {}),
   };
 }

@@ -1,3 +1,5 @@
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
+import { API_ENDPOINTS } from "database/config";
 // 文件路径: chat/messages/web/ToolMessageContent.tsx
 
 import { useAccountChatDisplayPreferences } from "app/settings/accountChatDisplayOwner";
@@ -636,7 +638,10 @@ const GeminiImageItem: React.FC<{
   t: any;
 }> = ({ file, index, onPreview, t }) => {
   const dispatch = useAppDispatch();
-  const [url, setUrl] = useState<string | null>(null);
+  const spaceId = useCurrentSpaceId();
+  const originalSrc = file?.fileUrl || (file?.fileId ? `${API_ENDPOINTS.DATABASE}/file/content/${encodeURIComponent(file.fileId)}` : null);
+  const mediaSrc = useWebMediaSrc(originalSrc, { spaceId });
+  const [localUrl, setUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "loaded" | "error">(
     "loading"
   );
@@ -654,7 +659,7 @@ const GeminiImageItem: React.FC<{
     setUrl(null);
     setStatus("loading");
 
-    dispatch(readFileContent({ fileId: file.fileId }))
+    dispatch(readFileContent({ fileId: file.fileId, useServerFallback: false }))
       .unwrap()
       .then(({ blob }: { blob: Blob }) => {
         if (!active) return;
@@ -688,13 +693,14 @@ const GeminiImageItem: React.FC<{
     appearance: "none",
   };
 
-  if (status === "loaded" && url) {
+  const url = localUrl || mediaSrc;
+  if (url) {
     return (
       <button
         type="button"
          data-hook="messages-esc-g-img-card" {...withLiteralClass("g-img-card loaded", contentStyles.imageCard)}
         style={cardStyle}
-        onClick={() => onPreview(url, name)}
+        onClick={() => onPreview(localUrl || originalSrc, name)}
         aria-label={name}
       >
         <img src={url} alt="" loading="lazy" {...withLiteralClass("g-img", contentStyles.image)} />
@@ -714,6 +720,7 @@ const GeminiImageItem: React.FC<{
 };
 
 const GeminiGallery: React.FC<ToolProps> = ({ rawData, isError, t }) => {
+  const spaceId = useCurrentSpaceId();
   const [preview, setPreview] = useState<{ url: string; alt: string } | null>(
     null
   );
@@ -755,6 +762,7 @@ const GeminiGallery: React.FC<ToolProps> = ({ rawData, isError, t }) => {
       </div>
       <ImagePreviewModal
         imageUrl={preview?.url ?? null}
+        spaceId={spaceId}
         alt={preview?.alt}
         onClose={() => setPreview(null)}
       />

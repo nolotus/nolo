@@ -33,6 +33,8 @@ export type AgentRuntimeAgentConfig = {
   presence_penalty?: number;
   max_tokens?: number;
   reasoning_effort?: string;
+  enableThinking?: boolean;
+  thinkingBudget?: number;
   /** Explicit tool names from agent record / form config. */
   toolNames?: string[];
   /**

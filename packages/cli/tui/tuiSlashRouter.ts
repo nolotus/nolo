@@ -71,7 +71,7 @@ import { createTrimRequester, resolveTranscribeTrim } from "./transcribePrefligh
 import { readClipboardImage } from "./clipboardImage";
 import type { ClipboardPasteSource } from "./pasteFlow";
 import { themeText, applyDetectedBackground } from "./theme";
-import { detectTerminalBackground } from "./detectBackground";
+import { detectTerminalBackground, resetPtyxisCanvasCache } from "./detectBackground";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   enterAltScreen,
@@ -603,10 +603,13 @@ export async function runSubmittedSlashLine(
     // theme switch in Ghostty et al. is picked up by the internal palette.
     // emitCommandOutput renders the history and repaints the composer with
     // the updated brightness, so no extra repaint is needed here.
+    // A manual refresh must re-read the host canvas, not a cached answer.
+    resetPtyxisCanvasCache();
     const detected = await detectTerminalBackground({
       stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
       stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
       allowSystemFallback: true,
+      trustHostCanvas: true,
     });
     if (detected && applyDetectedBackground(detected)) {
       emitCommandOutput(t("themeRefreshed", detected.brightness));

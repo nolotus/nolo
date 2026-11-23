@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from "../createAgentSchema";
 import type { ReferenceItem } from "app/types";
 
 export type GuidedAgentCapabilityId =
@@ -21,6 +22,8 @@ export type GuidedAgentDraft = {
   provider: string;
   model: string;
   isPublic: boolean;
+  enableThinking?: boolean;
+  reasoning_effort?: ReasoningEffort;
   capabilityIds: GuidedAgentCapabilityId[];
   toolIds: string[];
   references: GuidedAgentReferenceChoice[];

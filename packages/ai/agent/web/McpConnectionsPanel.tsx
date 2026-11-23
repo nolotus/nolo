@@ -442,7 +442,19 @@ export async function discoverMcpConfigurationTools(input: {
   );
 }
 
-export const McpPresetEntries: React.FC<{ LinkComponent: React.ElementType }> = ({
+// The link contract this section relies on: a client-side route target plus the
+// card action styling. Declaring the props (instead of a bare `React.ElementType`)
+// keeps the tag callable — an unparameterized `ElementType` is a union of every
+// intrinsic tag and component, whose props collapse to `never`.
+export type McpPresetLinkProps = {
+  to: string;
+  className?: string;
+  children: React.ReactNode;
+};
+
+export const McpPresetEntries: React.FC<{
+  LinkComponent: React.ComponentType<McpPresetLinkProps>;
+}> = ({
   LinkComponent,
 }) => (
   <>

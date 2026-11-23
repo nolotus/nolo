@@ -1,4 +1,4 @@
-import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
+import { DISPATCH_TIER_RANK, resolveModelTier, type DispatchDifficulty, type ModelTier } from "./dispatchSelectionPolicy";
 import {
   resolveBillingSource,
   type AgentBillingCandidate,
@@ -21,9 +21,11 @@ import {
 } from "./safeAgentSummary";
 import {
   isAgentUnavailableNow,
+  isSubscriptionPeriodWindow,
   resolveAgentAvailability,
   DEFAULT_PROVIDER_RETRY_MS,
 } from "./agentAvailabilityShared";
+import { resolveAgentSelectionPriority } from "./agentSelectionPriority";
 
 export type DiscoveryScope = "preferred" | "public" | "all";
 export { resolveBillingSource };
@@ -177,13 +179,12 @@ function recommendPlanning(
   if (!callerKey) return { ...base, reason: "caller_unknown" };
   if (currentTier === "unknown") return { ...base, reason: "caller_tier_unknown" };
   if (!poolComplete) return { ...base, reason: "pool_incomplete" };
-  const ranks = { easy: 0, normal: 1, complex: 2, extreme: 3 };
   // Tier is weak guidance, not a domain/quality score. Keep domain fit conditional.
   // Availability annotations are advisory; do not turn stale quota/cooldown into gates.
   const higher = agents.filter(a => a.agentKey && a.agentKey !== callerKey
-    && a.modelTier !== "unknown" && ranks[a.modelTier] > ranks[currentTier]);
+    && a.modelTier !== "unknown" && DISPATCH_TIER_RANK[a.modelTier] > DISPATCH_TIER_RANK[currentTier]);
   const free = higher.filter(a => a.requiresPaidApproval === false);
-  free.sort((a, b) => ranks[b.modelTier as keyof typeof ranks] - ranks[a.modelTier as keyof typeof ranks]);
+  free.sort((a, b) => DISPATCH_TIER_RANK[b.modelTier as DispatchDifficulty] - DISPATCH_TIER_RANK[a.modelTier as DispatchDifficulty]);
   const best = free[0];
   if (best) return { ...base, action: "delegate", reason: "higher_suitable_agent",
     agentKey: best.agentKey, recommendedTier: best.modelTier };
@@ -302,7 +303,6 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
  * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
  */
 export interface AgentDiscoveryResult {
-  planningRecommendation: PlanningRecommendation;
   total: number;
   offset?: number;
   limit?: number;
@@ -310,7 +310,32 @@ export interface AgentDiscoveryResult {
   unavailableCount: number;
   availableCount: number;
   agents: (CompactSafeAgentSummary | UltraCompactSafeAgentSummary | SafeAgentSummary)[];
+  planningRecommendation: PlanningRecommendation;
+  tierHints?: Partial<Record<DispatchDifficulty, { agentKey: string; name: string; model: string | null }>>;
   credentialGroups: CredentialGroupSummary[];
+}
+
+/** Infinity leaves candidates without a usable reset signal in existing list order. */
+function nearestFundedSubscriptionReset(agent: SafeAgentSummary, now: number): number {
+  let nearest = Infinity;
+  if (agent.billingSource !== "user_subscription") return nearest;
+  for (const window of agent.quota?.windows ?? []) {
+    const { resetAt, remaining, utilization } = window;
+    if (typeof resetAt === "number" && resetAt > now && resetAt < nearest &&
+        isSubscriptionPeriodWindow(window) &&
+        ((typeof remaining === "number" && remaining > 0) ||
+         (typeof utilization === "number" && utilization < 0.95))) {
+      nearest = resetAt;
+    }
+  }
+  return nearest;
+}
+
+function meteredUnitPrice(agent: SafeAgentSummary): number {
+  if (agent.billingSource === "user_subscription" || agent.billingSource === "owner_subscription") return Infinity;
+  const input = agent.inputPrice !== null && Number.isFinite(agent.inputPrice) ? agent.inputPrice : 0;
+  const output = agent.outputPrice !== null && Number.isFinite(agent.outputPrice) ? agent.outputPrice : 0;
+  return input > 0 || output > 0 ? input + output : Infinity;
 }
 
 /**
@@ -431,6 +456,24 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
         ? pagedAgents.map(toUltraCompactAgentSummary)
         : pagedAgents.map(toCompactAgentSummary);
 
+  const tierHints: NonNullable<AgentDiscoveryResult["tierHints"]> = {};
+  const tierHintPreferences = new Map<DispatchDifficulty, { priority: number; resetAt: number; price: number }>();
+  for (const agent of sortedAgents) {
+    const { agentKey, name, model, modelTier, requiresPaidApproval, availabilityStatus } = agent;
+    if (!agentKey || requiresPaidApproval !== false || modelTier === "unknown" ||
+        availabilityStatus === "quota_exhausted" || availabilityStatus === "rate_limited") continue;
+
+    const priority = resolveAgentSelectionPriority(agent);
+    const current = tierHintPreferences.get(modelTier);
+    // Sorted agents are already grouped by priority; never replace a higher-priority hint.
+    if (current && current.priority !== priority) continue;
+    const resetAt = nearestFundedSubscriptionReset(agent, now);
+    const price = resetAt === Infinity ? meteredUnitPrice(agent) : Infinity;
+    if (current && (resetAt > current.resetAt || (resetAt === current.resetAt && price >= current.price))) continue;
+    tierHintPreferences.set(modelTier, { priority, resetAt, price });
+    tierHints[modelTier] = { agentKey, name, model };
+  }
+
   // 键插入顺序即 JSON.stringify 的输出顺序：把 agents 放在最前，
   // credentialGroups 放到最后（见 AgentDiscoveryResult）。
   return {
@@ -445,6 +488,7 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
       sortedAgents, options.caller,
       !isTruncated && scope === "all" && !hasQuery && !options.poolRestricted,
     ),
+    ...(Object.keys(tierHints).length > 0 ? { tierHints } : {}),
     credentialGroups,
   };
 }

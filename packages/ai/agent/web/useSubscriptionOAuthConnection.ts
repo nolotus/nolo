@@ -10,7 +10,7 @@ export type SubscriptionOAuthConnection =
   | { kind: "loading" }
   | { kind: "not_connected" }
   | { kind: "connecting" }
-  | { kind: "connected"; email?: string; accountId?: string; expiresAt?: number }
+  | { kind: "connected"; provider?: string; email?: string; accountId?: string; expiresAt?: number }
   | { kind: "error"; message: string };
 
 type StatusBody = {
@@ -59,6 +59,7 @@ export function useSubscriptionOAuthConnection(provider: string | null) {
         body.connected
           ? {
               kind: "connected",
+              provider,
               email: body.email,
               accountId: body.accountId,
               expiresAt: body.expiresAt,
@@ -89,6 +90,7 @@ export function useSubscriptionOAuthConnection(provider: string | null) {
       }
       setConnection({
         kind: "connected",
+        provider,
         email: body.email,
         accountId: body.accountId,
         expiresAt: body.expiresAt,

@@ -156,6 +156,13 @@ export type FixedInputController = {
   resumeFromSubprocess(): void;
   resumeFromDialog(): void;
   disable(): void;
+  /**
+   * True after disable(): the controller no longer owns the terminal and every
+   * write-heavy entry point (repaint / exitOutputMode / alt-screen / init /
+   * resume) is a no-op. disable() is terminal and one-way on purpose — the
+   * session teardown has already handed the screen back to the shell.
+   */
+  isDisabled(): boolean;
   getInputLines(): number;
   /** True while a picker/confirm dialog or subprocess owns the screen. */
   isPaused(): boolean;
@@ -190,6 +197,7 @@ export function createNoopFixedInput(): FixedInputController {
     resumeFromSubprocess() {},
     resumeFromDialog() {},
     disable() {},
+    isDisabled: () => true,
     getInputLines: () => 1,
     isPaused: () => false,
     setMouseEnabled() {},
@@ -249,8 +257,14 @@ export function createFixedInput(
   const getColumns = () => (output as { columns?: number }).columns ?? 80;
   let inputLines = 1;
   let paused = false;
+  // disable() 之后本控制器不再拥有终端：会话收尾已经把自动换行/鼠标/滚动区
+  // 交还给 shell 并离开备用屏，此时迟到的异步续体（一个 turn 在 /exit 或
+  // stdin 关闭之后才结算）若继续 repaint / exitOutputMode，就会把 DECSTBM 与
+  // CUP 写进已经不属于自己的屏幕，弄坏用户的 shell。所有写入统一在这里闸掉。
+  let disabled = false;
 
   const write = (seq: string) => {
+    if (disabled) return;
     output.write(seq);
   };
 
@@ -577,6 +591,12 @@ export function createFixedInput(
   };
 
   const repaintAt = (buffer: string, cursorPos?: number, force = false) => {
+    // disable() 之后连外部副作用也一律不做了：旧实现在此之后仍会改写模块级
+    // topReservedRows（setTopReservedRows）并回调 config.onInputLinesChange，
+    // 而该回调通向整帧历史重绘（renderHistoryToOutput）。只闸 write() 会让
+    // 迟到帧变成「历史照画、composer 静默」的半帧残影，比整帧更难判断用户
+    // 历史是否被覆盖，所以闸门放在这个入口最前面。
+    if (disabled) return;
     const { text, lines, cursorCol, cursorRow } = renderInputArea(buffer, cursorPos);
     let linesChanged = false;
     if (lines !== inputLines) {
@@ -683,6 +703,7 @@ export function createFixedInput(
   return {
     active: true,
     init() {
+      if (disabled) return;
       invalidateComposerCache();
       saveCursor();
       setScrollRegion(inputLines);
@@ -713,6 +734,9 @@ export function createFixedInput(
       resetCursorStyle();
     },
     resumeFromSubprocess() {
+      // 禁用是终态：收尾之后不再有「恢复」，否则会留下 paused=false、
+      // active=true 却完全静默的空白 composer（无异常、难排查）。
+      if (disabled) return;
       paused = false;
       invalidateComposerCache();
       resetHistoryFrameDiffCache(output);
@@ -724,6 +748,7 @@ export function createFixedInput(
       write(`\x1b[${scrollBottom};1H\n`);
     },
     resumeFromDialog() {
+      if (disabled) return;
       paused = false;
       invalidateComposerCache();
       resetHistoryFrameDiffCache(output);
@@ -746,7 +771,10 @@ export function createFixedInput(
       // prior content, so the old cursor-positioning write below is dropped
       // (it cleared a row that the main screen already repopulated).
       leaveAltScreen(output);
+      // 兜住顺序：上面的复位序列必须在离开备用屏前真实发出，之后一律静默。
+      disabled = true;
     },
+    isDisabled: () => disabled,
     getInputLines: () => inputLines,
     isPaused: () => paused,
     setMouseEnabled(enabled: boolean) {
@@ -759,6 +787,9 @@ export function createFixedInput(
     },
     isMouseEnabled: () => mouseEnabled,
     setAltScreenEnabled(enabled: boolean) {
+      // 备用屏开关是终端所有权的另一半：disable() 已经离开备用屏后，任何
+      // 再次打开都会把用户丢进一个不再有人收尾的备用缓冲。
+      if (disabled) return;
       if (enabled) {
         enterAltScreen(output);
       } else {

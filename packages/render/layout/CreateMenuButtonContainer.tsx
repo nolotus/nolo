@@ -5,15 +5,22 @@ import React, { lazy, Suspense, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useLocation } from "app/routing";
 import { toast } from "app/utils/toast";
-import { useAppDispatch } from "app/store";
+import { useAppDispatch, useAppSelector } from "app/store";
 import { useHoverCapable } from "app/hooks/useHoverCapable";
 import type { TypedThunkDispatch } from "app/store";
-import { useStore } from "react-redux";
+import { useSelector, useStore } from "react-redux";
+import { selectIdentityUserId } from "identity/selectors";
+import { canManageSpaceCategories } from "chat/web/sidebar/workDialogSpaceGroups";
+import { setWorkSpacePreference } from "chat/web/sidebar/workSpaceUiStore";
+import { useAllMemberSpaces } from "create/space/spaceMembershipStore";
+import { normalizeSpaceId } from "database-engine/spaceLinkAccess";
+import { selectById } from "database/dbSlice";
+import { isTombstoneRecord } from "database/tombstones";
+import { getRouteDescriptor } from "./mainLayoutViewMode";
 import { useCreateMenuOpenCount, incrementCreateMenuOpenCount } from "./createMenuOpenCountStore";
 import { useCreateDialog } from "chat/dialog/useCreateDialog";
 import {
   resolveActiveProjectScope,
-  extractDialogKeyFromLocation,
   linkContentToProject,
 } from "chat/web/projectCreationScope";
 import {
@@ -30,6 +37,7 @@ import { APP_TEMPLATES } from "app/constants/appTemplates";
 import { AppRoutePaths, QUICK_CHAT_CREATE_APP_LAUNCH_SLUG } from "app/constants/routePaths";
 import {
   LuFileText,
+  LuChevronDown,
   LuBot,
   LuGrid2X2,
   LuUpload,
@@ -46,21 +54,22 @@ import { Dialog } from "render/web/ui/modal/Dialog";
 const CreateSpaceForm = lazy(() =>
   import("create/space/CreateSpaceForm").then((module) => ({ default: module.CreateSpaceForm })),
 );
-import { selectCurrentSpace, selectCurrentSpaceId, selectViewMode } from "create/space/spaceCurrentSelectors";
 import { buildRoutableContentPath } from "create/space/contentKeyUtils";
 import { DataType } from "create/types";
 import type { Key } from "react-aria-components";
 import CreateMenuButton from "./CreateMenuButton";
 import { MenuItem } from "render/web/ui/Menu";
-import { MenuSection } from "render/web/ui/Menu";
+import { Header, MenuSection } from "render/web/ui/Menu";
 import {
   type CreateMenuItemId,
   getVisibleCreateMenuItemIds,
   shouldShowCreateMenuLabel,
 } from "./createMenuPolicy";
-import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
-import { useViewMode } from "create/space/spaceCurrentStore";
+
+type SpaceTarget = { id: string; name: string };
+type CreationTarget = { spaceId: string; name: string; projectId: string | null };
+const SPACE_ACTION_GROUPS = [["new-chat"], ["new-page", "new-table"], ["scheduled-task"]] as const;
 
 const RAIL_CREATE_APP_GROUP_ITEM_IDS: readonly CreateMenuItemId[] = [
   "create-app",
@@ -83,7 +92,9 @@ interface CreateMenuButtonContainerProps {
   showLabel?: boolean;
   categoryId?: string;
   title?: string;
+  /** Retained for legacy callers; only a real Dialog binding supplies a project default. */
   projectScopeId?: string | null;
+  scopeSpace?: SpaceTarget;
   onUploadClick?: () => void;
   onOpenMenu?: () => void;
   onOpenChange?: (open: boolean) => void;
@@ -95,7 +106,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   showLabel,
   categoryId,
   title,
-  projectScopeId,
+  scopeSpace,
   onUploadClick,
   onOpenMenu,
   onOpenChange,
@@ -105,38 +116,76 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   const store = useStore();
   const navigate = useNavigate();
   const location = useLocation();
+  const userId = useSelector(selectIdentityUserId);
+  const memberSpaces = useAllMemberSpaces();
 
   const { createNewDialog } = useCreateDialog();
   const isDesktop = typeof document !== "undefined" && document.documentElement.dataset.noloDesktop === "1";
 
   const currentSpace = useCurrentSpaceFromEntity();
-  const currentSpaceId = useCurrentSpaceId();
-  const viewMode = useViewMode();
   const createMenuOpenCount = useCreateMenuOpenCount();
 
   // 仅顶栏在支持 hover 的桌面端走 hover 展开；侧栏 / inline / header 维持点击。
-  const hoverOpen = variant === "topbar" && useHoverCapable();
+  const hoverCapable = useHoverCapable();
+  const hoverOpen = variant === "topbar" && hoverCapable;
 
   const [isOpen, setIsOpen] = useState(false);
+  const [sessionTarget, setSessionTarget] = useState<CreationTarget>();
+  const [showDestinations, setShowDestinations] = useState(false);
   const [isCreatingPage, setIsCreatingPage] = useState(false);
-  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [taskTarget, setTaskTarget] = useState<{ spaceId: string | null } | null>(null);
   const [isCreateSpaceOpen, setIsCreateSpaceOpen] = useState(false);
 
   const { createNewTable, isCreating: isCreatingTable } = useCreateTable({
     onSuccess: () => setIsOpen(false),
   });
 
-  // 无项目时使用当前真实空间规则
-  const effectiveSpaceId = currentSpaceId ?? currentSpace?.id ?? null;
+  const pathname = location.pathname.replace(/\/+$/, "") || "/";
+  const route = getRouteDescriptor(pathname);
+  const dialogKey = route.routeKind === "global" && route.contentKeyType === "dialog"
+    && route.contentKey && !route.contentKey.includes("/") ? route.contentKey : null;
+  const dialog = useAppSelector((state) => dialogKey ? selectById(state, dialogKey) : null);
+  const dialogSpaceId = dialog?.type === DataType.DIALOG && !isTombstoneRecord(dialog)
+    ? dialog.spaceId
+    : null;
+  const isNewChatRoute = pathname === AppRoutePaths.CHAT;
+  // Only NewChatPage consumes the query. Existing dialogs can supply a loaded
+  // record for the exact URL key; the last selected Space is not route context.
+  const chatSpaceId = isNewChatRoute ? new URLSearchParams(location.search).get("spaceId") : null;
+  const routeSpaceId = normalizeSpaceId(route.spaceId ?? chatSpaceId ?? dialogSpaceId);
+  const canCreateIn = (id: string) => {
+    const normalizedId = normalizeSpaceId(id);
+    const record = normalizeSpaceId(currentSpace?.id) === normalizedId ? currentSpace : null;
+    const known = record || memberSpaces.some((space) => normalizeSpaceId(space.spaceId) === normalizedId);
+    return Boolean(known && canManageSpaceCategories({ spaceId: id, userId, memberSpaces, record }));
+  };
+  const writableSpaces = new Map<string, SpaceTarget>();
+  for (const space of memberSpaces) {
+    const id = normalizeSpaceId(space.spaceId);
+    if (id && canCreateIn(id)) writableSpaces.set(id, { id: space.spaceId, name: space.spaceName || space.spaceId });
+  }
+  const contextSpace = routeSpaceId && canCreateIn(routeSpaceId)
+    ? writableSpaces.get(routeSpaceId) ?? { id: routeSpaceId, name: currentSpace?.name || routeSpaceId }
+    : null;
+  if (contextSpace && routeSpaceId) writableSpaces.set(routeSpaceId, contextSpace);
 
-  const sidebarScopedSpaceId =
-    variant === "sidebar"
-      ? viewMode === "all"
-        ? null
-        : currentSpaceId ?? currentSpace?.id ?? null
-      : undefined;
-
-  const pageCreateSpaceId = effectiveSpaceId;
+  const outsideSpace = { spaceId: "", name: t("createOutsideSpace", "空间外"), projectId: null };
+  const scopedTarget = scopeSpace && { spaceId: scopeSpace.id, name: scopeSpace.name, projectId: null };
+  const getDefaultTarget = (): CreationTarget => {
+    if (dialogKey) {
+      const project = resolveActiveProjectScope({ location: { pathname, search: "" } });
+      if (project) {
+        const spaceId = project.spaceId ?? "";
+        const spaceName = spaceId ? writableSpaces.get(normalizeSpaceId(spaceId) ?? "")?.name ?? spaceId : outsideSpace.name;
+        return { spaceId, name: `${spaceName} · ${project.name}`, projectId: project.id };
+      }
+    }
+    if (contextSpace) return { spaceId: contextSpace.id, name: contextSpace.name, projectId: null };
+    return outsideSpace;
+  };
+  const targetForMenu = scopedTarget ?? sessionTarget ?? outsideSpace;
+  const canUseTarget = targetForMenu.spaceId ? canCreateIn(targetForMenu.spaceId) : !scopeSpace;
+  const targetCategoryId = categoryId && routeSpaceId && routeSpaceId === normalizeSpaceId(targetForMenu.spaceId) ? categoryId : undefined;
 
   // 计数副作用只在 count=true 分支触发；hover 预览 count=false 不递增
   // createMenuOpenCount（该计数超阈值会让「新建」引导标签永久消失）。
@@ -144,6 +193,10 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
   // 避免在渲染体内用工厂调 hook（违反 hooks 规则）。
   const applyOpenChange = useCallback(
     (open: boolean, count: boolean) => {
+      if (open) {
+        setSessionTarget(scopeSpace ? undefined : getDefaultTarget());
+        setShowDestinations(false);
+      }
       setIsOpen(open);
       onOpenChange?.(open);
       if (open && count) {
@@ -151,7 +204,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         if (onOpenMenu) onOpenMenu();
       }
     },
-    [onOpenChange, onOpenMenu]
+    [getDefaultTarget, scopeSpace, onOpenChange, onOpenMenu]
   );
 
   const handleOpenChange = useCallback(
@@ -191,39 +244,27 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     [t],
   );
 
-  /**
-   * 解析本次创建的落点：项目 + space。
-   * - 项目已被删除（或 storage 不可用）时返回 null，调用方必须在创建前中止，
-   *   否则会留下既无法关联、也无法回收的无主数据。
-   * - 项目没有 space 时，spaceId 是空串（显式「无 space」），
-   *   不能传 undefined——undefined 会被 action 回退成当前选中的 space。
-   */
-  const resolveCreationTarget = useCallback(
-    (fallbackSpaceId?: string | null) => {
-      // Only an existing Dialog binding retains Project compatibility. Retired Home
-      // queries and sidebar preferences must never retarget ordinary Space creation.
-      const dialogKey = extractDialogKeyFromLocation(location.pathname, location.search);
-      const project = dialogKey ? resolveActiveProjectScope({ location }) : null;
+  const resolveCreationTarget = () => {
+    if (!canUseTarget) return null;
+    if (targetForMenu.projectId) {
       let storage: Pick<Storage, "getItem"> | null = null;
-      try { storage = typeof window !== "undefined" ? window.localStorage : null; } catch { /* unavailable */ }
-      const target = resolveProjectCreationTarget({
-        storage,
-        project,
-        fallbackSpaceId,
-      });
-      if (!target.ok) {
-        toast.error(
-          t("chat:projectMissingForCreate", "项目已不存在，未创建任何内容"),
-        );
+      try { storage = window.localStorage; } catch { /* unavailable */ }
+      const project = resolveProjectCreationTarget({ storage, project: null, requestedProjectId: targetForMenu.projectId });
+      // A removed or retargeted project cannot change the displayed destination mid-session.
+      if (!project.ok || project.spaceId !== targetForMenu.spaceId) {
+        toast.error(t("chat:projectMissingForCreate", "项目已不存在，未创建任何内容"));
         return null;
       }
-      return target;
-    },
-    [location, projectScopeId, t],
-  );
+    }
+    return targetForMenu;
+  };
 
-  const createNewPageAndClose = useCallback(async () => {
-    const target = resolveCreationTarget(pageCreateSpaceId);
+  const revealCreatedGroup = (spaceId: string) => {
+    if (userId) setWorkSpacePreference(userId, "spaces", JSON.stringify(normalizeSpaceId(spaceId)), true);
+  };
+
+  const createNewPageAndClose = async () => {
+    const target = resolveCreationTarget();
     // 项目已被删除：什么都不创建，避免留下无主数据。
     if (!target) return;
     const projectId = target.projectId;
@@ -232,11 +273,12 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       const key = await createDocState(
         {
           spaceId: target.spaceId,
-          categoryId,
+          categoryId: targetCategoryId,
         },
         { dispatch, getState: store.getState }
       );
       if (!key) throw new Error("Unexpected createDoc result");
+      revealCreatedGroup(target.spaceId);
       if (projectId) {
         const link = tryLinkToProject(projectId, () =>
           linkContentToProject(window.localStorage, projectId, key),
@@ -257,136 +299,118 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
     } finally {
       setIsCreatingPage(false);
     }
-  }, [closeMenu, dispatch, navigate, reportUnlinked, resolveCreationTarget, categoryId, t, store]);
+  };
 
   const handleManualCreateAgent = useCallback(() => {
     closeMenu();
     navigate("/create/agent");
   }, [closeMenu, navigate]);
 
-  const handleCreateTask = useCallback(() => {
-    closeMenu();
-    setIsCreateTaskOpen(true);
-  }, [closeMenu]);
-
   const handleUploadClick = useCallback(() => {
     closeMenu();
     onUploadClick?.();
   }, [closeMenu, onUploadClick]);
 
-  const handleAction = useCallback(
-    (key: Key) => {
-      const strKey = String(key);
-      if (strKey === "create-app") {
+  const handleAction = (key: Key) => {
+    const strKey = String(key);
+    if (strKey === "create-app") {
+      closeMenu();
+      navigate(`${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_LAUNCH_SLUG}`);
+      return;
+    }
+    if (strKey.startsWith("create-app-template-")) {
+      const templateId = strKey.slice("create-app-template-".length);
+      const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
+      if (template) {
         closeMenu();
-        navigate(`${AppRoutePaths.CHAT}?launch=${QUICK_CHAT_CREATE_APP_LAUNCH_SLUG}`);
+        navigate(`${AppRoutePaths.CHAT}?launch=${template.launchSlug}`);
         return;
       }
-      if (strKey.startsWith("create-app-template-")) {
-        const templateId = strKey.slice("create-app-template-".length);
-        const template = APP_TEMPLATES.find((tmpl) => tmpl.id === templateId);
-        if (template) {
-          closeMenu();
-          navigate(`${AppRoutePaths.CHAT}?launch=${template.launchSlug}`);
-          return;
-        }
-      }
+    }
 
-      switch (key) {
-        case "new-chat": {
-          // 创建时同步快照
-          const target = resolveCreationTarget(sidebarScopedSpaceId);
-          // 项目已被删除：什么都不创建，避免留下无主数据。
-          if (!target) break;
-          const projectId = target.projectId;
-          closeMenu();
-          void createNewDialog({
-            agents: [noloAgentId],
-            spaceId: target.spaceId,
-            onCreated: ({ dbKey }) => {
-              if (!projectId) return;
-              const link = tryLinkToProject(projectId, () => {
-                // 关联前再确认一次：项目可能在创建期间刚好被删除。
-                if (!projectStillExists(window.localStorage, projectId)) {
-                  throw new Error(`项目不存在，关联失败: ${projectId}`);
-                }
-                bindDialogToProject(window.localStorage, dbKey, projectId);
-              });
-              // 关联失败：对话已创建，继续导航并明确告知用户。
-              if (!link.linked) reportUnlinked(link.error);
-            },
-          }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
-          break;
-        }
-        case "create-space":
-          // 新建空间不依赖当前选中的 space：表单自行创建并切换到新空间。
-          closeMenu();
-          setIsCreateSpaceOpen(true);
-          break;
-        case "new-project":
-          closeMenu();
-          break;
-        case "new-page":
-          void createNewPageAndClose();
-          break;
-        case "new-table": {
-          const target = resolveCreationTarget(sidebarScopedSpaceId);
-          // 项目已被删除：什么都不创建，避免留下无主数据。
-          if (!target) break;
-          const projectId = target.projectId;
-          createNewTable({
-            spaceId: target.spaceId,
-            categoryId,
-            onCreated: (dbKey) => {
-              if (!projectId) return;
-              const link = tryLinkToProject(projectId, () =>
-                linkContentToProject(window.localStorage, projectId, dbKey),
-              );
-              // 关联失败：表格已创建，useCreateTable 仍会导航过去，并明确告知用户。
-              if (!link.linked) reportUnlinked(link.error);
-            },
-          });
-          break;
-        }
-        case "create-agent-manual":
-          handleManualCreateAgent();
-          break;
-        case "scheduled-task":
-          handleCreateTask();
-          break;
-        case "upload-file":
-          handleUploadClick();
-          break;
-        default:
-          break;
+    switch (key) {
+      case "new-chat": {
+        // 创建时同步快照
+        const target = resolveCreationTarget();
+        // 项目已被删除：什么都不创建，避免留下无主数据。
+        if (!target) break;
+        const projectId = target.projectId;
+        closeMenu();
+        void createNewDialog({
+          agents: [noloAgentId],
+          spaceId: target.spaceId,
+          onCreated: ({ dbKey, spaceId }) => {
+            revealCreatedGroup(spaceId ?? target.spaceId);
+            if (!projectId) return;
+            const link = tryLinkToProject(projectId, () => {
+              // 关联前再确认一次：项目可能在创建期间刚好被删除。
+              if (!projectStillExists(window.localStorage, projectId)) {
+                throw new Error(`项目不存在，关联失败: ${projectId}`);
+              }
+              bindDialogToProject(window.localStorage, dbKey, projectId);
+            });
+            // 关联失败：对话已创建，继续导航并明确告知用户。
+            if (!link.linked) reportUnlinked(link.error);
+          },
+        }).catch(() => toast.error(t("chat:createDialogFailed", "新建对话失败")));
+        break;
       }
-    },
-    [
-      createNewPageAndClose,
-      createNewTable,
-      closeMenu,
-      createNewDialog,
-      t,
-      sidebarScopedSpaceId,
-      categoryId,
-      handleManualCreateAgent,
-      handleCreateTask,
-      handleUploadClick,
-      navigate,
-      location,
-      projectScopeId,
-      resolveCreationTarget,
-      reportUnlinked,
-    ]
-  );
+      case "create-space":
+        // 新建空间不依赖当前选中的 space：表单自行创建并切换到新空间。
+        closeMenu();
+        setIsCreateSpaceOpen(true);
+        break;
+      case "new-project":
+        closeMenu();
+        break;
+      case "new-page":
+        void createNewPageAndClose();
+        break;
+      case "new-table": {
+        const target = resolveCreationTarget();
+        // 项目已被删除：什么都不创建，避免留下无主数据。
+        if (!target) break;
+        const projectId = target.projectId;
+        createNewTable({
+          spaceId: target.spaceId,
+          categoryId: targetCategoryId,
+          onCreated: (dbKey) => {
+            revealCreatedGroup(target.spaceId);
+            if (!projectId) return;
+            const link = tryLinkToProject(projectId, () =>
+              linkContentToProject(window.localStorage, projectId, dbKey),
+            );
+            // 关联失败：表格已创建，useCreateTable 仍会导航过去，并明确告知用户。
+            if (!link.linked) reportUnlinked(link.error);
+          },
+        });
+        break;
+      }
+      case "create-agent-manual":
+        handleManualCreateAgent();
+        break;
+      case "scheduled-task": {
+        const target = resolveCreationTarget();
+        if (!target) break;
+        setTaskTarget({ spaceId: target.spaceId || null });
+        closeMenu();
+        break;
+      }
+      case "upload-file":
+        handleUploadClick();
+        break;
+      default:
+        break;
+    }
+  };
 
   const renderMenuItem = (id: CreateMenuItemId): React.ReactNode => {
     switch (id) {
       case "new-chat": {
         const label = t("chat:newChat", "新对话");
         return (
-          <MenuItem key={id} id={id} textValue={label}>
-            {isRail ? (
+          <MenuItem key={id} id={id} textValue={label} isDisabled={!canUseTarget}>
+            {isRail || scopeSpace ? (
               <LuMessageCirclePlus size={16} aria-hidden="true" />
             ) : (
               <span aria-hidden="true">✦</span>
@@ -417,7 +441,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
             key={id}
             id={id}
             textValue={label}
-            isDisabled={isCreatingPage}
+            isDisabled={isCreatingPage || !canUseTarget}
           >
             {isCreatingPage ? (
               <div className="spinner" aria-hidden="true" />
@@ -437,7 +461,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
             key={id}
             id={id}
             textValue={label}
-            isDisabled={isCreatingTable}
+            isDisabled={isCreatingTable || !canUseTarget}
           >
             {isCreatingTable ? (
               <div className="spinner" aria-hidden="true" />
@@ -464,7 +488,7 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       case "scheduled-task": {
         const label = t("scheduled", "任务");
         return (
-          <MenuItem key={id} id={id} textValue={label}>
+          <MenuItem key={id} id={id} textValue={label} isDisabled={!canUseTarget}>
             <LuCalendarClock size={16} aria-hidden="true" />
             <span slot="label" title={label}>
               {label}
@@ -548,6 +572,41 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
       <>{visibleItemIds.map(renderMenuItem)}</>
     );
 
+  const targetLabel = `${t("createDestination", "新建到")}：${targetForMenu.name}`;
+  const destination = scopeSpace ? (
+    <>
+      {SPACE_ACTION_GROUPS.map((group, index) => (
+        <MenuSection key={group[0]} className="create-menu__section">
+          {index === 0 && <Header className="create-menu__destination" title={targetLabel}>{targetLabel}</Header>}
+          {group.map(renderMenuItem)}
+        </MenuSection>
+      ))}
+    </>
+  ) : (
+    <>
+      <MenuItem id="toggle-destinations" textValue={targetLabel} shouldCloseOnSelect={false}
+        onAction={() => setShowDestinations((show) => !show)}>
+        <span slot="label" title={targetLabel}>{targetLabel}</span>
+        <LuChevronDown className="app-menu-chevron" size={16} aria-hidden="true" />
+      </MenuItem>
+      {showDestinations && (
+        <MenuSection aria-label={t("createDestination", "新建到")} selectionMode="single"
+          selectedKeys={targetForMenu.projectId ? [] : [`destination:${targetForMenu.spaceId}`]}>
+          {[outsideSpace, ...Array.from(writableSpaces.values(), ({ id, name }) => ({ spaceId: id, name, projectId: null }))].map((target) => (
+            <MenuItem
+              id={`destination:${target.spaceId}`}
+              key={target.spaceId}
+              shouldCloseOnSelect={false}
+              onAction={() => setSessionTarget(target)}
+            >
+              {target.name}
+            </MenuItem>
+          ))}
+        </MenuSection>
+      )}
+    </>
+  );
+
   return (
     <>
       <CreateMenuButton
@@ -562,12 +621,13 @@ const CreateMenuButtonContainer: React.FC<CreateMenuButtonContainerProps> = ({
         onAction={handleAction}
         hoverOpen={hoverOpen}
       >
-        {menuItems}
+        {destination}
+        {!scopeSpace && menuItems}
       </CreateMenuButton>
       <CreateTaskModal
-        isOpen={isCreateTaskOpen}
-        onClose={() => setIsCreateTaskOpen(false)}
-        spaceId={sidebarScopedSpaceId}
+        isOpen={taskTarget !== null && (!taskTarget.spaceId || canCreateIn(taskTarget.spaceId))}
+        onClose={() => setTaskTarget(null)}
+        spaceId={taskTarget?.spaceId}
       />
       {isCreateSpaceOpen && <Dialog
         isOpen={isCreateSpaceOpen}

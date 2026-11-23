@@ -953,6 +953,7 @@ const SpaceContent: React.FC = () => {
             </section>
           )}
           <SpaceContentList
+            spaceId={spaceId}
             items={items}
             loading={spaceLoading}
             viewMode={viewMode}
@@ -971,6 +972,7 @@ const SpaceContent: React.FC = () => {
         </div>
 
         <SpaceContentOverlays
+          spaceId={spaceId}
           showBackToTop={showBackToTop}
           onBackToTop={handleBackToTop}
           t={t}

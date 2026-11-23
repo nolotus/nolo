@@ -1,4 +1,6 @@
 import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
+import type { ReasoningEffort } from "../../ai/agent/createAgentSchema";
+import { withReasoningEffortOverride, resolveEffectiveReasoningEffortOverride } from "../../ai/agent/defaultReasoningEffort";
 import { isContextOverflowText } from "../../ai/chat/parseApiError";
 import { contextRefusalDiagnostics, describeContextRefusal } from "./contextRefusal";
 import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass";
@@ -375,6 +377,37 @@ function wrapLoadAgentConfigWithModelOverride(
         agentRef,
         applyModelLayerOverride(baseRecord, override),
       );
+    },
+  };
+}
+
+/**
+ * 本次 run 的推理档覆盖（`--reasoning-effort`）：与 modelOverride 同源同形——
+ * 读配置时**在内存里**替换有效 `reasoning_effort`，不写回磁盘/DB 的 agent 记录。
+ *
+ * 双保险：真正覆盖前再核对一次记录的真实 provider/model 与已显式档位（见
+ * `resolveEffectiveReasoningEffortOverride`）。派发与子进程启动之间配置可能已变，
+ * 此时宁可沿用记录里的值，也不盲目硬覆盖用户固定档位或给不支持该档的模型塞参数。
+ */
+function wrapLoadAgentConfigWithReasoningEffortOverride(
+  adapter: AgentRuntimeHostAdapter,
+  targetAgentKey: string,
+  override: ReasoningEffort,
+): AgentRuntimeHostAdapter {
+  return {
+    ...adapter,
+    loadAgentConfig: async (agentRef: string) => {
+      const config = await adapter.loadAgentConfig(agentRef);
+      if (!config || agentRef !== targetAgentKey) return config;
+      const effective = resolveEffectiveReasoningEffortOverride({
+        override,
+        provider: config.provider,
+        model: config.model,
+        recordReasoningEffort: config.reasoning_effort,
+      });
+      // 覆盖逻辑（含 rawRecord 一并覆盖）的真值在 ai/agent/defaultReasoningEffort：
+      // 这里只负责「读配置时套用、不写回记录」。
+      return withReasoningEffortOverride(config, effective);
     },
   };
 }
@@ -2446,6 +2479,15 @@ async function executeLocalAgentTurnForCliWithAdapter(
             options.modelOverride,
           )
         : resolvedBaseAdapter;
+    // 推理档覆盖在模型层覆盖之后应用：本次 run 显式声明的档位优先于记录里的值，
+    // 但两者都只在内存生效（见 wrapLoadAgentConfigWithReasoningEffortOverride）。
+    if (adapter && options.reasoningEffortOverride) {
+      adapter = wrapLoadAgentConfigWithReasoningEffortOverride(
+        adapter,
+        options.agentKey,
+        options.reasoningEffortOverride,
+      );
+    }
     if (adapter) adapter = applyEphemeralIfRequested(options, adapter);
     if (adapter && options.imageUrls?.length) {
       const imageAdapter = adapter;

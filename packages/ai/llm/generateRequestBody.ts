@@ -8,6 +8,7 @@ import {
   resolveAgentCallPlan,
   resolveClientWire,
 } from "../../agent-runtime/agentCallPlan";
+import { usesCodexDeveloperPrefix } from "../../agent-runtime/codexOAuthPure";
 import { stablePromptCacheKey } from "../../agent-runtime/promptCacheKey";
 import { Contexts } from "../types";
 import { getModelConfig } from "./providers";
@@ -204,9 +205,8 @@ export const generateRequestBody = ({
   // 1) Response API 走新版 /v1/responses。用描述符的 client wire 判定，
   //    而不是 isResponseAPIModel —— 后者只看 provider/model，对 codex
   //    (apiKeyRef:chatgpt) 会误判为 responses 而发 input（F1 bug）。
-  const clientWire = resolveClientWire(
-    resolveAgentCallPlan(agentConfigForRequest as any, {})
-  );
+  const plan = resolveAgentCallPlan(agentConfigForRequest as any, {});
+  const clientWire = resolveClientWire(plan);
   if (clientWire === "responses") {
     const body = generateResponseRequestBody(
       agentConfigForRequest,
@@ -231,13 +231,17 @@ export const generateRequestBody = ({
   }
 
   // 2) 其余走老版 chat/completions
+  const codexOAuth = plan.authMethod.kind === "oauth" && plan.authMethod.ref === "chatgpt";
   const baseBody = generateOpenAIRequestBody(
     agentConfigForRequest,
     provider,
     messages,
     contexts,
     stableMessages,
-    prependSystemPrompt
+    prependSystemPrompt,
+    undefined,
+    codexOAuth && usesCodexDeveloperPrefix(agentConfigForRequest, agentConfigForRequest.model),
+    codexOAuth,
   );
 
   // 在基础请求体上注入图像相关配置（如果模型 + Agent 都支持/需要）

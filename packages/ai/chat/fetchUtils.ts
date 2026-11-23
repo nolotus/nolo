@@ -1,7 +1,8 @@
+import { buildProxyPayload } from "./buildProxyPayload";
+import { isAgentCredentialShared } from "../../shared/providerSecrets";
 // 文件路径: ai/chat/fetchUtils.ts
 import { Agent } from "app/types";
 import { toErrorMessage } from "core/errorMessage";
-import { asOptionalTrimmedString } from "core/optionalString";
 
 import { API_ENDPOINTS } from "database/config";
 import { buildProviderAuthHeaders } from "../../agent-runtime/providerResolution";
@@ -39,37 +40,6 @@ interface FetchParams {
   }) => void;
 }
 
-const buildProxyPayload = (
-  bodyData: BodyData,
-  api: string,
-  agentConfig: Agent,
-  dialogId?: string
-) => {
-  const apiSource =
-    agentConfig.apiSource === "custom" || agentConfig.apiSource === "cli"
-      ? agentConfig.apiSource
-      : undefined;
-  const provider =
-    bodyData.provider ||
-    agentConfig.provider ||
-    (apiSource === "custom" ? "custom" : undefined);
-  // Server-proxy KEY: only transient/raw apiKey. Never hydrate from local broker.
-  const apiKey = asOptionalTrimmedString(agentConfig.apiKey);
-
-  return {
-    ...bodyData,
-    url: api,
-    provider,
-    agentKey: agentConfig.dbKey,
-    ...(asOptionalTrimmedString(dialogId)
-      ? { dialogId: asOptionalTrimmedString(dialogId) }
-      : {}),
-    ...(apiSource ? { apiSource } : {}),
-    ...((agentConfig as any).apiKeyHeader ? { apiKeyHeader: (agentConfig as any).apiKeyHeader } : {}),
-    KEY: apiKey,
-  };
-};
-
 const fetchDirectly = async (params: FetchParams): Promise<Response> => {
   const { api, agentConfig, bodyData, signal, currentServer, token, dialogId } = params;
   try {
@@ -77,7 +47,7 @@ const fetchDirectly = async (params: FetchParams): Promise<Response> => {
       syncFetcher: currentServer && token
         ? (ref) => fetchSyncedCredential({ currentServer, authToken: token }, ref)
         : undefined,
-      providerSecretFetcher: currentServer && token
+      providerSecretFetcher: isAgentCredentialShared(agentConfig) && currentServer && token
         ? async (ref) => {
             const presetId = ref.startsWith("provider-key:") ? ref.slice("provider-key:".length) : ref;
             const local = getLocalProviderSecret(presetId);
@@ -173,17 +143,28 @@ export const formatFriendlyNetworkErrorMessage = (error: unknown): string => {
 export const performFetchRequest = async (
   params: FetchParams
 ): Promise<Response> => {
+  let direct = false;
   try {
     // Preserve the old shouldUseServerProxy(agentConfig, bodyData.provider)
     // request-provider override semantics.
-    const planConfig = {
-      ...params.agentConfig,
-      provider: params.bodyData.provider || params.agentConfig.provider,
-    };
-    return resolveAgentCallPlan(planConfig as any, {}).transport ===
-      "server-proxy"
-      ? await fetchWithServerProxy(params)
-      : await fetchDirectly(params);
+    const { agentConfig, bodyData } = params;
+    const credentialRef = "credentialRef" in agentConfig && typeof agentConfig.credentialRef === "string"
+      ? agentConfig.credentialRef : undefined;
+    const plan = resolveAgentCallPlan({
+      key: "",
+      provider: bodyData.provider || agentConfig.provider,
+      model: agentConfig.model,
+      apiSource: agentConfig.apiSource,
+      cliProvider: agentConfig.cliProvider ?? undefined,
+      customProviderUrl: agentConfig.customProviderUrl,
+      apiKey: agentConfig.apiKey ?? undefined,
+      apiKeyRef: agentConfig.apiKeyRef,
+      credentialRef,
+      credentialSynced: agentConfig.credentialSynced,
+      useServerProxy: agentConfig.useServerProxy,
+    }, undefined, { canResolveLocalCredential: true });
+    direct = plan.transport === "direct";
+    return direct ? await fetchDirectly(params) : await fetchWithServerProxy(params);
   } catch (error: any) {
     if (
       error instanceof DirectApiKeyResolutionError ||
@@ -192,8 +173,12 @@ export const performFetchRequest = async (
       throw error;
     }
     console.error("[performFetchRequest] 请求过程中发生错误:", error);
-    if (params.preserveStructuredError) throw error;
-    const friendlyMsg = formatFriendlyNetworkErrorMessage(error);
+    if (params.preserveStructuredError || params.signal?.aborted || error?.name === "AbortError") throw error;
+    const rawMessage = toErrorMessage(error);
+    const friendlyMsg = direct && /failed to fetch|networkerror|network error|load failed/i.test(rawMessage) &&
+      !(typeof navigator !== "undefined" && navigator.onLine === false)
+      ? "网络请求失败：浏览器直连服务商时，可能被服务商的跨域限制（CORS）拦截。"
+      : formatFriendlyNetworkErrorMessage(error);
     throw new Error(
       friendlyMsg.startsWith("网络请求失败")
         ? friendlyMsg

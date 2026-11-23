@@ -132,6 +132,95 @@ export function isTerminalDevice(stream: unknown): boolean {
   return stream instanceof ReadStream;
 }
 
+/** Strip the single quotes `gsettings get` wraps string values in. */
+function readGsettingsValue(raw: string | null): string {
+  return (raw ?? "")
+    .trim()
+    .replace(/^'([\s\S]*)'$/, "$1")
+    .trim()
+    .toLowerCase();
+}
+
+/** Read one gsettings key; null when the binary, schema or key is missing. */
+type GsettingsReader = (schema: string, key: string) => string | null;
+
+const readGsettingsKey: GsettingsReader = (schema, key) => {
+  try {
+    return execFileSync("gsettings", ["get", schema, key], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 200,
+    }).trim();
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * GNOME `org.gnome.desktop.interface color-scheme` enum → brightness.
+ *
+ * `default` is GNOME's own spelling of "no preference", i.e. the light theme.
+ * Matching only the words dark/light made the Linux fallback return null on a
+ * stock GNOME install, which is why it never corrected a wrong guess.
+ */
+export function parseGnomeColorScheme(
+  value: string | null | undefined,
+): TuiBrightness | null {
+  const scheme = readGsettingsValue(value ?? null);
+  if (scheme === "prefer-dark") return "dark";
+  if (scheme === "prefer-light" || scheme === "default") return "light";
+  return null;
+}
+
+/** Ptyxis exports PTYXIS_VERSION / PTYXIS_PROFILE to its children. */
+export function isPtyxisTerminal(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return Boolean(
+    (env.PTYXIS_VERSION ?? "").trim() || (env.PTYXIS_PROFILE ?? "").trim(),
+  );
+}
+
+/**
+ * Canvas brightness of a Ptyxis terminal, or null when this is not Ptyxis.
+ *
+ * Ptyxis paints its light theme above VTE instead of through VTE's palette, so
+ * VTE keeps answering `rgb:0000/0000/0000` for OSC 11 and `997;1` for the
+ * color-scheme query on a white canvas. Measured 2026-11-22 (VTE 0.84, Ptyxis
+ * 50.1, GNOME light): replies identical at 0 s / 1 s / 3 s / 6 s after mount,
+ * so this is not a cold-start race — the terminal's self-report is simply not
+ * the canvas. The canvas follows Ptyxis' own `interface-style`, and when that
+ * says `system` it follows the desktop scheme.
+ *
+ * Cached for the process lifetime: the polled OSC 11 path must not fork
+ * gsettings every few seconds. `resetPtyxisCanvasCache` drops it when the
+ * terminal reports a color-scheme change.
+ */
+let ptyxisCanvasCache: { value: TuiBrightness | null } | null = null;
+
+export function resetPtyxisCanvasCache(): void {
+  ptyxisCanvasCache = null;
+}
+
+export function detectPtyxisCanvasBrightness(
+  env: Record<string, string | undefined> = process.env,
+  read: GsettingsReader = readGsettingsKey,
+): TuiBrightness | null {
+  if (ptyxisCanvasCache) return ptyxisCanvasCache.value;
+  if (!isPtyxisTerminal(env)) return null;
+  const style = readGsettingsValue(read("org.gnome.Ptyxis", "interface-style"));
+  const value =
+    style === "light"
+      ? "light"
+      : style === "dark"
+        ? "dark"
+        : parseGnomeColorScheme(
+            read("org.gnome.desktop.interface", "color-scheme"),
+          );
+  ptyxisCanvasCache = { value };
+  return value;
+}
+
 export type DetectTerminalBackgroundArgs = {
   stdin?: Stdin;
   stdout?: NodeJS.WritableStream & { isTTY?: boolean };
@@ -140,6 +229,17 @@ export type DetectTerminalBackgroundArgs = {
   preserveInput?: boolean;
   /** Override the terminal-device check. Tests use this to drive a fake pair. */
   isTerminal?: (stream: unknown) => boolean;
+  /** Environment to inspect for host identity (defaults to `process.env`). */
+  env?: Record<string, string | undefined>;
+  /**
+   * Let a host that disagrees with its terminal decide the canvas (see
+   * detectPtyxisCanvasBrightness). Opt-in because the probe's own contract —
+   * "ask the terminal" — stays the default for callers and tests that drive a
+   * fake terminal pair.
+   */
+  trustHostCanvas?: boolean;
+  /** Test seam for the gsettings reads behind trustHostCanvas. */
+  readGsettings?: GsettingsReader;
   /**
    * When the terminal probe returns null (silent / non-TTY), fall back to the
    * system dark/light preference (reads macOS `defaults` / Linux `gsettings`).
@@ -153,6 +253,12 @@ export type DetectTerminalBackgroundArgs = {
 export type DetectedTerminalBackground = {
   brightness: TuiBrightness;
   hex: string;
+  /**
+   * True when the brightness comes from the terminal itself or its host
+   * windowing layer (e.g. Ptyxis `interface-style` or DECSET 2031 push)
+   * without an exact RGB hex, as opposed to an OS-level appearance guess.
+   */
+  trustedCanvas?: boolean;
 };
 
 /**
@@ -242,9 +348,22 @@ async function probeTerminalBackground(
 export async function detectTerminalBackground(
   args: DetectTerminalBackgroundArgs = {},
 ): Promise<DetectedTerminalBackground | null> {
+  // A host that reports a canvas its terminal disagrees with must be asked the
+  // host, not the terminal: see detectPtyxisCanvasBrightness. `hex` stays empty
+  // because the host reports a scheme, not a color — the palette's own base hex
+  // then applies instead of blending surfaces toward a made-up black.
+  const hostCanvas = args.trustHostCanvas
+    ? detectPtyxisCanvasBrightness(
+        args.env ?? process.env,
+        args.readGsettings ?? readGsettingsKey,
+      )
+    : null;
+  if (hostCanvas) return { brightness: hostCanvas, hex: "", trustedCanvas: true };
   const r = await probeTerminalBackground(args);
   if (r || !args.allowSystemFallback) return r;
-  const brightness = detectSystemBrightness(process.env, { allowSubprocess: true });
+  const brightness = detectSystemBrightness(args.env ?? process.env, {
+    allowSubprocess: true,
+  });
   return brightness ? { brightness, hex: "" } : null;
 }
 
@@ -308,6 +427,8 @@ export function detectSystemBrightness(
           timeout: 200,
         },
       ).trim();
+      const scheme = parseGnomeColorScheme(out);
+      if (scheme) return scheme;
       const val = out.toLowerCase();
       if (/(?:^|[\s\-_:])dark(?:$|[\s\-_:])/i.test(val)) return "dark";
       if (/(?:^|[\s\-_:])light(?:$|[\s\-_:])/i.test(val)) return "light";

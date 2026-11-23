@@ -1079,6 +1079,8 @@ export const sendOpenAICompletionsRequest = async ({
     buildFinalCompletionsRequestBody(bodyData, agentConfig, disableToolsForThisRequest),
     {
       shouldInline: shouldInlineImageUrlsForAgent(agentConfig),
+      serverUrl: selectCurrentServer(getState() as RootState),
+      signal,
     },
   );
 

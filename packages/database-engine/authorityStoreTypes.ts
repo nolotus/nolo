@@ -63,6 +63,8 @@ export interface AuthorityStore {
       | { ok: false; error: { code: string; message: string; retryable?: boolean } }
     >
   >;
+  /** Local store only: guard a publication read + single batch against intervening writes. */
+  runPublicationBatch?<T>(task: (store: Pick<AuthorityStore, "get" | "batchWrite">) => Promise<T>): Promise<T>;
   put(key: string, value: unknown): Promise<void>;
   del(key: string): Promise<void>;
   batchWrite(ops: AuthorityBatchOperation[]): Promise<void>;

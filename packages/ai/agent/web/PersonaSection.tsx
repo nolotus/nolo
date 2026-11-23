@@ -1,3 +1,4 @@
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
 /**
  * 人设与提示词区——从 BasicInfoTab 重构。
  *
@@ -41,6 +42,7 @@ interface PersonaSectionProps {
   values: FormData;
   set: (name: string, value: any) => void;
   readOnly?: boolean;
+  afterIdentity?: React.ReactNode;
 }
 
 const PersonaSection: React.FC<PersonaSectionProps> = ({
@@ -48,6 +50,7 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
   values,
   set,
   readOnly,
+  afterIdentity,
 }) => {
   const { t } = useTranslation("ai");
   const dispatch = useAppDispatch();
@@ -55,6 +58,7 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
   const server = useAppSelector(selectCurrentServer);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const avatarMediaSrc = useWebMediaSrc(avatarPreview);
 
   const avatarFileId = values.avatarFileId as string | undefined;
 
@@ -101,15 +105,16 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
   };
 
   return (
-    <div className="persona-section">
+    <div className={`persona-section${afterIdentity ? " persona-section--edit" : ""}`}>
+      {afterIdentity && <h3 className="adv-settings__title">{t("editRoleModel.identity", "身份")}</h3>}
       {/* ── 顶部：头像 + 名称一行 ── */}
       <div className="persona-section__identity">
         {/* 头像 */}
         <div className="persona-section__avatar">
           {readOnly ? (
             <div {...stylex.props(avatarStyles.avatarPreview)}>
-              {avatarPreview ? (
-                <img src={avatarPreview} alt="avatar" {...stylex.props(avatarStyles.avatarPreviewImg)} />
+              {avatarMediaSrc ? (
+                <img src={avatarMediaSrc} alt="avatar" {...stylex.props(avatarStyles.avatarPreviewImg)} />
               ) : (
                 <LuCamera size={22} className="agent-avatar-placeholder" aria-hidden="true" />
               )}
@@ -121,8 +126,8 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
               onClick={() => fileInputRef.current?.click()}
               aria-label={t("form.avatarUpload", "上传头像")}
             >
-              {avatarPreview ? (
-                <img src={avatarPreview} alt="" {...stylex.props(avatarStyles.avatarPreviewImg)} />
+              {avatarMediaSrc ? (
+                <img src={avatarMediaSrc} alt="" {...stylex.props(avatarStyles.avatarPreviewImg)} />
               ) : (
                 <LuCamera size={22} className="agent-avatar-placeholder" aria-hidden="true" />
               )}
@@ -174,12 +179,15 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
               value={values.prompt ?? ""}
               onChange={(e) => set("prompt", e.target.value)}
               placeholder={t("form.promptPlaceholder")}
-              rows={12}
+              rows={afterIdentity ? 5 : 12}
               autoResize
             />
           </FormField>
         </div>
       )}
+
+      {afterIdentity}
+      {afterIdentity && <h3 className="adv-settings__title">{t("editRoleModel.greeting", "问候语与菜单")}</h3>}
 
       {/* ── 问候语 ── */}
       <FormField
@@ -229,10 +237,18 @@ const PersonaSection: React.FC<PersonaSectionProps> = ({
           min-height: 300px;
         }
 
+        .persona-section--edit .persona-section__prompt {
+          min-height: 0;
+        }
+
         .persona-section__prompt textarea {
           min-height: 280px;
           font-size: var(--fontSize-md);
           line-height: 1.6;
+        }
+
+        .persona-section--edit .persona-section__prompt textarea {
+          min-height: 112px;
         }
 
         @media (max-width: 768px) {

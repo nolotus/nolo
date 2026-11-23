@@ -18,6 +18,9 @@
 //   拿不准的不要写，让 provider-map 兜底。每条必须写 note 注明依据。
 // - 匹配对完整 model id 与其 basename（最后一个 / 之后）同时生效，
 
+import { isAdaptiveThinkingModelId } from "integrations/anthropic/anthropicOAuthModels";
+import { isLoopbackUrl } from "core/localOrigins";
+import { isPlatformHostedMimoModel, usesMimoThinkingWire } from "../llm/platformHosted";
 import {
   PROVIDER_REASONING_EFFORT_VALUES,
   type ReasoningEffort,
@@ -45,6 +48,61 @@ export type ModelReasoningCapability = {
   mandatory?: boolean;
   source: ModelReasoningSource;
 };
+
+export type ThinkingControl =
+  | { controlKind: "off" }
+  | { controlKind: "toggle"; defaultEnabled: boolean }
+  | { controlKind: "levels"; efforts: readonly ReasoningEffort[]; defaultEffort?: ReasoningEffort; modelConfirmed?: boolean };
+
+/** New agents store Medium only when the model exposes it as a selectable level. */
+export function getNewAgentThinkingDepth(control: ThinkingControl): "medium" | undefined {
+  return control.controlKind === "levels" && control.modelConfirmed && control.efforts.includes("medium") ? "medium" : undefined;
+}
+
+/** Use the same effective value for a new Agent's controls and create payload. */
+export function resolveNewAgentThinkingSelection(
+  control: ThinkingControl,
+  selection: { reasoningEffort?: ReasoningEffort | null; enableThinking?: boolean | null },
+) {
+  return {
+    reasoningEffort: control.controlKind !== "levels" ? undefined
+      : selection.reasoningEffort === null || (selection.reasoningEffort && control.efforts.includes(selection.reasoningEffort))
+        ? selection.reasoningEffort : getNewAgentThinkingDepth(control),
+    enableThinking: control.controlKind === "toggle" ? selection.enableThinking : undefined,
+  };
+}
+
+/** Single control decision for create and edit. Separate from Chat Completions effort clamping:
+ *  native Anthropic depth is serialized as output_config.effort, not reasoning_effort. */
+export function resolveThinkingControl(args: {
+  provider?: string | null;
+  model?: string | null;
+  customProviderUrl?: string | null;
+  capability?: ModelReasoningCapability | null;
+}): ThinkingControl {
+  const provider = args.provider?.toLowerCase();
+  const model = args.model?.trim();
+  if (!provider || !model) return { controlKind: "off" };
+  if (provider === "anthropic") {
+    return isAdaptiveThinkingModelId(model)
+      ? { controlKind: "levels", efforts: ["none", "low", "medium", "high", "xhigh", "max"], defaultEffort: "medium", modelConfirmed: true }
+      : { controlKind: "toggle", defaultEnabled: true };
+  }
+  if (isLoopbackUrl(args.customProviderUrl ?? undefined) && /qwen/i.test(model)) {
+    return { controlKind: "toggle", defaultEnabled: true };
+  }
+  if (usesMimoThinkingWire(provider, model, args.customProviderUrl)) {
+    return {
+      controlKind: "levels",
+      efforts: ["none", ...PROVIDER_REASONING_EFFORT_VALUES.mimo!],
+      modelConfirmed: isPlatformHostedMimoModel(model),
+    };
+  }
+  const capability = args.capability ?? resolveModelReasoningCapabilityWithCache(provider, model);
+  return capability.efforts.length && capability.supportsReasoning && !capability.mandatory
+    ? { controlKind: "levels", efforts: capability.efforts, defaultEffort: capability.defaultEffort, modelConfirmed: capability.found }
+    : { controlKind: "off" };
+}
 
 type ModelReasoningOverride = {
   /** 命中的 provider（小写）；网关 provider 自动复用全部 override */

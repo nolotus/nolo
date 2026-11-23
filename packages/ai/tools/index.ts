@@ -338,6 +338,8 @@ import { execShellFunctionSchema, execShellFunc } from "./execShellTool";
 import {
   materializeWorkspaceFileFunctionSchema,
   materializeWorkspaceFileClientStub,
+  materializeSkillAssetsFunctionSchema,
+  materializeSkillAssetsClientStub,
   commitSandboxArtifactFunctionSchema,
   commitSandboxArtifactClientStub,
 } from "./sandboxWorkspaceTools";
@@ -2375,6 +2377,18 @@ const baseToolDefinitions: ToolDefinition[] = [
       category: "代码 / 文件操作",
     },
     behavior: "data",
+    uiGroup: "data",
+  },
+  {
+    id: "materializeSkillAssets",
+    schema: materializeSkillAssetsFunctionSchema,
+    executor: materializeSkillAssetsClientStub,
+    description: {
+      name: "materializeSkillAssets",
+      description: "把平台内置的可执行技能脚本复制到 Sandbox 的 work/skills/<skill>/。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "action",
     uiGroup: "data",
   },
   {

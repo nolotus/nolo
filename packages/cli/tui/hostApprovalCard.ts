@@ -1,18 +1,15 @@
 /**
- * The TUI's in-conversation approval card.
+ * Browser and MCP approvals share this host-only dialog.
  *
- * A connector action that needs consent used to force the user into a browser popup. This module
- * keeps the question where the work is happening: the card is written into the transcript stream
- * (not a separate window, not a full-screen modal), and the host submits the answer straight to the
- * connector through `submit_approval_decision` — the model is never asked, and cannot answer.
- *
- * Deliberate non-goals:
- *  - inline presentation uses the same DialogHost keyboard owner as ask/secret;
- *    legacy standalone callers may still omit the host;
- *  - it does NOT remember anything: one card = one action, no "always allow";
- *  - styling stays minimal on purpose: one frame, no colour. Long values (and the script itself) wrap
- *    at the terminal width instead of being clipped, because the only copy of the code the user can
- *    inspect is this card when `hostApproval` is set.
+ * One card = one action, and the answer goes straight back to the connector through the host
+ * renderer — the model is never asked and cannot answer. Non-goals that must stay non-goals:
+ *  - no "always allow": every card is a fresh decision, nothing is remembered;
+ *  - the decision is only taken from a human key press that the composer did not consume
+ *    (empty draft, and no approval during a turn the user did not start);
+ *  - the card shows the real payload (target, scope, arguments/script) because it is the only
+ *    copy of the code the user can inspect before allowing it.
+ * MCP invocations reach this card only after `permitsMcpRead` admitted the call
+ * (packages/agent-runtime/mcpExecutionBridge.ts), which is why the MCP copy talks about a read.
  */
 import type {
   HostApprovalCard,
@@ -25,17 +22,22 @@ import {
   formatApprovalRemaining,
   HOST_APPROVAL_SUMMARY_LIMIT,
 } from "../client/hostApprovalFlow";
-import type { DialogHost } from "./dialogHost";
+import type { DialogAnchor, DialogHost } from "./dialogHost";
 import { displayWidth } from "./tuiAnsi";
 import { safeApprovalMultilineText, safeApprovalSingleLineText } from "./askTextSanitize";
-import { renderDialogRule } from "./dialogFrame";
+import { renderDialogRow, renderDialogRule } from "./dialogFrame";
 import { describeBrowserApproval } from "../client/browserApprovalCopy";
+
+import { t } from "./i18n";
+import { getTopReservedRows } from "./tuiLayout";
+import { createDialogFramePainter, isArrowDown, isArrowUp, isSubmit, outputIsTty } from "./selectDialog";
 
 const SELECT_ALLOW = new Set(["\x1b[C", "\x1bOC"]);
 const SELECT_CANCEL = new Set(["\x1b[D", "\x1bOD"]);
-const ENTER = new Set(["\r", "\n"]);
-/** The workspace decoder emits a lone ESC as "\x1b"; a fast double press arrives as "\x1b\x1b". */
+/** Includes the workspace decoder's lone and double Escape tokens. */
 const ESCAPE_KEYS = new Set(["\x1b", "\x1b\x1b", "\x1b[27~"]);
+const PAGE_UP = "\x1b[5~";
+const PAGE_DOWN = "\x1b[6~";
 
 const FALLBACK_COLUMNS = 80;
 /** Columns a field label occupies in the card: " action    ", " detail    ". */
@@ -213,7 +215,7 @@ function detailRows(
 /** Render connector data only after stripping terminal controls and bidi overrides. */
 export function renderHostApprovalCardLines(
   card: HostApprovalCard,
-  opts: { now: number; columns?: number },
+  opts: { now: number; columns?: number; allowFocused?: boolean; colorEnabled?: boolean; rows?: number; scroll?: number; onScroll?: (start: number) => void },
 ): string[] {
   const columns = Math.max(20, opts.columns ?? FALLBACK_COLUMNS);
   const contentWidth = Math.max(1, columns - CONTENT_INDENT - 2);
@@ -222,48 +224,65 @@ export function renderHostApprovalCardLines(
   // Classify the original action, not a normalized approximation of an unknown action.
   const copy = describeBrowserApproval(card.actionLabel, safeApprovalSingleLineText(card.target));
   const detail = safeApprovalMultilineText(card.summary);
-  const heading = isMcp ? "Call a read tool (callMcpTool)" : copy.action;
-  const impact = isMcp ? "A connected service will receive the shown arguments." : copy.impact;
+  const heading = isMcp ? t("hostApprovalMcpHeading") : copy.action;
+  const impact = isMcp ? t("hostApprovalMcpImpact") : copy.impact;
   const browserParts = !isMcp
     ? [
         safeApprovalSingleLineText(card.browser),
         safeApprovalSingleLineText(card.tabId) ? `tab ${safeApprovalSingleLineText(card.tabId)}` : "",
       ].filter(Boolean)
     : [];
-  const actionBar = " ❯ Cancel (Enter)     Allow once (→ then Enter)";
-  const actionRows = displayWidth(actionBar) <= columns - 1
-    ? [actionBar]
-    : [
-        ...wrapProseLine("❯ Cancel (Enter)", columns - 2).map((line) => ` ${line}`),
-        ...wrapProseLine("Allow once (→ then Enter)", columns - 4).map((line) => `   ${line}`),
-      ];
-  const lines = [
-    renderDialogRule(columns, false),
+  const body = [
     ...wrapProseLine(heading, columns - 2).map((line) => ` ${line}`),
     "",
-    ...fieldRows("target", isMcp ? safeApprovalSingleLineText(card.target) || "Unknown tool" : copy.target, contentWidth),
-    ...fieldRows(isMcp ? "scope" : "site", safeApprovalSingleLineText(card.origin) || (isMcp ? "Unknown scope" : "Unknown site"), contentWidth),
+    ...fieldRows("target", isMcp ? safeApprovalSingleLineText(card.target) || t("hostApprovalUnknownTool") : copy.target, contentWidth),
+    ...fieldRows(isMcp ? "scope" : "site", safeApprovalSingleLineText(card.origin) || (isMcp ? t("hostApprovalUnknownScope") : "Unknown site"), contentWidth),
     ...(browserParts.length ? fieldRows("browser", browserParts.join(" · "), contentWidth) : []),
     ...wrapProseLine(impact, contentWidth).map((row, index) => `${index === 0 ? ` ${"impact".padEnd(LABEL_COLUMN, " ")}` : " ".repeat(CONTENT_INDENT)}${row}`),
     ...(detail ? ["", ...detailRows(detail, contentWidth)] : []),
-    "",
-    ...(expired ? [
-      ...fieldRows("expired", "This action was not run and will not be retried.", contentWidth),
-      ...fieldRows("keys", "disabled", contentWidth),
-    ] : [
-      ...fieldRows("expires", `${formatApprovalRemaining(card.expiresAt, opts.now)} left`, contentWidth),
-      ...wrapProseLine("With an empty input line:", columns - 2).map((line) => ` ${line}`),
-      ...actionRows,
-    ]),
-    renderDialogRule(columns, false),
   ];
-  return lines.map((line) => clipCardLine(line, columns));
+  const footer = expired ? [
+    ...fieldRows("expired", "This action was not run and will not be retried.", contentWidth),
+    ...fieldRows("keys", "disabled", contentWidth),
+  ] : [
+    ...fieldRows("expires", `${formatApprovalRemaining(card.expiresAt, opts.now)} left`, contentWidth),
+    ...wrapProseLine(t("hostApprovalKeys"), columns - 2).map(line => ` ${line}`),
+  ];
+  const rule = renderDialogRule(columns, false);
+  const bodyBudget = (opts.rows ?? Infinity) - footer.length - (expired ? 0 : 2) - 2;
+  let visibleBody = body;
+  if (body.length > bodyBudget) {
+    const pageSize = bodyBudget - 1;
+    if (pageSize < 1) throw new Error("approval frame does not fit");
+    // Keep the choice rows visible while paging the wrapped preview, including its folded tail.
+    const start = Math.min(opts.scroll ?? 0, body.length - pageSize);
+    const end = start + pageSize;
+    opts.onScroll?.(start);
+    visibleBody = [
+      ...body.slice(start, end),
+      ` PgUp/PgDn ${start + 1}–${end}/${body.length}`,
+    ];
+  } else {
+    opts.onScroll?.(0);
+  }
+  return [
+    ...[rule, ...visibleBody].map(line => clipCardLine(line, columns)),
+    ...(!expired ? [
+      renderDialogRow({ label: `[1] ${t("hostApprovalCancel")}`, focused: !opts.allowFocused }, opts.colorEnabled ?? false),
+      renderDialogRow({ label: `[2] ${t("hostApprovalAllowOnce")}`, focused: !!opts.allowFocused }, opts.colorEnabled ?? false),
+    ] : []),
+    ...[...footer, rule].map(line => clipCardLine(line, columns)),
+  ];
 }
 
-/** One card on screen at a time; Allow requires explicit selection then Enter. */
+/** One card on screen at a time. */
 type ActiveCard = {
-  card: HostApprovalCard;
   allowSelected: boolean;
+  expiresAt: number;
+  /** False when there is no live frame to redraw (non-TTY): arrows cannot show their effect. */
+  interactive: boolean;
+  repaint(): void;
+  page(delta: number): boolean;
   finish(decision: HostApprovalResult): void;
 };
 
@@ -275,9 +294,10 @@ export type InlineHostApprovalPrompt = {
    * not reach the draft buffer / submit path.
    *
    * `draftEmpty` keeps selection and confirmation out of a non-empty composer.
-   * `busy` keeps Esc meaning "stop the running turn" — a pending card must not shadow that.
+   * `busy` keeps Esc meaning "stop the running turn". Only the workspace may
+   * opt in to answering during its active, non-aborted agent turn.
    */
-  handleKey(sequence: string, context: { draftEmpty: boolean; busy: boolean }): boolean;
+  handleKey(sequence: string, context: { draftEmpty: boolean; busy: boolean; canApproveDuringTurn?: boolean }): boolean;
   /** Whether this prompt currently owns input (not merely queued behind another dialog). */
   isActive(): boolean;
   /** Cancel pending cards so no tool call can hang on shutdown. */
@@ -289,6 +309,8 @@ export type InlineHostApprovalPrompt = {
 export function createInlineHostApprovalPrompt(args: {
   write(text: string): void;
   dialogHost?: DialogHost;
+  output?: NodeJS.WritableStream;
+  colorEnabled?: boolean;
   now?: () => number;
   columns?: () => number;
   /** Injectable timers so a test can drive expiry without waiting. */
@@ -307,102 +329,123 @@ export function createInlineHostApprovalPrompt(args: {
   let active: ActiveCard | null = null;
   let disposed = false;
 
-  /**
-   * Settle the active card exactly once.
-   *
-   * `finish` lives in `finally` on purpose: `write` reaches a real terminal/pTY and can throw
-   * (closed stdout, dead writer). The old order (clear state → write → resolve) meant such a throw
-   * left the promise pending forever, `dispose()` could no longer see the card, and the queue behind
-   * it never advanced — one broken write wedged every later approval.
-   */
   const settle = (decision: HostApprovalResult, note: string) => {
     if (!active) return;
     const finishing = active;
     active = null;
-    try {
-      args.write(`${note}\n`);
-    } catch {
-      // Losing the label is acceptable; losing the settlement is not.
-    } finally {
-      finishing.finish(decision);
-    }
+    finishing.finish(decision);
+    try { args.write(`${note}\n`); } catch { /* A failed echo cannot change the decision. */ }
   };
 
-  const presentOne = (card: HostApprovalCard, context: HostApprovalContext = {}): Promise<HostApprovalResult> =>
-    new Promise<HostApprovalResult>((resolve) => {
+  const presentOne = (card: HostApprovalCard, context: HostApprovalContext, anchor?: DialogAnchor): Promise<HostApprovalResult> =>
+    new Promise(resolve => {
       if (disposed || context.signal?.aborted) {
         resolve(disposed ? "deny" : "cancelled");
         return;
       }
+      const expiresAt = Math.min(card.expiresAt, context.expiresAt ?? Infinity);
+      if (expiresAt <= now()) { resolve("expired"); return; }
       const abort = () => settle(context.signal?.reason === "expired" ? "expired" : "cancelled", "✖ approval ended — the action was not run");
-      active = { card, allowSelected: false, finish: result => {
-        context.signal?.removeEventListener("abort", abort);
-        resolve(result);
-      } };
+      let scroll = 0;
+      const render = (rows?: number): string => {
+        const lines = renderHostApprovalCardLines({ ...card, expiresAt }, {
+          now: now(), columns: columns(), allowFocused: current.allowSelected,
+          colorEnabled: rows !== undefined && args.colorEnabled, rows, scroll,
+          onScroll: start => { scroll = start; },
+        });
+        return lines.join("\n");
+      };
+      const output = args.output;
+      const availableRows = () => anchor!.bottomRow() - getTopReservedRows(output!);
+      const painter = anchor && output && outputIsTty(output) ? createDialogFramePainter({
+        output, render: () => render(availableRows()), bottomAnchored: anchor.bottomAnchored,
+        resolveBottomRow: anchor.bottomRow, session: anchor.session,
+      }) : undefined;
+      const failPaint = () => settle("unavailable", "✖ approval could not be shown (terminal too short or repaint failed) — the action was not run");
+      const repaint = () => {
+        if (active !== current) return;
+        if (expiresAt <= now()) { settle("expired", "⌛ approval expired — the action was not run"); return; }
+        try { painter?.paint(); } catch { failPaint(); }
+      };
+      const current: ActiveCard = {
+        expiresAt, allowSelected: false, repaint, interactive: Boolean(painter),
+        page(delta) {
+          if (!painter) return false;
+          // Page by a fraction of the available frame so consecutive views overlap.
+          scroll = Math.max(0, scroll + delta * Math.max(1, Math.floor(availableRows() / 3)));
+          repaint();
+          return true;
+        },
+        finish(result) {
+          context.signal?.removeEventListener("abort", abort);
+          try { painter?.clear(); } catch { /* Still release the DialogHost session. */ }
+          finally { resolve(result); }
+        },
+      };
+      active = current;
       context.signal?.addEventListener("abort", abort, { once: true });
-      try {
-        const lines = renderHostApprovalCardLines(card, { now: now(), columns: columns() });
-        args.write(`${lines.join("\n")}\n`);
-      } catch {
-        // The user was never shown the action, so nothing may be approved: deny and let the queue
-        // present the next card instead of waiting for an answer to a card that does not exist.
-        settle("deny", "⌛ approval could not be shown — the action was not run");
-        return;
+      anchor?.registerForegroundRepaint?.(repaint);
+      if (painter) repaint();
+      else {
+        // Non-terminal callers can observe the initial card but have no display to repaint.
+        try { args.write(`${render()}\n`); } catch { failPaint(); }
       }
-
     });
 
   return {
     awaitHostApproval: (card, context = {}) => {
       const signal = context.signal ? AbortSignal.any([context.signal, shutdown.signal]) : shutdown.signal;
       return queue.present(card, (next, lifetime = {}) => args.dialogHost
-        ? args.dialogHost.withKeyboard(() => presentOne(next, lifetime), {
+        ? args.dialogHost.run(anchor => presentOne(next, lifetime, anchor), {
             signal: lifetime.signal!, cancelled: () => "cancelled" as HostApprovalResult,
           })
         : presentOne(next, lifetime), { ...context, signal });
     },
     isActive: () => active !== null,
     handleKey(sequence, context) {
-      if (!active || disposed) return false;
-      const isConfirm = ENTER.has(sequence);
-      const selectAllow = SELECT_ALLOW.has(sequence);
-      const selectCancel = SELECT_CANCEL.has(sequence);
-      const isEscape = ESCAPE_KEYS.has(sequence);
-      if (!context.draftEmpty || !(isConfirm || selectAllow || selectCancel || isEscape)) {
-        // Any intervening input disarms Allow, even if the user later clears their draft.
-        if (active.allowSelected) {
-          active.allowSelected = false;
-          try { args.write("  Cancel selected (default).\n"); } catch { /* Allow is already disarmed. */ }
+      const current = active;
+      if (!current || disposed) return false;
+      const confirm = isSubmit(sequence);
+      const allow = isArrowDown(sequence) || SELECT_ALLOW.has(sequence);
+      const cancel = isArrowUp(sequence) || SELECT_CANCEL.has(sequence);
+      const escape = ESCAPE_KEYS.has(sequence);
+      const digit = sequence === "1" || sequence === "2";
+      const page = sequence === PAGE_UP || sequence === PAGE_DOWN;
+      const setFocus = (allowFocused: boolean) => {
+        if (current.allowSelected === allowFocused) return;
+        if (current.interactive) {
+          current.allowSelected = allowFocused;
+          current.repaint();
+          return;
         }
+        // 没有可重绘的帧时（非 TTY/旧宿主），把焦点变化回显出来，否则屏幕上仍显示旧的选项
+        // 而决定已经变了。回显失败就不给出「批准」：用户没看到的那一票不能算数。
+        // 反向不成立——失败不能把已经说明的批准留下来，因此失败一律退回取消。
+        try {
+          args.write(` ${allowFocused ? t("hostApprovalAllowOnce") : t("hostApprovalCancel")} · ${t("hostApprovalConfirmHint")}\n`);
+          current.allowSelected = allowFocused;
+        } catch {
+          current.allowSelected = false;
+        }
+      };
+      if (page && current.page(sequence === PAGE_UP ? -1 : 1)) return true;
+      if (!context.draftEmpty || (escape && context.busy) || !(confirm || allow || cancel || escape || digit)) {
+        // Unclaimed input remains the composer's and disarms Allow.
+        setFocus(false);
         return false;
       }
-      if (isEscape && context.busy) {
-        active.allowSelected = false;
-        return false;
-      }
-      if (active.card.expiresAt <= now()) {
+      if (current.expiresAt <= now()) {
         settle("expired", "⌛ approval expired — the action was not run");
         return true;
       }
-      if (selectAllow || selectCancel) {
-        if (active.allowSelected !== selectAllow) {
-          active.allowSelected = false;
-          try {
-            args.write(selectAllow
-              ? "  Allow once selected · Enter confirms · ← selects Cancel\n"
-              : "  Cancel selected · Enter cancels\n");
-            active.allowSelected = selectAllow;
-          } catch {
-            settle("deny", "✖ selection could not be shown — the action was not run");
-          }
-        }
+      const mayApprove = !context.busy || context.canApproveDuringTurn === true;
+      if (allow || cancel) {
+        setFocus(allow && mayApprove);
         return true;
       }
-      const isAllow = isConfirm && active.allowSelected;
-      settle(
-        isAllow ? "allow_once" : "deny",
-        isAllow ? "✔ allowed once (this action only)" : "✖ denied",
-      );
+      if (!mayApprove && sequence === "2") { setFocus(false); return true; }
+      const approved = mayApprove && (sequence === "2" || (confirm && current.allowSelected));
+      settle(approved ? "allow_once" : "deny", approved ? "✔ allowed once (this action only)" : "✖ denied");
       return true;
     },
     dispose() {

@@ -1,3 +1,5 @@
+import { useStableMediaPlayback } from "render/web/ui/useStableMediaPlayback";
+import { useWebMediaSource } from "render/web/ui/useWebMediaSrc";
 import { bilingualRows } from "ai/lecture/export/common";
 import { buildLectureMediaUrl } from "./mediaLectureMediaUrl";
 import * as stylex from "@stylexjs/stylex";
@@ -33,6 +35,8 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
   const player = useRef<HTMLMediaElement>(null);
   const [job, setJob] = useState<MediaJob | null>(null);
   const [result, setResult] = useState<LectureView | null>(null);
+  const mediaSource = useWebMediaSource(result?.source.fileId ? buildLectureMediaUrl(result.source.fileId) : null);
+  const playback = useStableMediaPlayback(mediaSource, player);
   const [tab, setTab] = useState<Tab>("overview");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -78,7 +82,12 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
     return () => clearTimeout(t);
   }, [job, id, pollMs]);
 
-  const seek = async (sec: number) => setNotice(await seekAndPlay(player.current, sec));
+  const seek = async (sec: number) => {
+    const status = await playback.prepareSeek(sec);
+    if (status === "switching") setNotice("");
+    else if (status === "ready") setNotice(await seekAndPlay(player.current, sec));
+    else setNotice("播放器尚未就绪，请稍后再试");
+  };
 
   /** 播放高亮跟随：timeupdate 时按 currentTime 找出所在 segment（无元素或无结果时清除高亮）。 */
   const onTimeUpdate = useCallback(() => {
@@ -160,7 +169,6 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
     );
   }
   const Player = result.source.kind === "video" ? "video" : "audio";
-  const mediaUrl = buildLectureMediaUrl(result.source.fileId);
   const running = job.status === "running";
   const canExtend = ["done", "cancelled", "failed"].includes(job.status) && !running;
   const excludedSegments = result.segments.filter((s) => s.excluded);
@@ -193,11 +201,13 @@ export function MediaLectureView({ id, pollMs = 1500 }: { id: string; pollMs?: n
       <Player
         ref={player as never}
         controls
-        src={mediaUrl}
+        src={playback.src ?? undefined}
+        {...playback.events}
         data-testid="media-player"
-        onTimeUpdate={onTimeUpdate}
+        onTimeUpdate={() => { playback.events.onTimeUpdate(); onTimeUpdate(); }}
         {...stylex.props(styles.player)}
       />
+      {(!playback.src || playback.unavailable) && <p role="status" {...stylex.props(styles.statusNotice)}>媒体暂不可播放</p>}
       {notice && (
         <p role="status" data-testid="notice" {...stylex.props(styles.statusNotice)}>{notice}</p>
       )}

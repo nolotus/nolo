@@ -337,7 +337,9 @@ export const saveBufferAsFile = async (
         tenantId,
         sha256: blob.sha256,
         size: blob.size,
-        mimeType: options.publicationOps ? mimeType : blob.mimeType,
+        // Space dedup shares bytes, not MIME: its entry and older sync clients
+        // use this upload's type, not whichever type first created the blob.
+        mimeType: options.ownerType === "space" || options.publicationOps ? mimeType : blob.mimeType,
         filePath: blob.path,
 
         originalName: options.originalName,
@@ -412,25 +414,25 @@ const resolveTenantAndFileId = async (
 export type LocalFileLookup =
     | { kind: "missing" }
     | { kind: "deleted" }
-    | { kind: "found"; metadata: FileMetadata };
+    | { kind: "found"; fileKey: string; metadata: FileMetadata };
 
-const classifyLocalFile = (metadata: FileMetadata | null): LocalFileLookup => {
+const classifyLocalFile = (fileKey: string, metadata: FileMetadata | null): LocalFileLookup => {
     if (metadata === null) return { kind: "missing" };
     if (isTombstoneRecord(metadata)) return { kind: "deleted" };
-    return { kind: "found", metadata };
+    return { kind: "found", fileKey, metadata };
 };
 
 /** A direct key takes precedence over the ID index, including on deletion. */
 export async function lookupLocalFileById(fileId: string): Promise<LocalFileLookup> {
     if (fileId.startsWith("file-")) {
-        const direct = classifyLocalFile(await dbGetOrNull<FileMetadata>(fileId));
+        const direct = classifyLocalFile(fileId, await dbGetOrNull<FileMetadata>(fileId));
         if (direct.kind !== "missing") return direct;
     }
 
     const index = await resolveTenantAndFileId(fileId);
     if (!index) return { kind: "missing" };
     const mainKey = index.mainKey || fileKey.single(index.tenantId, index.fileId);
-    return classifyLocalFile(await dbGetOrNull<FileMetadata>(mainKey));
+    return classifyLocalFile(mainKey, await dbGetOrNull<FileMetadata>(mainKey));
 }
 
 export const getFileMetadataById = async (fileId: string): Promise<FileMetadata | null> => {

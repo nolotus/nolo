@@ -2910,7 +2910,8 @@ export const streamAgentChatTurnHandler = async (
                     const finalBody = await inlineImageUrlsForCustomProvider(
                         buildFinalCompletionsRequestBody(bodyData, agentConfigForCall,
                             shouldDisableQuickChatToolsForDirectAnswer(quickChatPerfStartedAt, userInput, runtimeOptions, currentDialog)),
-                        { shouldInline: shouldInlineImageUrlsForAgent(agentConfigForCall), signal: loopController.signal },
+                        { shouldInline: shouldInlineImageUrlsForAgent(agentConfigForCall),
+                            serverUrl: selectCurrentServer(getState() as RootState), signal: loopController.signal },
                     );
                     return { value: { bodyData: finalBody, dynamicMessages, stableMessages }, wireBodies: [buildEmptyCompletionRepairBody(finalBody)] };
                 },

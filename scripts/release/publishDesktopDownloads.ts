@@ -3,6 +3,7 @@
 import { assertWindowsInstallerLooksRunnable } from "./windowsInstallerIntegrity";
 import {
   createDesktopReleaseArtifact,
+  buildDesktopUploadKindIndex,
   desktopReleaseManifestFileName,
   formatDesktopPublishDestination,
   hashFileSha256,
@@ -31,6 +32,11 @@ import {
   type DesktopReleaseManifest,
   type DesktopReleasePlatform,
 } from "../../packages/app/constants/desktopReleaseManifest";
+import {
+  assertChecksumSidecarsMatchArtifacts,
+  isDesktopChecksumSidecarUploadName,
+  isDesktopUpdateManifestUploadName,
+} from "../../packages/desktop/scripts/checksumSidecar";
 
 const args = process.argv.slice(2);
 
@@ -258,6 +264,68 @@ for (const target of plan.primary) {
   }
 }
 
+// 发布前 fail closed（Electrobun 2.0.7）：`*-checksum.json` 边车必须与**同目录** manifest
+// 的 hash 以及 manifest 指向的最终 tar 摘要/大小一致。必须按 sourcePath 定位——发布计划
+// 会递归发现子目录里的产物（CI 按平台分目录下载），拿 uploadName 拼 artifactDir 根目录
+// 会 ENOENT 或校验到同名旧文件。不一致就中止发布。
+await assertChecksumSidecarsMatchArtifacts({
+  sidecars: plan.optional
+    .filter((target) => isDesktopChecksumSidecarUploadName(target.uploadName))
+    .map((target) => ({ uploadName: target.uploadName, sourcePath: target.sourcePath })),
+});
+
+// 清单引用对象与上传顺序的预解析（dry-run 也要看到真实顺序，不能只报计划表）
+const referencedPayloadByPlatform = new Map<DesktopReleasePlatform, string>();
+for (const target of plan.primary) {
+  const updateJsonTarget = plan.updateMetadata[target.platform];
+  if (!updateJsonTarget) fail(`Missing ${target.platform} desktop update metadata`);
+  const updateJson = (await Bun.file(updateJsonTarget.sourcePath).json()) as DesktopBuiltUpdateMetadata;
+  const referenced = (updateJson as { artifact?: { file?: string } }).artifact?.file?.trim();
+  if (!referenced) fail(`${target.platform} update.json has no artifact.file`);
+  referencedPayloadByPlatform.set(target.platform, referenced);
+}
+
+// Electrobun 2.0.7：清单里的 artifact.file 必须在清单公开之前已经上传到那个名字。
+// 它可能是版本化主件名、主件的固定名 alias，也可能是 optional 里的更新包
+// （Windows 主件是 .exe，更新包是 stable-*-stable.tar.zst）。解析不出来就 fail closed。
+const uploadableKinds = buildDesktopUploadKindIndex({
+  primary: plan.primary,
+  optional: plan.optional,
+});
+for (const [platform, referenced] of referencedPayloadByPlatform) {
+  if (!uploadableKinds.has(referenced)) {
+    fail(`${platform} update.json references ${referenced}, which this publish plan never uploads`);
+  }
+}
+const referencedNames = new Set(referencedPayloadByPlatform.values());
+// 所有固定名 alias（主件与 optional 都可能有），供「清单引用的名字」提前上传使用。
+const aliasSources = new Map<string, string>();
+for (const target of [...plan.primary, ...plan.optional]) {
+  if (target.aliasUploadName && !aliasSources.has(target.aliasUploadName)) {
+    aliasSources.set(target.aliasUploadName, target.sourcePath);
+  }
+}
+const allAliasNames = [...plan.primary, ...plan.optional]
+  .map((target) => target.aliasUploadName)
+  .filter((name): name is string => Boolean(name));
+const earlyAliasNames = allAliasNames.filter((name) => referencedNames.has(name));
+const postManifestAliasNames = allAliasNames.filter((name) => !referencedNames.has(name));
+// 被清单引用的更新包排在前面，`*-update.json` 永远最后上传（上游发布顺序要求）。
+const orderedOptional = [
+  ...plan.optional.filter((target) => !isDesktopUpdateManifestUploadName(target.uploadName)),
+  ...plan.optional.filter((target) => isDesktopUpdateManifestUploadName(target.uploadName)),
+];
+// 真实上传顺序：主件 → 被清单引用的 alias → 其余可选件（含边车，早于 update.json）
+// → 渠道清单 → 其余 alias（主件与 optional 都算）→ legacy manifest。
+const uploadOrder: string[] = [
+  ...plan.primary.map((target) => target.uploadName),
+  ...earlyAliasNames,
+  ...orderedOptional.map((target) => target.uploadName),
+  plan.channelManifestUploadName,
+  ...postManifestAliasNames,
+  plan.legacyManifestUploadName,
+];
+
 const summary = {
   channel,
   remote: formatDesktopPublishDestination(config),
@@ -267,6 +335,7 @@ const summary = {
     sourcePath: target.sourcePath,
     uploadName: target.uploadName,
     aliasUploadName: target.aliasUploadName,
+    referencedPayload: referencedPayloadByPlatform.get(target.platform) ?? null,
   })),
   optional: plan.optional.map((target) => ({
     sourcePath: target.sourcePath,
@@ -274,8 +343,12 @@ const summary = {
   })),
   channelManifest: plan.channelManifestUploadName,
   legacyManifest: plan.legacyManifestUploadName,
-  preManifestUploadNames: plan.preManifestUploadNames,
-  postManifestUploadNames: plan.postManifestUploadNames,
+  preManifestUploadNames: uploadOrder.slice(
+    0,
+    uploadOrder.indexOf(plan.channelManifestUploadName) + 1,
+  ),
+  postManifestUploadNames: uploadOrder.slice(uploadOrder.indexOf(plan.channelManifestUploadName) + 1),
+  uploadOrder,
   dryRun,
 };
 
@@ -293,7 +366,6 @@ const existingManifest = await readRemoteManifest(config);
 for (const target of plan.primary) {
   const updateJsonTarget = plan.updateMetadata[target.platform];
   if (!updateJsonTarget) fail(`Missing ${target.platform} desktop update metadata`);
-
   const updateJson = (await Bun.file(updateJsonTarget.sourcePath).json()) as DesktopBuiltUpdateMetadata;
   validateDesktopUpdateMetadata({
     channel,
@@ -311,6 +383,8 @@ if (config.storage === "ssh") {
 
 const publishedAt = new Date().toISOString();
 const updates: Partial<Record<DesktopReleasePlatform, Awaited<ReturnType<typeof createDesktopReleaseArtifact>>>> = {};
+// 已在 update.json 之前提前上传的对象名（清单引用名 ⇒ 不能留到清单之后）。
+const uploadedAliasNames = new Set<string>();
 
 for (const target of plan.primary) {
   console.log(`[publish-desktop] Uploading ${target.uploadName}`);
@@ -332,7 +406,17 @@ for (const target of plan.primary) {
   });
 }
 
-for (const target of plan.optional) {
+for (const aliasName of earlyAliasNames) {
+  const sourcePath = aliasSources.get(aliasName);
+  if (!sourcePath) continue;
+  console.log(
+    `[publish-desktop] Uploading referenced payload ${aliasName} before its update manifest`,
+  );
+  await uploadFile({ config, sourcePath, uploadName: aliasName });
+  uploadedAliasNames.add(aliasName);
+}
+
+for (const target of orderedOptional) {
   console.log(`[publish-desktop] Uploading optional ${target.uploadName}`);
   await uploadFile({
     config,
@@ -422,12 +506,18 @@ if (config.storage === "s3") {
 
 for (const target of [...plan.primary, ...plan.optional]) {
   if (!target.aliasUploadName) continue;
-  console.log(`[publish-desktop] Updating legacy alias ${target.aliasUploadName}`);
-  await uploadFile({
-    config,
-    sourcePath: target.sourcePath,
-    uploadName: target.aliasUploadName,
-  });
+  if (uploadedAliasNames.has(target.aliasUploadName)) {
+    console.log(
+      `[publish-desktop] Alias ${target.aliasUploadName} already uploaded before its update manifest`,
+    );
+  } else {
+    console.log(`[publish-desktop] Updating legacy alias ${target.aliasUploadName}`);
+    await uploadFile({
+      config,
+      sourcePath: target.sourcePath,
+      uploadName: target.aliasUploadName,
+    });
+  }
   if (config.storage === "s3") {
     console.log(`[publish-desktop] Verifying legacy alias S3 object ${target.aliasUploadName}`);
     await verifyPublishedS3Object({

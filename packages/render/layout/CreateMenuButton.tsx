@@ -48,6 +48,7 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
   children,
 }) => {
   const isRail = variant === "sidebar" && !shouldShowLabel;
+  const isCompactMenu = isRail || variant === "header";
 
   const triggerTitle = title ?? createLabel;
 
@@ -81,11 +82,11 @@ const CreateMenuButton: React.FC<CreateMenuButtonPresentationProps> = ({
     <Popover
       className="create-menu-popover"
       data-variant={variant}
-      data-rail={isRail ? "true" : undefined}
+      data-compact={isCompactMenu ? "true" : undefined}
       placement={
         variant === "topbar"
           ? "bottom end"
-          : isRail
+          : isCompactMenu
             ? "right top"
             : "bottom start"
       }

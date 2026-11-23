@@ -1,3 +1,4 @@
+import { isAgentCredentialShared } from "../../shared/providerSecrets";
 /**
  * Resolve an API key for client-side *direct* provider requests only.
  *
@@ -121,13 +122,13 @@ export async function resolveDirectRequestApiKey(
   if (local) return local;
 
   // Provider-level remembered secret is a fallback after the broker's latest value.
-  if (credentialRef.startsWith("provider-key:") && options?.providerSecretFetcher) {
+  if (isAgentCredentialShared(agentConfig) && credentialRef.startsWith("provider-key:") && options?.providerSecretFetcher) {
     const providerSecret = await options.providerSecretFetcher(credentialRef);
     if (providerSecret) return providerSecret;
   }
 
   // Priority 2: server sync fallback (only when opted in)
-  if (agentConfig.credentialSynced && options?.syncFetcher) {
+  if (isAgentCredentialShared(agentConfig) && options?.syncFetcher) {
     const synced = await options.syncFetcher(credentialRef);
     const trimmed = asTrimmedString(synced);
     if (trimmed) {

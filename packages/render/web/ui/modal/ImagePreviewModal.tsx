@@ -1,3 +1,4 @@
+import { useWebMediaSrc } from "../useWebMediaSrc";
 // 文件路径: render/web/ui/modal/ImagePreviewModal.tsx
 
 import "./ImagePreviewModal.css"
@@ -16,6 +17,7 @@ import { toast } from "app/utils/toast"
 
 interface ImagePreviewModalProps {
   imageUrl: string | null;
+  spaceId?: string | null;
   onClose: () => void;
   alt?: string;
   // If provided, enables actions
@@ -25,6 +27,7 @@ interface ImagePreviewModalProps {
 
 const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   imageUrl,
+  spaceId,
   onClose,
   alt = "预览图片",
   contentKey,
@@ -36,13 +39,14 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
   const isFavorited = useIsContentFavorited(contentKey ?? "");
   const favoriteDeps = useFavoriteDeps();
   const [isSharing, setIsSharing] = useState(false);
+  const mediaSrc = useWebMediaSrc(imageUrl, { spaceId });
 
   useEffect(() => {
-    if (imageUrl) {
+    if (mediaSrc) {
       setIsLoaded(false);
       setHasError(false);
     }
-  }, [imageUrl]);
+  }, [mediaSrc]);
 
   const handleFavorite = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -76,7 +80,8 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
       const shareData = {
         id: contentKey,
         type: DataType.IMAGE,
-        url: imageUrl, // Might be blob url (useless for remote) or http url
+        // Persist the original reference only; the rendered capability is ephemeral.
+        url: imageUrl,
         // Ideally we need the fileId to reconstruct the URL on the other side
         fileId: contentKey.replace("image-", "").replace("file-", "").split("-").pop() 
       };
@@ -116,7 +121,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
       >
         {imageUrl && (
           <div className="preview-container">
-            {!isLoaded && !hasError && (
+            {mediaSrc && !isLoaded && !hasError && (
               <div className="loading-spinner">
                 <svg viewBox="0 0 24 24" fill="none" className="spinner-icon">
                   <circle
@@ -136,15 +141,15 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
               </div>
             )}
 
-            {hasError && (
+            {(!mediaSrc || hasError) && (
               <div className="preview-error" role="status" aria-live="polite">
                 <div className="preview-error__title">图片加载失败</div>
                 <div className="preview-error__hint">这张图片当前不可用，可能是文件资源缺失或无权限访问。</div>
               </div>
             )}
 
-            <img
-              src={imageUrl}
+            {mediaSrc && <img
+              src={mediaSrc}
               alt={alt}
               className={`preview-image ${isLoaded ? "loaded" : "loading"}${hasError ? " failed" : ""}`}
               onLoad={() => {
@@ -155,7 +160,7 @@ const ImagePreviewModal: React.FC<ImagePreviewModalProps> = ({
                 setIsLoaded(false);
                 setHasError(true);
               }}
-            />
+            />}
 
             <div className="actions-bar">
                {contentKey && (

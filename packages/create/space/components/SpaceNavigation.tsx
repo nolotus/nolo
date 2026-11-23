@@ -14,6 +14,7 @@ import TabsNav from "render/web/ui/TabsNav";
 import { useCurrentSpaceFromEntity } from "create/space/useCurrentSpaceFromEntity";
 import { getCurrentSpaceIdRaw } from "create/space/spaceCurrentStore";
 import { normalizeSpaceId } from "create/space/spaceKeys";
+import { isTombstoneRecord } from "database/tombstones";
 
 export interface SpaceNavigationProps {
   /**
@@ -52,6 +53,12 @@ const SpaceNavigation: React.FC<SpaceNavigationProps> = ({
   const showResolvedStats =
     hasMounted && !loading && propSpaceMatchesCurrent;
 
+  const contentCount = showResolvedStats && spaceId && currentSpace?.id &&
+    normalizeSpaceId(currentSpace.id) === normalizeSpaceId(spaceId) &&
+    !isTombstoneRecord(currentSpace) && currentSpace.contents
+    ? Object.values(currentSpace.contents).filter((item) => item && !isTombstoneRecord(item)).length
+    : null;
+
   // 导航项配置
   const navItems = [
     {
@@ -71,6 +78,7 @@ const SpaceNavigation: React.FC<SpaceNavigationProps> = ({
         <span className="nav-item-content">
           <LuLayoutGrid size={16} className="nav-icon" aria-hidden="true" />
           全部内容
+          {contentCount !== null && <span className="nav-badge">{contentCount}</span>}
         </span>
       ),
     },

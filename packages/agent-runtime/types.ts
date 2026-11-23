@@ -58,6 +58,8 @@ export interface AgentRuntimeChatMessage {
   content: AgentRuntimeMessageContent;
   /** Internal system-prompt boundary used by explicit-cache providers. */
   stable_prefix_chars?: number;
+  /** Internal ChatGPT OAuth metadata, not an upstream message field. */
+  agent_prompt_in_messages?: true;
   /** Internal provenance: buildMessages already included the configured agent prompt. */
   [AGENT_PROMPT_IN_MESSAGES]?: true;
   /**

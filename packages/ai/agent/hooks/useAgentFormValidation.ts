@@ -137,7 +137,7 @@ export const useAgentValidation = (
   });
 
   const onSubmit = useCallback(
-    async (data: FormData) => {
+    async (data: FormData, createAttempt?: object) => {
       const effectiveUserId = user?.userId?.trim()
         ? user.userId.trim()
         : "local";
@@ -194,6 +194,7 @@ export const useAgentValidation = (
         createAgent({
           userId: effectiveUserId,
           formData: data,
+          createAttempt,
           spaceId: currentSpaceId || undefined, // 传入当前空间 ID
         })
       ).unwrap();

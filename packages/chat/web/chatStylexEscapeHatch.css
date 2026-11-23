@@ -1192,17 +1192,37 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   padding-top: var(--space-8, 32px);
 }
 
-/* Workspace chrome yields to content; intent reveals actions. */
+/* 空间行「新建」和「更多」对齐；桌面只显示正在操作的空间行的「新建」。 */
 @media (hover: hover) and (pointer: fine) {
-  .WorkSpaceGroup__more {
-    opacity: 0.35;
-    transition: opacity 0.18s ease;
+  .WorkSpaceGroup__header:not(:hover):not(:focus-within)
+    .WorkSpaceGroup__create:not([aria-expanded="true"]):not(.is-active) {
+    opacity: 0;
+    pointer-events: none;
   }
-  .WorkSpaceGroup__header:hover .WorkSpaceGroup__more,
-  .WorkSpaceGroup__header:focus-within .WorkSpaceGroup__more,
-  .WorkSpaceGroup__more[aria-expanded="true"] {
-    opacity: 1;
-  }
+}
+.WorkSpaceGroup__header .WorkSpaceGroup__create .create-menu__icon {
+  stroke-width: 1.75;
+}
+.WorkSpaceGroup__header .WorkSpaceGroup__create,
+.WorkSpaceGroup__header .WorkSpaceGroup__more {
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.WorkSpaceGroup__header:hover .WorkSpaceGroup__create:not(:hover):not(:focus-visible):not([data-focus-visible]):not([aria-expanded="true"]):not(.is-active),
+.WorkSpaceGroup__header:focus-within .WorkSpaceGroup__create:not(:hover):not(:focus-visible):not([data-focus-visible]):not([aria-expanded="true"]):not(.is-active),
+.WorkSpaceGroup__header:hover .WorkSpaceGroup__more:not(:hover):not(:focus-visible):not([aria-expanded="true"]),
+.WorkSpaceGroup__header:focus-within .WorkSpaceGroup__more:not(:hover):not(:focus-visible):not([aria-expanded="true"]) {
+  color: var(--textSecondary);
+}
+.WorkSpaceGroup__header .WorkSpaceGroup__create:hover,
+.WorkSpaceGroup__header .WorkSpaceGroup__create:focus-visible,
+.WorkSpaceGroup__header .WorkSpaceGroup__create[data-focus-visible],
+.WorkSpaceGroup__header .WorkSpaceGroup__create[aria-expanded="true"],
+.WorkSpaceGroup__header .WorkSpaceGroup__create.is-active,
+.WorkSpaceGroup__header .WorkSpaceGroup__more:hover,
+.WorkSpaceGroup__header .WorkSpaceGroup__more:focus-visible,
+.WorkSpaceGroup__header .WorkSpaceGroup__more[aria-expanded="true"] {
+  background-color: var(--backgroundTertiary);
+  color: var(--text);
 }
 .WorkSpaceGroup__categories > section > .CategoryHeader {
   margin-inline-start: var(--sidebar-gap-x);
@@ -1212,7 +1232,8 @@ html[data-nolo-desktop="1"] [data-hook~="chat-esc-sidebar-scroller"]:not(#\#):no
   font-weight: 500;
 }
 @media (prefers-reduced-motion: reduce) {
-  .WorkSpaceGroup__more {
+  .WorkSpaceGroup__more,
+  .WorkSpaceGroup__create {
     transition: none;
   }
 }

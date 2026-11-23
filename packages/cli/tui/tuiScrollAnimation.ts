@@ -62,21 +62,31 @@ export type ScrollAnimatorDeps = {
 
 /**
  * 速度增益（油门）：默认模式下每条报告的距离不再固定 5 行，而是看「最近
- * VELOCITY_WINDOW_MS 内同方向来了多少条报告」。
+ * VELOCITY_WINDOW_MS 内同方向积累了多少脉冲权重」。
  *
- * 为什么：终端对一格滚轮通常连发多条报告（Ghostty discrete 倍率默认 3，
- * 触控板轻碰也是一串），固定 5 行/条 → 轻滚一格就走 15 行。油门语义是
- * 「轻踩走一点、踩深才加速」：
+ * 为什么区分「同格 burst」与「跨格连续拨动」：
+ * - 某些终端（如 Ghostty，discrete 倍率默认 3）对一格物理滚轮会在 <12ms 内
+ *   连发 3 条报告；轻滚一格 3 条应恰好走 3 行（每条 1 脉冲 → 累计 3 ≤ SLOW_COUNT）。
+ * - 标准终端（如 VTE / GNOME Terminal / Ptyxis / xterm）一格物理滚轮只发
+ *   1 条报告，人手连续拨动时相邻两格间隔在 20~150ms。若每条仍只计 1 脉冲且
+ *   窗口仅 160ms，人手连拨永远卡在 count ≤ 3 的 1 行死区里，完全触发不了加速。
  *
- *   n ≤ VELOCITY_SLOW_COUNT        → 1 行/条（一格 ≈ 3 行，与 less/vim 同感）
- *   n 更大（持续快滑 / 用力甩）     → 线性加到 VELOCITY_MAX_GAIN 行/条
+ * 因此：
+ * - 首条报告或同格 burst（dt < VELOCITY_CADENCE_SEPARATION_MS = 12ms）计 1 脉冲；
+ * - 跨格连续拨动（dt ≥ 12ms 且仍在 VELOCITY_WINDOW_MS 内）每格计
+ *   VELOCITY_CADENCE_PULSE_WEIGHT = 3 脉冲（对齐一格物理滚轮的量纲）。
+ *
+ *   pulsedCount ≤ VELOCITY_SLOW_COUNT  → 1 行/报告（慢滚 1 行、Ghostty 1 格 3 行）
+ *   pulsedCount 更大（连续拨动 / 快甩） → 线性加到 VELOCITY_MAX_GAIN 行/报告
  *
  * 小数增益用累加器结转，总距离不因取整丢失。反向立即清空窗口与累加器。
  */
-export const VELOCITY_WINDOW_MS = 160;
+export const VELOCITY_WINDOW_MS = 240;
 export const VELOCITY_SLOW_COUNT = 3;
-export const VELOCITY_GAIN_PER_REPORT = 0.35;
-export const VELOCITY_MAX_GAIN = 6;
+export const VELOCITY_GAIN_PER_REPORT = 0.65;
+export const VELOCITY_MAX_GAIN = 8;
+export const VELOCITY_CADENCE_SEPARATION_MS = 12;
+export const VELOCITY_CADENCE_PULSE_WEIGHT = 3;
 
 export function velocityGain(recentCount: number): number {
   if (recentCount <= VELOCITY_SLOW_COUNT) return 1;
@@ -159,8 +169,8 @@ export function createScrollAnimator(deps: ScrollAnimatorDeps) {
   const { wheelLines, maxLinesPerTick, adaptiveStep, velocityGain: useVelocity } =
     resolveScrollTuning(deps.env ?? process.env);
   const now = deps.now ?? (() => performance.now());
-  /** 最近同方向报告的时间戳（仅速度模式用）。 */
-  let recentReports: number[] = [];
+  /** 最近同方向报告的时间戳与脉冲权重（仅速度模式用）。 */
+  let recentReports: { ts: number; weight: number }[] = [];
   let recentDirection: ScrollWheelDirection | null = null;
   /** 小数增益结转，保证总距离不因取整丢失。 */
   let fractionalLines = 0;
@@ -173,9 +183,15 @@ export function createScrollAnimator(deps: ScrollAnimatorDeps) {
       fractionalLines = 0;
       recentDirection = direction;
     }
-    recentReports = recentReports.filter((ts) => t - ts < VELOCITY_WINDOW_MS);
-    recentReports.push(t);
-    fractionalLines += velocityGain(recentReports.length);
+    recentReports = recentReports.filter((entry) => t - entry.ts < VELOCITY_WINDOW_MS);
+    const lastEntry = recentReports.at(-1);
+    const weight =
+      lastEntry !== undefined && t - lastEntry.ts >= VELOCITY_CADENCE_SEPARATION_MS
+        ? VELOCITY_CADENCE_PULSE_WEIGHT
+        : 1;
+    recentReports.push({ ts: t, weight });
+    const pulsedCount = recentReports.reduce((sum, entry) => sum + entry.weight, 0);
+    fractionalLines += velocityGain(pulsedCount);
     const whole = Math.floor(fractionalLines);
     fractionalLines -= whole;
     return whole;

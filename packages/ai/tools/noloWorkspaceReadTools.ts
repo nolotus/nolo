@@ -833,7 +833,6 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
 
   const rawData = {
       success: true,
-      planningRecommendation: discovery.planningRecommendation,
       total: discovery.total,
       ...(typeof discovery.offset === "number" ? { offset: discovery.offset } : {}),
       ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
@@ -844,6 +843,8 @@ export async function listAgentsFunc(args: any, thunkApi: any, context?: import(
       // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
       // 参考标注），不再单列 unavailableAgents，避免两套真相。
       agents: discovery.agents,
+      planningRecommendation: discovery.planningRecommendation,
+      ...(discovery.tierHints ? { tierHints: discovery.tierHints } : {}),
       credentialGroups: discovery.credentialGroups,
     };
   const delivered = args?.compact === true && args?.verbose !== true

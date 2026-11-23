@@ -43,7 +43,6 @@ import {
   applyProviderPresetFields,
   findPresetIdForEdit,
   findOAuthProviderPresetIdByApiKeyRef,
-  getProviderPresetDisplayLabel,
   isApiKeyTemplatePresetId,
   isOAuthProviderPresetId,
   listProviderPresetGroups,
@@ -58,6 +57,9 @@ import type { FormData } from "../createAgentSchema";
 import * as stylex from "@stylexjs/stylex";
 import { modelSourceStyles as modelStyles } from "./modelSourceStyles";
 import { withLiteralClass } from "./withLiteralClass";
+import { mergeModelOptionsWithDiscovery } from "./providerModelDiscoveryClient";
+import { isAgentCredentialShared, providerCredentialRef } from "shared/providerSecrets";
+import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
 
 // CLI 模型列表（从 AdvancedSettingsTab 提取）
@@ -139,12 +141,6 @@ const CLI_LOGIN_COMMANDS: Record<CliProvider, string> = {
   kimi: "kimi login",
 };
 
-const API_SOURCE_LABELS: Record<ApiSourceType, string> = {
-  platform: "平台 API",
-  custom: "自定义 API",
-  cli: "CLI（终端）",
-};
-
 export type ModelSourceSectionProps = {
   errors: Record<string, string>;
   values: FormData;
@@ -153,6 +149,7 @@ export type ModelSourceSectionProps = {
   apiSource: ApiSourceType;
   setApiSource: (next: ApiSourceType) => void;
   readOnly?: boolean;
+  discoveryConnectionSaved?: boolean;
 };
 
 const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
@@ -163,6 +160,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
   apiSource,
   setApiSource,
   readOnly = false,
+  discoveryConnectionSaved,
 }) => {
   const { t } = useTranslation("ai");
   const currentServer = useAppSelector(selectCurrentServer);
@@ -172,6 +170,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
     (typeof window !== "undefined" ? window.location.origin : "");
   const authToken = currentToken ?? "";
   const [machines, setMachines] = useState<MachineSummary[]>([]);
+  const [editModelIdManually, setEditModelIdManually] = useState(false);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("manual");
   const [machinesError, setMachinesError] = useState<string | null>(null);
   // React 19 不支持 <details defaultOpen>；用本地 state 复现"仅初始展开"语义：
@@ -366,6 +365,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
   const handlePresetChange = useCallback(
     (id: string) => {
       setSelectedPresetId(id);
+      setEditModelIdManually(false);
       const fields = resolveProviderPresetFields(id);
       applyProviderPresetFields(fields, (key, value) => {
         set(key as keyof FormData, value as never);
@@ -390,16 +390,38 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
 
   const isOAuthPreset = isOAuthProviderPresetId(selectedPresetId);
   const isTemplatePreset = isApiKeyTemplatePresetId(selectedPresetId);
-  const providerPresetGroups = listProviderPresetGroups();
+  const providerPresetGroups = listProviderPresetGroups(t);
   const selectedPresetFields = resolveProviderPresetFields(selectedPresetId);
-  const selectedModelOptions = selectedPresetFields.modelOptions;
+  const inEditForm = discoveryConnectionSaved !== undefined;
+  const sharedRef = providerCredentialRef(selectedPresetId);
+  // Account discovery reads the cloud copy; a private Agent ref takes precedence at runtime.
+  const matchesPresetEndpoint = isTemplatePreset &&
+    customProviderUrl?.trim().replace(/\/+$/, "") === selectedPresetFields.customProviderUrl.replace(/\/+$/, "") &&
+    providerValue?.trim().toLowerCase() === selectedPresetFields.provider;
+  const hasSharedProviderKey = matchesPresetEndpoint && isAgentCredentialShared(values) &&
+    apiKeyRefValueStr.trim() === sharedRef && (!credentialRefValue?.trim() || credentialRefValue.trim() === sharedRef);
+  const discovery = useProviderModelDiscovery({
+    serverOrigin,
+    token: authToken,
+    presetId: !readOnly && isCustomApi && discoveryConnectionSaved && !apiKeyValue
+      ? selectedPresetId
+      : "",
+    hasSharedProviderKey,
+  });
+  const selectedModelOptions = mergeModelOptionsWithDiscovery(selectedPresetFields.modelOptions, discovery);
+  const sourceOptions = [
+    { value: "platform", label: t("editModelSource.platform", "平台 API"), desc: t("editModelSource.platformHint", "使用平台密钥") },
+    { value: "custom", label: t("editModelSource.custom", "自定义 API"), desc: t("editModelSource.customHint", "使用自己的密钥") },
+    { value: "cli", label: t("editModelSource.cli", "CLI（终端）"), desc: t("editModelSource.cliHint", "例如 gh copilot") },
+  ] as const;
+  const selectedPresetLabel = providerPresetGroups.flatMap(({ items }) => items).find(({ id }) => id === selectedPresetId)?.label;
 
   return (
     <section className="adv-settings__model">
         {readOnly ? (
           <>
             <FormField label={t("form.apiSource")} {...common}>
-              <div {...stylex.props(modelStyles.readonlyValue)}>{API_SOURCE_LABELS[apiSource]}</div>
+              <div {...stylex.props(modelStyles.readonlyValue)}>{sourceOptions.find(({ value }) => value === apiSource)?.label}</div>
             </FormField>
 
             {isPlatformApi && (
@@ -456,7 +478,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
               <div
                 {...stylex.props(modelStyles.customApiBox)}
               >
-                <FormField label="CLI 工具" {...common}>
+                <FormField label={t("editModelSource.cliTool", "CLI 工具")} {...common}>
                   <div {...stylex.props(modelStyles.readonlyValue)}>{cliProviderLabel}</div>
                 </FormField>
 
@@ -464,7 +486,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   <div {...stylex.props(modelStyles.readonlyValue)}>{selectedCliModelLabel}</div>
                 </FormField>
 
-                <FormField label="运行位置" {...common}>
+                <FormField label={t("editModelSource.runLocation", "运行位置")} {...common}>
                   <div {...stylex.props(modelStyles.readonlyValue)}>
                     {selectedMachine
                       ? `${selectedMachine.name} (${selectedMachine.platform}/${selectedMachine.arch})`
@@ -478,11 +500,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
           <>
             <FormField label={t("form.apiSource")} {...common}>
               <div {...stylex.props(modelStyles.apiSourceSelector)}>
-                {[
-                  { value: "platform" as ApiSourceType, label: "平台 API", desc: "使用平台密钥" },
-                  { value: "custom" as ApiSourceType, label: "自定义 API", desc: "自己的密钥" },
-                  { value: "cli" as ApiSourceType, label: "CLI（终端）", desc: "gh copilot 等" },
-                ].map((opt) => (
+                {sourceOptions.map((opt) => (
                   <button
                     key={opt.value}
                     type="button"
@@ -530,18 +548,14 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
               <div
                 {...stylex.props(modelStyles.customApiBox)}
               >
-                <FormField label="Provider" required {...common}>
+                <FormField label={t("editModelSource.provider", "服务商")} required {...common}>
                   <SelectRoot
                     selectedKey={selectedPresetId}
                     onSelectionChange={(v) => handlePresetChange(v as string)}
                   >
                     <SelectTrigger className="agent-create-esc-cli-select nolo-select-trigger">
                       <SelectValue>
-                        {() => {
-                          const v = selectedPresetId;
-                          if (!v) return "选择 Provider";
-                          return getProviderPresetDisplayLabel(v);
-                        }}
+                        {() => selectedPresetLabel ?? t("form.selectProvider")}
                       </SelectValue>
                       <SelectIcon>
                         <LuChevronDown size={16} />
@@ -557,28 +571,22 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                               </SelectGroupLabel>
                             ) : null}
                             {group.items.map((item) => {
-                              const baseTextValue = item.description
-                                ? `${item.label} (${item.description})`
-                                : item.label;
-                              // 官方限制第三方登录的通道照常可选（产品决定 2026-11-14），
-                              // 只在选项文本上标出来，由用户自己承担后果。
-                              const textValue = item.riskNotice
-                                ? `${baseTextValue} · ${t(
-                                    "providerPreset.officialRestricted",
-                                    "官方限制第三方登录",
-                                  )}`
-                                : baseTextValue;
+                              // Keep the brand name separate from localized risk copy.
+                              const riskLabel = item.riskNotice
+                                ? t("providerPreset.officialRestricted", "官方限制第三方登录")
+                                : undefined;
                               return (
                                 <SelectItem
                                   key={item.id}
                                   id={item.id}
-                                  textValue={textValue}
+                                  textValue={riskLabel ? `${item.label} · ${riskLabel}` : item.label}
                                 >
                                   <SelectItemText className="nolo-select-item-text">
                                     <ProviderPresetOptionLabel
-                                      label={textValue}
+                                      label={item.label}
                                       provider={item.provider}
                                     />
+                                    {riskLabel && <small style={{ display: "block", whiteSpace: "normal" }}>{riskLabel}</small>}
                                   </SelectItemText>
                                   <SelectItemIndicator className="nolo-select-item-indicator">
                                     <LuCheck size={14} />
@@ -604,8 +612,8 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                     {hasBrokeredKey && (
                       <span style={{ fontSize: "var(--fontSize-xs)", color: "var(--text-muted, #888)", display: "block", marginTop: 4 }}>
                         {usesProviderKey
-                          ? t("form.apiKeyProviderShared", "✓ 使用共享的 {{presetId}} 密钥（跨 Agent 复用）。如需更换请在上方填写新 Key。", { presetId: providerKeyPresetId })
-                          : `✓ ${t("form.apiKeyConfigured", "API Key 已配置（已安全存储）。如需更换请在上方填写新 Key。")}`}
+                          ? t("editModelSource.apiKeyProviderShared", "✓ 使用共享的 {{presetId}} 密钥（跨 Agent 复用）。如需更换请在上方填写新 Key。", { presetId: providerKeyPresetId })
+                          : `✓ ${t("editModelSource.apiKeyConfigured", "API Key 已配置（已安全存储）。如需更换请在上方填写新 Key。")}`}
                       </span>
                     )}
                     {selectedPresetFields.keyFormatHint && (
@@ -617,7 +625,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                 )}
 
                 <FormField label={t("form.model")} required error={errors.model} {...common}>
-                  {selectedModelOptions.length > 0 ? (
+                  {selectedModelOptions.length > 0 && !editModelIdManually ? (
                     <Select
                       className={stylex.props(modelStyles.cliSelect).className}
                       selectedKey={(values.model as string) || selectedPresetFields.model}
@@ -625,14 +633,14 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                         const id = String(key ?? "");
                         set("model", id);
                         const opt = selectedModelOptions.find((m) => m.id === id);
-                        set("hasVision", Boolean(opt?.hasVision));
+                        if (opt) set("hasVision", Boolean(opt.hasVision));
                       }}
                     >
                       {values.model && !selectedModelOptions.some((model) => model.id === values.model) ? (
                         <SelectItem id={values.model as string} textValue={values.model as string}>{values.model as string}</SelectItem>
                       ) : null}
                       {selectedModelOptions.map((model) => {
-                        const label = `${model.label}${model.recommended ? "（推荐）" : ""}`;
+                        const label = model.recommended ? t("form.modelRecommendedLabel", "{{label}}（推荐）", { label: model.label }) : model.label;
                         return (
                           <SelectItem key={model.id} id={model.id} textValue={label}>
                             <ModelOptionLabel label={label} hasVision={model.hasVision} />
@@ -642,6 +650,13 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                     </Select>
                   ) : (
                     <Input value={(values.model as string) ?? ""} onChange={(e) => set("model", e.target.value)} placeholder={t("form.customModelNamePlaceholder")} />
+                  )}
+                  {inEditForm && selectedModelOptions.length > 0 && (
+                    <button type="button" className="btn btn-sm" onClick={() => setEditModelIdManually((manual) => !manual)}>
+                      {editModelIdManually
+                        ? t("editModelSource.chooseModel", "从目录选择")
+                        : t("editModelSource.manualModel", "手动输入模型 ID")}
+                    </button>
                   )}
                 </FormField>
 
@@ -682,10 +697,10 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                       }}
                     >
                       {values.machineId
-                        ? `高级选项：已绑定运行电脑 (${selectedMachine?.name ?? values.machineId})`
+                        ? t("editModelSource.cliMachineBound", { machine: selectedMachine?.name ?? values.machineId })
                         : "高级选项：指定运行电脑（默认当前设备本地直连）"}
                     </summary>
-                    <FormField label="运行位置" {...common}>
+                    <FormField label={t("editModelSource.runLocation", "运行位置")} {...common}>
                       <Select
                         className={stylex.props(modelStyles.cliSelect).className}
                         selectedKey={(values.machineId as string) || ""}
@@ -742,7 +757,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
               <div
                 {...stylex.props(modelStyles.customApiBox)}
               >
-                <FormField label="CLI 工具" {...common}>
+                <FormField label={t("editModelSource.cliTool", "CLI 工具")} {...common}>
                   <Select
                     className={stylex.props(modelStyles.cliSelect).className}
                     selectedKey={(values.cliProvider as string) || DEFAULT_CLI_PROVIDER}
@@ -791,7 +806,7 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                   </Select>
                 </FormField>
 
-                <FormField label="凭据状态" {...common}>
+                <FormField label={t("editModelSource.credentialStatus", "凭据状态")} {...common}>
                   <div
                     style={{
                       padding: "8px 12px",
@@ -811,10 +826,10 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                           backgroundColor: "var(--warning, #f59e0b)",
                         }}
                       />
-                      <strong style={{ color: "var(--text)" }}>未验证（需在本机登录）</strong>
+                      <strong style={{ color: "var(--text)" }}>{t("editModelSource.cliUnverified")}</strong>
                     </div>
                     <p style={{ margin: "4px 0 0", fontSize: "var(--fontSize-xs)", color: "var(--textSecondary)", lineHeight: 1.45 }}>
-                      机器在线具备执行能力不等于 CLI 已认证。请确保在目标机器终端已运行登录命令（如 <code>{CLI_LOGIN_COMMANDS[selectedCliProvider] ?? "登录命令"}</code>）。
+                      {t("editModelSource.cliLoginHint", { command: CLI_LOGIN_COMMANDS[selectedCliProvider] ?? t("editModelSource.cliLoginCommand") })}
                     </p>
                   </div>
                 </FormField>
@@ -865,10 +880,10 @@ const ModelSourceSection: React.FC<ModelSourceSectionProps> = ({
                     }}
                   >
                     {values.machineId
-                      ? `高级选项：已绑定运行电脑 (${selectedMachine?.name ?? values.machineId})`
-                      : "高级选项：指定运行机器（默认使用本地/默认 CLI 环境）"}
+                      ? t("editModelSource.cliMachineBound", { machine: selectedMachine?.name ?? values.machineId })
+                      : t("editModelSource.cliMachineUnbound")}
                   </summary>
-                  <FormField label="运行位置" {...common}>
+                  <FormField label={t("editModelSource.runLocation", "运行位置")} {...common}>
                     <Select
                       className={stylex.props(modelStyles.cliSelect).className}
                       selectedKey={(values.machineId as string) || ""}

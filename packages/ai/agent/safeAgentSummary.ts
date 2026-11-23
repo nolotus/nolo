@@ -189,6 +189,7 @@ export interface SafeAgentSummary {
   name: string;
   handle: string | null;
   introduction: string | null;
+  roleHint?: string;
   model: string | null;
   modelTier: ModelTier;
   provider: string | null;
@@ -393,6 +394,16 @@ export function isOwnedAgentRecord(
   );
 }
 
+function subscriptionQuotaChannel(source: unknown): string | undefined {
+  if (typeof source !== "string") return undefined;
+  const id = source.toLowerCase();
+  if (id.includes("fetchavailablemodels:pool:")) return "antigravity";
+  const probe = id.match(/(?:^|[^a-z0-9-])(antigravity|codex|anthropic|claude|cursor|devin|xai)-oauth(?=$|[^a-z0-9-])/)?.[1];
+  if (probe === "codex") return "chatgpt";
+  if (probe === "anthropic") return "claude";
+  return probe;
+}
+
 export function toSafeAgentSummary(
   record: any,
   options?: SafeAgentSummaryOptions
@@ -425,6 +436,11 @@ export function toSafeAgentSummary(
         ? record.description
         : null;
 
+  const roleText = typeof record?.introduction === "string"
+    ? record.introduction.trim().replace(/\s+/g, " ") : "";
+  const roleChars = Array.from(roleText);
+  const roleHint = roleChars.length > 60 ? `${roleChars.slice(0, 59).join("")}…` : roleText;
+
   const model = typeof record?.model === "string" && record.model ? record.model : null;
   const provider =
     typeof record?.provider === "string" && record.provider
@@ -455,21 +471,6 @@ export function toSafeAgentSummary(
     typeof record?.nextAvailableAt === "number" && Number.isFinite(record.nextAvailableAt)
       ? record.nextAvailableAt
       : undefined;
-  // 配额快照透传：只在校验为合法形状（windows 数组 + 数值 observedAt）时带出，
-  // 坏数据静默丢弃（与 nextAvailableAt 同一口径——上游写的脏数据不进摘要）。
-  const quotaExhaustion = record?.quotaExhaustion &&
-    typeof record.quotaExhaustion.observedAt === "number" &&
-    Number.isFinite(record.quotaExhaustion.observedAt)
-    ? { observedAt: record.quotaExhaustion.observedAt } : undefined;
-  const rawQuota = record?.quota;
-  const quota: AgentQuota | undefined =
-    rawQuota && typeof rawQuota === "object" &&
-    Array.isArray((rawQuota as AgentQuota).windows) &&
-    typeof (rawQuota as AgentQuota).observedAt === "number" &&
-    Number.isFinite((rawQuota as AgentQuota).observedAt)
-      ? (rawQuota as AgentQuota)
-      : undefined;
-
   const currentUserId = options?.userId;
   // dbKey 与 privateKey 是同一个 agent-<userId>-<id> 键的两种字段名（CLI/TUI
   // 传 ListedAgent，只有 privateKey；web 传原始 record，带 dbKey）。
@@ -534,8 +535,29 @@ export function toSafeAgentSummary(
   const credentialGroup = record?.credentialGroup ?? credInfo?.credentialGroup;
   const credentialKind = record?.credentialKind ?? credInfo?.credentialKind;
 
+  const rawQuota: AgentQuota | undefined = record?.quota;
+  const snapshot = rawQuota && Array.isArray(rawQuota.windows) && Number.isFinite(rawQuota.observedAt)
+    ? rawQuota : undefined;
+  const ref = typeof rawCredRef === "string" ? rawCredRef.trim().toLowerCase() : undefined;
+  const group = typeof credentialGroup === "string" ? credentialGroup.trim().toLowerCase() : undefined;
+  const oauthChannel = isOAuthApiKeyRef(ref) ? ref : isOAuthApiKeyRef(group) ? group : undefined;
+  const providerId = provider?.trim().toLowerCase();
+  const channel = oauthChannel ?? (providerId === "google-antigravity" ? "antigravity" : providerId);
+  const platformChannel = apiSource === "platform" ||
+    (providerId === "nolo" && !oauthChannel && apiSource !== "custom");
+  const windows = snapshot?.windows.filter(window => {
+    const origin = subscriptionQuotaChannel(window?.source);
+    return !origin || (!platformChannel && (!channel || origin === channel));
+  });
+  const foreignOnly = Boolean(snapshot?.windows.length && windows?.length === 0);
+  const quota = snapshot && windows && !foreignOnly ? { ...snapshot, windows } : undefined;
+  // An exhaustion response can stand alone, but must not survive a wholly foreign snapshot.
+  const observedAt = record?.quotaExhaustion?.observedAt;
+  const quotaExhaustion = !foreignOnly && typeof observedAt === "number" && Number.isFinite(observedAt)
+    ? { observedAt } : undefined;
+
   const availability = resolveAgentAvailability(
-    { nextAvailableAt, quota, quotaExhaustion },
+    { nextAvailableAt, quota, quotaExhaustion, model },
     options?.now ?? Date.now(),
   );
 
@@ -546,6 +568,7 @@ export function toSafeAgentSummary(
     name,
     handle,
     introduction,
+    ...(roleHint ? { roleHint } : {}),
     model,
     modelTier: resolveModelTier(model),
     provider,
@@ -596,7 +619,7 @@ export function sortSafeAgentSummaries<T extends AgentSelectionCandidate>(agents
  * 字段，必须保留；introduction/cliProvider/价格等长文本或大量
  * 为 null 的字段在截断预算里是纯噪音，默认剔除。verbose 模式拿回完整字段集。
  */
-export const COMPACT_AGENT_SUMMARY_FIELDS = [
+const AGENT_SUMMARY_FIELDS = [
   // —— 派发决策必需（短字段，必须排最前）——
   // agentKey 是唯一不可推导、必须逐字复制的字段；截断时它首先被保住。
   "agentKey",
@@ -606,7 +629,6 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   "billingSource",
   // 扣费授权判据：listAgents 默认走 compact 投影，缺了它模型在默认派发
   // 流程里读不到「派它之前要先问用户」（2026-11-15 事故成因）。
-  // 与 ULTRA_COMPACT 白名单必须同时保留——两处任何一处缺失都等于该字段不存在。
   "requiresPaidApproval",
   "availabilityStatus",
   "credentialGroup",
@@ -628,9 +650,19 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
   // Phase 2A economics 快照（period/multipliers/changesAt 等小对象）。
   // 只对 DeepSeek API / BigModel GLM Coding Plan 存在；不含完整 policy/windows。
   "economics",
+] as const;
+
+// Both projections end with these fields; keep roleHint in its existing compact slot.
+const AGENT_SUMMARY_TRAILING_FIELDS = [
   "tools",
   // 额度快照（windows 数组，体积最大）：只有上游真上报过窗口的 agent 才带。
   "quota",
+] as const;
+
+export const COMPACT_AGENT_SUMMARY_FIELDS = [
+  ...AGENT_SUMMARY_FIELDS,
+  "roleHint",
+  ...AGENT_SUMMARY_TRAILING_FIELDS,
 ] as const;
 
 export type CompactSafeAgentSummary = Pick<
@@ -680,30 +712,8 @@ export function toCompactAgentSummary(
  * 同时剔除次要长文本说明与非准入元数据（如 introduction、greeting、prompt 等）。
  */
 export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
-  // —— 派发决策与关键准入语义（必须保留，不能宣称安全但丢证据）——
-  "agentKey",
-  "name",
-  "model",
-  "modelTier",
-  "billingSource",
-  // 扣费授权判据必须随投影一起走：精简投影里没有它，模型就看不到
-  // 「派它之前要先问用户」，等于该字段不存在（2026-11-15 事故的直接成因）。
-  "requiresPaidApproval",
-  "availabilityStatus",
-  "credentialGroup",
-  "isFavorite",
-  "isOAuth",
-  "isOwned",
-  "isPublic",
-  "provider",
-  "apiSource",
-  "credentialKind",
-  "credentialed",
-  "nextAvailableAt",
-  "availabilityReason",
-  "economics",
-  "tools",
-  "quota",
+  ...AGENT_SUMMARY_FIELDS,
+  ...AGENT_SUMMARY_TRAILING_FIELDS,
 ] as const;
 
 export type UltraCompactSafeAgentSummary = Pick<

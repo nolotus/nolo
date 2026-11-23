@@ -43,6 +43,9 @@ export async function compressImage(
 export interface WaitForFileReadyOptions {
     maxWaitMs?: number;
     intervalMs?: number;
+    /** Only use for the current server’s upload URL, never a persisted media URL. */
+    token?: string;
+    request?: typeof fetch;
 }
 
 const appendNoCacheQuery = (url: string): string => {
@@ -50,8 +53,12 @@ const appendNoCacheQuery = (url: string): string => {
     return url.includes("?") ? `${url}&${stamp}` : `${url}?${stamp}`;
 };
 
-const requestWithFallback = async (url: string): Promise<Response> => {
-    const headResponse = await fetch(url, { method: "HEAD" });
+const requestWithFallback = async (request: typeof fetch, url: string, token?: string): Promise<Response> => {
+    const options: RequestInit = {
+        credentials: "omit", redirect: "error", cache: "no-store",
+        ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
+    };
+    const headResponse = await request(url, { ...options, method: "HEAD" });
     // Only fall back when the origin explicitly does not support HEAD.
     // For 404/500/etc. we want to preserve the real status instead of
     // downloading the full body again with GET.
@@ -59,7 +66,7 @@ const requestWithFallback = async (url: string): Promise<Response> => {
         return headResponse;
     }
 
-    return fetch(url, { method: "GET" });
+    return request(url, { ...options, method: "GET" });
 };
 
 export const waitForFileReady = async (
@@ -67,6 +74,8 @@ export const waitForFileReady = async (
     {
         maxWaitMs = 10000,
         intervalMs = 500,
+        token,
+        request = fetch,
     }: WaitForFileReadyOptions = {}
 ): Promise<boolean> => {
     const start = Date.now();
@@ -78,7 +87,7 @@ export const waitForFileReady = async (
         attempt++;
         const tryUrl = appendNoCacheQuery(url);
         try {
-            const response = await requestWithFallback(tryUrl);
+            const response = await requestWithFallback(request, tryUrl, token?.trim());
             if (response.ok) {
                 console.log(`[imageUtils.native] waitForFileReady: OK after ${attempt} attempts (${Date.now() - start}ms)`);
                 return true;

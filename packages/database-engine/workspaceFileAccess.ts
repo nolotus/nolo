@@ -10,6 +10,7 @@ import {
 import { fileKey as buildFileKey } from "database/keys";
 import { isTombstoneRecord } from "database/tombstones";
 import { asOptionalTrimmedString } from "core/optionalString";
+import { resolveSpaceWriteAuthorization } from "./spaceWriteRole";
 
 export type PrincipalRef =
   | { kind: "user"; id: string }
@@ -263,10 +264,14 @@ export async function authorizeWorkspacePrincipalWrite(args: {
   }
 
   const store = args.deps?.store ?? (serverDb as unknown as SpaceReadableStore);
-  let role: SpaceRole | null;
-  try {
-    role = await resolveSpaceRoleFromStore(store, actorUserId, normalized.id);
-  } catch {
+  // 与 `database/server/routes/uploadOwnership.ts` 共用同一个写资格实现，
+  // 防止「上传能进、写授权不进」这类两处漂移。
+  const authorization = await resolveSpaceWriteAuthorization({
+    store,
+    actorUserId,
+    spaceId: normalized.id,
+  });
+  if (authorization.kind === "unavailable") {
     return {
       allowed: false,
       reason: "authorization_unavailable",
@@ -274,7 +279,17 @@ export async function authorizeWorkspacePrincipalWrite(args: {
       message: "Failed to verify Space role for write authorization",
     };
   }
-  if (!role) {
+  if (authorization.kind === "denied") {
+    // 对外 reason 沿用本函数既有字符串：guest 与「非成员 / Space 不存在 / 已删除」
+    // 分开，其余合并成 not_space_member（与改动前的响应形状一致）。
+    if (authorization.reason === "insufficient_space_role") {
+      return {
+        allowed: false,
+        reason: "insufficient_space_role",
+        statusCode: 403,
+        message: "Space guests cannot commit artifacts",
+      };
+    }
     return {
       allowed: false,
       reason: "not_space_member",
@@ -282,15 +297,7 @@ export async function authorizeWorkspacePrincipalWrite(args: {
       message: "Caller is not a member of the target Space",
     };
   }
-  if (role === "guest") {
-    return {
-      allowed: false,
-      reason: "insufficient_space_role",
-      statusCode: 403,
-      message: "Space guests cannot commit artifacts",
-    };
-  }
-  return { allowed: true, principal: normalized, role };
+  return { allowed: true, principal: normalized, role: authorization.role };
 }
 
 /** Host storage paths are internal, even for callers allowed to read bytes. */

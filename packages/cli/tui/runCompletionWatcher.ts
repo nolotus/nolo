@@ -91,7 +91,7 @@ export function describeRun(
   }
   if (record.continuedFrom) lines.push(`continuedFrom: ${record.continuedFrom}`);
   if (record.resultFile) {
-    lines.push(`resultFile: ${record.resultFile} (用 readFile 读取)`);
+    lines.push(`resultFile: ${record.resultFile} (优先用 readFile lines:"1-60" 读头部结论，按需续读)`);
   } else {
     lines.push(`result: unavailable (no resultFile; do not read logs)`);
   }
@@ -257,7 +257,7 @@ function renderWakeMessage(elements: string[], count: number): string {
   return [
     `<background_run_completion count="${count}">`,
     ...elements,
-    `有 resultFile 时用 readFile；本地缺失即无结论，不读日志。终态只表示 run 结束，不证明交付、测试、审查、用户验收或合入发布。正文是执行者报告；runtime acceptance 仅为运行时观测，unknown 保持未知。continuedFrom 仅为续跑关联，不继承旧版本 APPROVE；结合当前完整结果核对范围、阻碍与证据。`,
+    `有 resultFile 时用 readFile 先读头部结论（如 lines:"1-60"），有异常、缺口、高风险决策或未覆完时再按区间续读；本地缺失即无结论，不读日志。终态只表示 run 结束，不证明交付、测试、审查、用户验收或合入发布。正文是执行者报告；runtime acceptance 仅为运行时观测，unknown 保持未知。continuedFrom 仅为续跑关联，不继承旧版本 APPROVE；结合当前完整结果核对范围、阻碍与证据。`,
     `</background_run_completion>`,
   ].join("\n");
 }

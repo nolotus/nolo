@@ -1,4 +1,9 @@
 import { normalizeServerOrigin } from "core/serverOrigin";
+
+// Raw-byte limits shared by every provider inline path and the public byte route.
+export const INLINE_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+export const INLINE_IMAGE_TOTAL_MAX_BYTES = 20 * 1024 * 1024;
+export const INLINE_IMAGE_PUBLIC_HEADER = "x-nolo-inline-public";
 import { API_ENDPOINTS } from "./config";
 
 const normalizeFileId = (fileId: string | undefined | null): string => {

@@ -1,9 +1,9 @@
 // 路径: ai/agent/web/AgentCreateSourceStep.tsx
-// Web 手动创建：四卡内联快速创建（平台 / 订阅 / API / CLI）。
+// Web 手动创建：三张主卡与次级 CLI 入口（平台 / 订阅 / API / CLI）。
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { TFunction } from "i18next";
+import { subscriptionFootnoteProviders } from "./agentSourceFootnote";
 import { useNavigate, Link } from "app/routing";
 import Button from "render/web/ui/Button";
 import { Select, SelectItem } from "render/web/ui/Select";
@@ -13,7 +13,7 @@ import { ProviderPresetOptionLabel } from "./ProviderPresetOptionLabel";
 import { PasswordInput } from "render/web/form/Input";
 import { Checkbox } from "render/web/form/Checkbox";
 import { MANUAL_PROVIDER_PRESET_ID } from "../providerPresetApply";
-import { CLI_PROVIDER_GROUPS } from "ai/agent/cliProviders";
+import { CLI_PROVIDER_GROUPS, CREATABLE_CLI_PROVIDERS } from "ai/agent/cliProviders";
 import {
   CREATE_RUN_MODE_LABELS,
   PLATFORM_QUICK_CREATE_MODEL,
@@ -21,17 +21,11 @@ import {
   useAgentCreateSourceState,
   type AgentCreateQuickDraft,
   type CreateRunMode,
+  type QuickCreateAttempt,
 } from "./useAgentCreateSourceState";
 import type { SubscriptionOAuthConnection } from "./useSubscriptionOAuthConnection";
-import { useIsLoggedIn, useUserId } from "identity";
-import type { ReasoningEffort } from "../createAgentSchema";
-import {
-  useModelReasoningCapability,
-  useReasoningEffortCalibration,
-  resolveReasoningEffortOptions,
-  getReasoningEffortProviderHint,
-  type UseModelReasoningCapabilityResult,
-} from "./useModelReasoningCapability";
+import { getIsDesktopApp } from "app/utils/env";
+import ThinkingControlField from "./ThinkingControlField";
 import * as stylex from "@stylexjs/stylex";
 import { agentFormStyles as afs } from "./agentFormStyles";
 import { withLiteralClass } from "./withLiteralClass";
@@ -49,10 +43,15 @@ export type AgentCreateSourceStepProps = {
   /** Open full AgentForm with draft applied. */
   onAdvancedEdit: (draft: AgentCreateQuickDraft) => void;
   /** Minimal create → dialog. */
-  onQuickCreate: (draft: AgentCreateQuickDraft) => void | Promise<void>;
+  onQuickCreate: (draft: AgentCreateQuickDraft, attempt?: QuickCreateAttempt) => boolean | void | Promise<boolean | void>;
   isSubmitting?: boolean;
   disabled?: boolean;
 };
+
+const CREATABLE_CLI_GROUPS = CLI_PROVIDER_GROUPS.map((group) => ({
+  ...group,
+  items: group.items.filter((item) => CREATABLE_CLI_PROVIDERS.includes(item.value)),
+})).filter((group) => group.items.length > 0);
 
 const CARD_DEFS: {
   id: CreateRunMode;
@@ -77,102 +76,24 @@ const CARD_DEFS: {
   {
     id: "subscription",
     titleKey: "createAgent.runMode.subscription.title",
-    titleDefault: "订阅会员",
+    titleDefault: "我的订阅",
     descKey: "createAgent.runMode.subscription.desc",
     descDefault: "使用已有订阅，无需按量付费。",
     footnoteKey: "createAgent.runMode.subscription.footnote",
-    footnoteDefault: "支持 ChatGPT、SuperGrok、Token Plan、Ollama Cloud、CommandCode。",
+    // 静态文案里不再写死支持名单（会随 registry 漂移）；名单由
+    // `subscriptionFootnoteProviders` 从 registry 派生后覆盖，空名单时保持这句中性说明。
+    footnoteDefault: "使用已有订阅，无需按量付费。",
   },
   {
     id: "api",
     titleKey: "createAgent.runMode.api.title",
-    titleDefault: "API 用量计费",
+    titleDefault: "自带 API",
     descKey: "createAgent.runMode.api.desc",
     descDefault: "填写 API Key，按上游用量计费。",
     footnoteKey: "createAgent.runMode.api.footnote",
     footnoteDefault: "支持 OpenAI、Anthropic 等兼容接口。",
   },
-  {
-    id: "cli",
-    titleKey: "createAgent.runMode.cli.title",
-    titleDefault: "本机 CLI",
-    descKey: "createAgent.runMode.cli.desc",
-    descDefault: "使用本机的 Claude Code、Codex、Gemini CLI。",
-    footnoteKey: "createAgent.runMode.cli.footnote",
-    footnoteDefault: "需桌面端绑定本机；未绑定也可先创建。",
-  },
 ];
-
-/**
- * 推理强度下拉选项。label 通过 i18n 渲染，id 用作 reasoning_effort 存储值。
- */
-function getReasoningEffortSelectOptions(
-  t: (key: string) => string,
-): { id: ReasoningEffort; label: string }[] {
-  const prefix = "createAgent.quickCreate.reasoningEffortOptions.";
-  return [
-    { id: "none", label: t(`${prefix}none`) },
-    { id: "minimal", label: t(`${prefix}minimal`) },
-    { id: "low", label: t(`${prefix}low`) },
-    { id: "medium", label: t(`${prefix}medium`) },
-    { id: "high", label: t(`${prefix}high`) },
-    { id: "xhigh", label: t(`${prefix}xhigh`) },
-    { id: "max", label: t(`${prefix}max`) },
-    { id: "ultra", label: t(`${prefix}ultra`) },
-  ];
-}
-
-/**
- * 推理强度选择字段：创建面板三处来源（自定义 / 订阅 OAuth / 订阅 Key）共用。
- * 按模型级真实能力渲染：不支持提示 / 无档位提示 / provider 不可用提示 / 过滤后的下拉。
- */
-function ReasoningEffortSelectField({
-  t,
-  reasoning,
-  provider,
-  value,
-  onChange,
-  busy,
-}: {
-  t: TFunction;
-  reasoning: UseModelReasoningCapabilityResult;
-  provider: string | null | undefined;
-  value: ReasoningEffort;
-  onChange: (v: ReasoningEffort) => void;
-  busy: boolean;
-}) {
-  const resolution = resolveReasoningEffortOptions(
-    reasoning.info,
-    reasoning.loading,
-    provider,
-  );
-  if (resolution.kind === "unsupported-model") {
-    return <span>{t("help.modelNoReasoningEffort", "该模型不支持推理强度设置")}</span>;
-  }
-  if (resolution.kind === "no-levels") {
-    return <span>{t("help.modelNoReasoningLevels", "该模型支持推理，但无独立强度档位可调")}</span>;
-  }
-  if (resolution.kind === "provider-unavailable") {
-    return <span>{getReasoningEffortProviderHint(provider)}</span>;
-  }
-  return (
-    <Select
-      className="agent-create-esc-source-select"
-      label={t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-      selectedKey={value}
-      isDisabled={busy}
-      onSelectionChange={(key) => onChange(String(key ?? "medium") as ReasoningEffort)}
-    >
-      {getReasoningEffortSelectOptions(t)
-        .filter((o) => (resolution.efforts as string[]).includes(o.id))
-        .map((o) => (
-          <SelectItem key={o.id} id={o.id} textValue={o.label}>
-            {o.label}
-          </SelectItem>
-        ))}
-    </Select>
-  );
-}
 
 
 const AgentCreateIntro: React.FC = () => {
@@ -182,68 +103,103 @@ const AgentCreateIntro: React.FC = () => {
       <h2 {...stylex.props(afs.createSourceStepHeading)}>
         {t("createAgent.runMode.heading", "运行方式")}
       </h2>
-      <p {...stylex.props(afs.createSourceStepSub)}>
-        {t(
-          "createAgent.runMode.subheading",
-          "先选择模型从哪里来。平台路径填提示词即可创建；需要知识、工具、发布时用高级编辑。"
-        )}
-      </p>
     </div>
   );
 };
+
+const CREATE_MODE_ORDER: readonly CreateRunMode[] = [...CARD_DEFS.map(({ id }) => id), "cli"];
 
 const AgentCreateModeCards: React.FC<{
   selected: CreateRunMode | null;
   busy: boolean;
   onSelect: (mode: CreateRunMode) => void;
-}> = ({ selected, busy, onSelect }) => {
+  /**
+   * 卡片脚注覆盖项。订阅模式的支持名单来自 registry（见
+   * `subscriptionFootnoteProviders`），不再依赖手写的默认文案。
+   */
+  footnotes?: Partial<Record<CreateRunMode, React.ReactNode>>;
+}> = ({ selected, busy, onSelect, footnotes }) => {
   const { t } = useTranslation("ai");
+  const tabStop = selected ?? CREATE_MODE_ORDER[0];
+
+  const handleModeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const direction = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+      : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+    if (!direction || busy || !(event.target instanceof HTMLElement)) return;
+
+    const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role="radio"]'));
+    const index = buttons.findIndex((button) => button === event.target);
+    if (index < 0) return;
+    event.preventDefault();
+    const nextIndex = (index + direction + buttons.length) % buttons.length;
+    buttons[nextIndex]?.focus();
+    const nextMode = CREATE_MODE_ORDER[nextIndex];
+    if (nextMode) onSelect(nextMode);
+  };
   return (
     <div
-      {...stylex.props(afs.createSourceStepCards)}
+      {...stylex.props(afs.createSourceModeChoices)}
       role="radiogroup"
+      onKeyDown={handleModeKeyDown}
       aria-label={t("createAgent.runMode.heading", "运行方式")}
     >
-      {CARD_DEFS.map((card) => {
-        const isActive = selected === card.id;
-        return (
-          <button
-            key={card.id}
-            type="button"
-            role="radio"
-            aria-checked={isActive}
-            disabled={busy}
-            {...withLiteralClass(
-              "agent-create-esc-source-card",
-              afs.createSourceCard,
-              isActive && afs.createSourceCardActive
-            )}
-            onClick={() => onSelect(card.id)}
-          >
-            <div {...stylex.props(afs.createSourceCardTop)}>
-              <span
-                  {...stylex.props(
-                    afs.createSourceCardTitle,
-                    isActive && afs.createSourceCardTitleActive
-                  )}
-                >
-                {t(card.titleKey, card.titleDefault)}
-              </span>
-              {card.recommended ? (
-                <span {...stylex.props(afs.createSourceCardBadge)}>
-                  {t("createAgent.runMode.recommended", "推荐")}
+      <div {...stylex.props(afs.createSourceStepCards)}>
+        {CARD_DEFS.map((card) => {
+          const isActive = selected === card.id;
+          return (
+            <button
+              key={card.id}
+              type="button"
+              role="radio"
+              aria-checked={isActive}
+              tabIndex={tabStop === card.id ? 0 : -1}
+              disabled={busy}
+              {...withLiteralClass(
+                "agent-create-esc-source-card",
+                afs.createSourceCard,
+                isActive && afs.createSourceCardActive
+              )}
+              onClick={() => onSelect(card.id)}
+            >
+              <div {...stylex.props(afs.createSourceCardTop)}>
+                <span
+                    {...stylex.props(
+                      afs.createSourceCardTitle,
+                      isActive && afs.createSourceCardTitleActive
+                    )}
+                  >
+                  {t(card.titleKey, card.titleDefault)}
                 </span>
-              ) : null}
-            </div>
-            <p {...stylex.props(afs.createSourceCardDesc)}>
-              {t(card.descKey, card.descDefault)}
-            </p>
-            <p {...stylex.props(afs.createSourceCardFootnote)}>
-              {t(card.footnoteKey, card.footnoteDefault)}
-            </p>
-          </button>
-        );
-      })}
+                {card.recommended ? (
+                  <span {...stylex.props(afs.createSourceCardBadge)}>
+                    {t("createAgent.runMode.recommended", "推荐")}
+                  </span>
+                ) : null}
+              </div>
+              <p {...stylex.props(afs.createSourceCardDesc)}>
+                {t(card.descKey, card.descDefault)}
+              </p>
+              <p {...stylex.props(afs.createSourceCardFootnote)}>
+                {footnotes?.[card.id] ?? t(card.footnoteKey, card.footnoteDefault)}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={selected === "cli"}
+        tabIndex={tabStop === "cli" ? 0 : -1}
+        disabled={busy}
+        onClick={() => onSelect("cli")}
+        {...stylex.props(
+          afs.createSourceCliEntry,
+          selected === "cli" && afs.createSourceCliEntryActive,
+        )}
+      >
+        {t("createAgent.runMode.cli.entry", "已有本机 Claude Code / Codex 等 CLI？桥接本机终端")}
+      </button>
     </div>
   );
 };
@@ -292,6 +248,7 @@ const AgentCreatePlatformPanel: React.FC<{
   busy: boolean;
   isSubmitting: boolean;
   canCreate: boolean;
+  thinkingField: React.ReactNode;
   onAdvancedEdit: () => void;
   onCreate: () => void;
 }> = ({
@@ -303,12 +260,14 @@ const AgentCreatePlatformPanel: React.FC<{
   busy,
   isSubmitting,
   canCreate,
+  thinkingField,
   onAdvancedEdit,
   onCreate,
 }) => {
   const { t } = useTranslation("ai");
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="platform">
+      {thinkingField}
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
@@ -367,24 +326,25 @@ const AgentCreatePlatformPanel: React.FC<{
     </div>
   );
 };
-/**
- * Shared "cross-device key" checkbox (compact form Checkbox).
- * Shown only for logged-in non-local accounts — Web/桌面 need server proxy for
- * CORS, which requires the key in the sync store. Local-only users have no
- * account to push, so the option is hidden.
- */
+/** The cross-device option is hidden for users without a sync account. */
 const CredentialSyncCheckbox: React.FC<{
   show: boolean;
   checked: boolean;
   onChange: (v: boolean) => void;
   busy: boolean;
-  label?: string;
-}> = ({ show, checked, onChange, busy, label }) => {
+}> = ({ show, checked, onChange, busy }) => {
   const { t } = useTranslation("ai");
   if (!show) return null;
   return (
     <Checkbox
-      label={label ?? t("form.crossDeviceKey", "跨设备使用此密钥")}
+      label={t("form.crossDeviceKey", "跨设备使用此密钥")}
+      helperText={checked ? undefined : [
+        t("form.crossDeviceKeyOffHint", "关闭后，本次不再上传密钥；此前已同步的副本不会被删除。"),
+        ...(!getIsDesktopApp() ? [t(
+          "form.crossDeviceKeyOffWebHint",
+          "浏览器会尝试直接请求服务商；请求可能被服务商的跨域限制（CORS）拦截。"
+        )] : []),
+      ].join(" ")}
       checked={checked}
       disabled={busy}
       onChange={(e) => onChange(e.target.checked)}
@@ -393,19 +353,21 @@ const CredentialSyncCheckbox: React.FC<{
 };
 
 
-/** discovery 回落静态目录时的统一提示（API / 订阅面板共用）。 */
-const StaticCatalogHint: React.FC<{
-  t: TFunction;
-  source?: "live" | "static";
-  reason?: string;
-}> = ({ t, source, reason }) =>
-  source === "static" ? (
-    <span {...stylex.props(afs.createSourcePanelDesktopBody)}>
-      {reason
-        ? t("createAgent.quickCreate.staticCatalogReason", "静态目录（原因：{{reason}}）", { reason })
-        : t("createAgent.quickCreate.staticCatalog", "静态目录")}
-    </span>
-  ) : null;
+function PresetEndpointHint({ url }: { url: string }) {
+  const { t } = useTranslation("ai");
+  let host: string;
+  try {
+    host = new URL(url).host;
+  } catch {
+    return null;
+  }
+  if (!host) return null;
+  return (
+    <p {...stylex.props(afs.createSourceEndpointHint)}>
+      {t("createAgent.quickCreate.endpointHost", "服务商端点：{{host}}", { host })}
+    </p>
+  );
+}
 
 const AgentCreateApiPanel: React.FC<{
   prompt: string;
@@ -423,19 +385,14 @@ const AgentCreateApiPanel: React.FC<{
   model: string;
   setModel: (v: string) => void;
   activePresetFields: {
-    discoverySource?: "live" | "static";
-    discoveryFallbackReason?: string;
-    lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
-  reasoningEffort: ReasoningEffort;
-  setReasoningEffort: (v: ReasoningEffort) => void;
-  selectReasoningEffort: (v: ReasoningEffort) => void;
   busy: boolean;
   isSubmitting: boolean;
   canCreate: boolean;
+  thinkingField: React.ReactNode;
   onAdvancedEdit: () => void;
   onCreate: () => void;
 }> = ({
@@ -454,26 +411,19 @@ const AgentCreateApiPanel: React.FC<{
   model,
   setModel,
   activePresetFields,
-  reasoningEffort,
-  setReasoningEffort,
-  selectReasoningEffort,
   busy,
   isSubmitting,
   canCreate,
+  thinkingField,
   onAdvancedEdit,
   onCreate,
 }) => {
   const { t } = useTranslation("ai");
 
-  const modelReasoning = useModelReasoningCapability({
-    provider: activePresetFields.provider,
-    model,
-  });
-
-  useReasoningEffortCalibration(modelReasoning.info, reasoningEffort, setReasoningEffort);
 
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="api">
+      {thinkingField}
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
@@ -495,24 +445,24 @@ const AgentCreateApiPanel: React.FC<{
           ))}
         </Select>
       </div>
-      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <span {...stylex.props(afs.createSourceFieldLabel)}>
-          {t("form.customProviderUrl", "服务商 URL")}
-        </span>
-        <input
-          type="url"
-          {...stylex.props(afs.createSourceFieldInput)}
-          value={customProviderUrl}
-          disabled={busy}
-          readOnly={
-            apiPresetId !== MANUAL_PROVIDER_PRESET_ID &&
-            !!activePresetFields.lockCustomProviderUrl
-          }
-          placeholder="https://api.openai.com/v1"
-          onChange={(e) => setCustomProviderUrl(e.target.value)}
-          autoComplete="off"
-        />
-      </label>
+      {apiPresetId === MANUAL_PROVIDER_PRESET_ID ? (
+        <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
+          <span {...stylex.props(afs.createSourceFieldLabel)}>
+            {t("form.customProviderUrl", "服务商 URL")}
+          </span>
+          <input
+            type="url"
+            {...stylex.props(afs.createSourceFieldInput)}
+            value={customProviderUrl}
+            disabled={busy}
+            placeholder="https://api.openai.com/v1"
+            onChange={(e) => setCustomProviderUrl(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+      ) : (
+        <PresetEndpointHint url={customProviderUrl} />
+      )}
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("form.apiKey", "API 密钥")}
@@ -531,10 +481,7 @@ const AgentCreateApiPanel: React.FC<{
         onChange={setCredentialSynced}
         busy={busy}
       />
-      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <span {...stylex.props(afs.createSourceFieldLabel)}>
-          {t("form.model", "模型")}
-        </span>
+      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         {activePresetFields.modelOptions.length > 0 ? (
           <Select
             className="agent-create-esc-source-select"
@@ -547,7 +494,7 @@ const AgentCreateApiPanel: React.FC<{
               <SelectItem id={model} textValue={model}>{model}</SelectItem>
             ) : null}
             {activePresetFields.modelOptions.map((m) => {
-              const label = `${m.label}${m.recommended ? "（推荐）" : ""}`;
+              const label = m.recommended ? t("form.modelRecommendedLabel", "{{label}}（推荐）", { label: m.label }) : m.label;
               return (
                 <SelectItem key={m.id} id={m.id} textValue={label}>
                   <ModelOptionLabel label={label} hasVision={m.hasVision} />
@@ -556,40 +503,20 @@ const AgentCreateApiPanel: React.FC<{
             })}
           </Select>
         ) : (
-          <input
-            type="text"
-            {...stylex.props(afs.createSourceFieldInput)}
-            value={model}
-            disabled={busy}
-            placeholder="gpt-5.6-sol"
-            onChange={(e) => setModel(e.target.value)}
-            autoComplete="off"
-          />
+          <label {...stylex.props(afs.createSourceField)}>
+            <span {...stylex.props(afs.createSourceFieldLabel)}>{t("form.model", "模型")}</span>
+            <input
+              type="text"
+              {...stylex.props(afs.createSourceFieldInput)}
+              value={model}
+              disabled={busy}
+              placeholder="gpt-5.6-sol"
+              onChange={(e) => setModel(e.target.value)}
+              autoComplete="off"
+            />
+          </label>
         )}
-      </label>
-      <StaticCatalogHint
-        t={t}
-        source={activePresetFields.discoverySource}
-        reason={activePresetFields.discoveryFallbackReason}
-      />
-      <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <span {...stylex.props(afs.createSourceFieldLabel)}>
-          {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-          {modelReasoning.loading ? (
-            <span style={{ marginLeft: 8, fontSize: "var(--fontSize-xs)", opacity: 0.65, fontWeight: "normal" }}>
-              (正在探测模型推理支持...)
-            </span>
-          ) : null}
-        </span>
-        <ReasoningEffortSelectField
-          t={t}
-          reasoning={modelReasoning}
-          provider={activePresetFields.provider}
-          value={reasoningEffort}
-          onChange={selectReasoningEffort}
-          busy={busy}
-        />
-      </label>
+      </div>
       <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <span {...stylex.props(afs.createSourceFieldLabel)}>
           {t("createAgent.quickCreate.prompt", "系统提示词")}
@@ -628,7 +555,6 @@ const AgentCreateSubscriptionPanel: React.FC<{
     provider?: string;
   }[];
   subCustomProviderUrl: string;
-  setSubCustomProviderUrl: (v: string) => void;
   subApiKey: string;
   setSubApiKey: (v: string) => void;
   credentialSynced: boolean;
@@ -640,16 +566,10 @@ const AgentCreateSubscriptionPanel: React.FC<{
   subModel: string;
   setSubModel: (v: string) => void;
   activePresetFields: {
-    discoverySource?: "live" | "static";
-    discoveryFallbackReason?: string;
-    lockCustomProviderUrl?: boolean;
     keyFormatHint?: string;
     modelOptions: ReadonlyArray<{ id: string; label: string; recommended?: boolean; hasVision?: boolean }>;
     provider: string;
   };
-  reasoningEffort: ReasoningEffort;
-  setReasoningEffort: (v: ReasoningEffort) => void;
-  selectReasoningEffort: (v: ReasoningEffort) => void;
   draftRequiresDesktopOAuth: boolean;
   oauth: {
     isDesktop: boolean;
@@ -661,6 +581,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
   busy: boolean;
   isSubmitting: boolean;
   canCreate: boolean;
+  thinkingField: React.ReactNode;
   onAdvancedEdit: () => void;
   onCreate: () => void;
 }> = ({
@@ -670,7 +591,6 @@ const AgentCreateSubscriptionPanel: React.FC<{
   applySubPreset,
   subscriptionPresetOptions,
   subCustomProviderUrl,
-  setSubCustomProviderUrl,
   subApiKey,
   setSubApiKey,
   credentialSynced,
@@ -682,15 +602,13 @@ const AgentCreateSubscriptionPanel: React.FC<{
   subModel,
   setSubModel,
   activePresetFields,
-  reasoningEffort,
-  setReasoningEffort,
-  selectReasoningEffort,
   draftRequiresDesktopOAuth,
   oauth,
   navigate,
   busy,
   isSubmitting,
   canCreate,
+  thinkingField,
   onAdvancedEdit,
   onCreate,
 }) => {
@@ -698,25 +616,10 @@ const AgentCreateSubscriptionPanel: React.FC<{
 
   // 订阅面板同样按 (provider, model) 解析真实推理能力：
   // 命中模型级 override（如 grok-3-mini 仅 low/high）时过滤档位并自动校准。
-  const subReasoning = useModelReasoningCapability({
-    provider: activePresetFields.provider,
-    model: subModel,
-  });
-  useReasoningEffortCalibration(subReasoning.info, reasoningEffort, setReasoningEffort);
-
-  const effortField = (
-    <ReasoningEffortSelectField
-      t={t}
-      reasoning={subReasoning}
-      provider={activePresetFields.provider}
-      value={reasoningEffort}
-      onChange={selectReasoningEffort}
-      busy={busy}
-    />
-  );
 
   return (
     <div {...stylex.props(afs.createSourcePanel)} data-mode="subscription">
+      {thinkingField}
       <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
         <Select
           className="agent-create-esc-source-select"
@@ -739,11 +642,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
         </Select>
       </div>
 
-      <StaticCatalogHint
-        t={t}
-        source={activePresetFields.discoverySource}
-        reason={activePresetFields.discoveryFallbackReason}
-      />
+      <PresetEndpointHint url={subCustomProviderUrl} />
 
       {draftRequiresDesktopOAuth ? (
         <>
@@ -789,7 +688,7 @@ const AgentCreateSubscriptionPanel: React.FC<{
                     )}
           </p>
           {oauth.connection.kind === "error" ? (
-            <p role="alert" {...stylex.props(afs.createSourcePanelDesktopBody)}>
+            <p role="alert" {...stylex.props(afs.createSourcePanelDesktopBody, afs.createSourcePanelError)}>
               {oauth.connection.message}
             </p>
           ) : null}
@@ -803,15 +702,15 @@ const AgentCreateSubscriptionPanel: React.FC<{
                   isDisabled={busy}
                   onSelectionChange={(key) => setSubModel(String(key ?? ""))}
                   description={t(
-                    "createAgent.quickCreate.recommendedModelHint",
-                    "已按当前订阅推荐最新模型，可随时更换",
+                    "createAgent.quickCreate.subscriptionModelHint",
+                    "模型来自所选方案的目录，可随时更换。",
                   )}
                 >
                   {subModel && !activePresetFields.modelOptions.some((model) => model.id === subModel) ? (
                     <SelectItem id={subModel} textValue={subModel}>{subModel}</SelectItem>
                   ) : null}
                   {activePresetFields.modelOptions.map((model) => {
-                    const label = `${model.label}${model.recommended ? "（推荐）" : ""}`;
+                    const label = model.recommended ? t("form.modelRecommendedLabel", "{{label}}（推荐）", { label: model.label }) : model.label;
                     return (
                       <SelectItem key={model.id} id={model.id} textValue={label}>
                         <ModelOptionLabel label={label} hasVision={model.hasVision} />
@@ -820,12 +719,6 @@ const AgentCreateSubscriptionPanel: React.FC<{
                   })}
                 </Select>
               </div>
-              <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-                <span {...stylex.props(afs.createSourceFieldLabel)}>
-                  {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-                </span>
-                {effortField}
-              </label>
               <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
                 <span {...stylex.props(afs.createSourceFieldLabel)}>
                   {t("createAgent.quickCreate.prompt", "系统提示词")}
@@ -876,20 +769,6 @@ const AgentCreateSubscriptionPanel: React.FC<{
         <>
           <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
-              {t("form.customProviderUrl", "服务商 URL")}
-            </span>
-            <input
-              type="url"
-              {...stylex.props(afs.createSourceFieldInput)}
-              value={subCustomProviderUrl}
-              disabled={busy}
-              readOnly={!!activePresetFields.lockCustomProviderUrl}
-              onChange={(e) => setSubCustomProviderUrl(e.target.value)}
-              autoComplete="off"
-            />
-          </label>
-          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-            <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("form.apiKey", "API 密钥")}
             </span>
             <PasswordInput
@@ -899,6 +778,9 @@ const AgentCreateSubscriptionPanel: React.FC<{
               onChange={(e) => setSubApiKey(e.target.value)}
               autoComplete="off"
             />
+            <span {...stylex.props(afs.createSourceEndpointHint)}>
+              {t("createAgent.quickCreate.subscriptionKeyRequired", "需要所选订阅方案的专用 Key。")}
+            </span>
             {activePresetFields?.keyFormatHint && (
               <span>
                 {activePresetFields.keyFormatHint}
@@ -912,18 +794,14 @@ const AgentCreateSubscriptionPanel: React.FC<{
             busy={busy}
           />
           {!draftRequiresDesktopOAuth ? (
-            <CredentialSyncCheckbox
-              show={Boolean(providerKeyRef)}
+            providerKeyRef && <Checkbox
               checked={providerKeyRemembered}
-              onChange={setProviderKeyRemembered}
-              busy={busy}
-              label="记住此服务商密钥"
+              onChange={(e) => setProviderKeyRemembered(e.target.checked)}
+              disabled={busy}
+              label={t("form.rememberProviderKey", "记住此服务商密钥")}
             />
           ) : null}
-          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-            <span {...stylex.props(afs.createSourceFieldLabel)}>
-              {t("form.model", "模型")}
-            </span>
+          <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             {activePresetFields.modelOptions.length > 0 ? (
               <Select
                 className="agent-create-esc-source-select"
@@ -932,15 +810,15 @@ const AgentCreateSubscriptionPanel: React.FC<{
                 isDisabled={busy}
                 onSelectionChange={(key) => setSubModel(String(key ?? ""))}
                 description={t(
-                  "createAgent.quickCreate.recommendedModelHint",
-                  "已按当前订阅推荐最新模型，可随时更换",
+                  "createAgent.quickCreate.subscriptionModelHint",
+                  "模型来自所选方案的目录，可随时更换。",
                 )}
               >
                 {subModel && !activePresetFields.modelOptions.some((m) => m.id === subModel) ? (
                   <SelectItem id={subModel} textValue={subModel}>{subModel}</SelectItem>
                 ) : null}
                 {activePresetFields.modelOptions.map((m) => {
-                  const label = `${m.label}${m.recommended ? "（推荐）" : ""}`;
+                  const label = m.recommended ? t("form.modelRecommendedLabel", "{{label}}（推荐）", { label: m.label }) : m.label;
                   return (
                     <SelectItem key={m.id} id={m.id} textValue={label}>
                       <ModelOptionLabel label={label} hasVision={m.hasVision} />
@@ -949,22 +827,19 @@ const AgentCreateSubscriptionPanel: React.FC<{
                 })}
               </Select>
             ) : (
-              <input
-                type="text"
-                {...stylex.props(afs.createSourceFieldInput)}
-                value={subModel}
-                disabled={busy}
-                onChange={(e) => setSubModel(e.target.value)}
-                autoComplete="off"
-              />
+              <label {...stylex.props(afs.createSourceField)}>
+                <span {...stylex.props(afs.createSourceFieldLabel)}>{t("form.model", "模型")}</span>
+                <input
+                  type="text"
+                  {...stylex.props(afs.createSourceFieldInput)}
+                  value={subModel}
+                  disabled={busy}
+                  onChange={(e) => setSubModel(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
             )}
-          </label>
-          <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-            <span {...stylex.props(afs.createSourceFieldLabel)}>
-              {t("createAgent.quickCreate.reasoningEffort", "推理强度")}
-            </span>
-            {effortField}
-          </label>
+          </div>
           <label {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
             <span {...stylex.props(afs.createSourceFieldLabel)}>
               {t("createAgent.quickCreate.prompt", "系统提示词")}
@@ -1043,11 +918,15 @@ export const AgentCreateCliPanel: React.FC<{
         <Select
           className="agent-create-esc-source-select"
           label={t("createAgent.quickCreate.cliProvider", "CLI 工具")}
+          description={t(
+            "createAgent.quickCreate.cliSignInHint",
+            "机器在线具备执行能力不等于 CLI 已认证。请确保在目标机器终端已运行对应登录命令。",
+          )}
           selectedKey={cliProvider}
           isDisabled={busy}
           onSelectionChange={(key) => setCliProvider(String(key ?? ""))}
         >
-          {CLI_PROVIDER_GROUPS.map((group) => (
+          {CREATABLE_CLI_GROUPS.map((group) => (
             <SelectGroup key={group.id}>
               <SelectGroupLabel className="nolo-select-group-label">
                 {group.label}
@@ -1060,37 +939,6 @@ export const AgentCreateCliPanel: React.FC<{
             </SelectGroup>
           ))}
         </Select>
-      </div>
-
-      <div {...withLiteralClass("agent-create-esc-source-field", afs.createSourceField)}>
-        <span {...stylex.props(afs.createSourceFieldLabel)}>
-          {t("createAgent.quickCreate.cliCredentialStatus", "凭据状态")}
-        </span>
-        <div
-          style={{
-            padding: "8px 12px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--border)",
-            backgroundColor: "var(--backgroundTertiary, var(--backgroundSecondary))",
-            fontSize: "var(--fontSize-sm)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span
-              style={{
-                display: "inline-block",
-                width: 8,
-                height: 8,
-                borderRadius: "50%",
-                backgroundColor: "var(--warning, #f59e0b)",
-              }}
-            />
-            <strong style={{ color: "var(--text)" }}>未验证（需在本机登录）</strong>
-          </div>
-          <p style={{ margin: "4px 0 0", fontSize: "var(--fontSize-xs)", color: "var(--textSecondary)", lineHeight: 1.45 }}>
-            机器在线具备执行能力不等于 CLI 已认证。请确保在目标机器终端已运行对应登录命令。
-          </p>
-        </div>
       </div>
 
       <details
@@ -1206,7 +1054,7 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
   isSubmitting = false,
   disabled = false,
 }) => {
-  const { t } = useTranslation("ai");
+  const { t, i18n } = useTranslation("ai");
   const navigate = useNavigate();
 
   const {
@@ -1230,23 +1078,21 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
     subPresetId,
     applySubPreset,
     subscriptionPresetOptions,
+    subscriptionPlans,
     subCustomProviderUrl,
-    setSubCustomProviderUrl,
     subApiKey,
     setSubApiKey,
     credentialSynced,
     setCredentialSynced,
+    showCredentialSync,
     providerKeyRemembered,
     setProviderKeyRemembered,
     providerKeyRef,
     subModel,
     setSubModel,
-    subReasoningEffort,
-    setSubReasoningEffort,
-    selectSubEffort,
-    apiReasoningEffort,
-    setApiReasoningEffort,
-    selectApiEffort,
+    thinkingControl,
+    thinkingSelection,
+    setThinking,
     canCreatePlatform,
     canCreateApi,
     canCreateSubscription,
@@ -1272,15 +1118,41 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
 
   // Cross-device key sync is only meaningful for logged-in accounts (non-local);
   // local-only users have no account to push to.
-  const loggedInUserId = useUserId();
-  const isLoggedIn = useIsLoggedIn();
-  const showCredentialSync =
-    isLoggedIn && !!loggedInUserId && loggedInUserId !== "local";
+  const { preview, total } = subscriptionFootnoteProviders(subscriptionPlans);
+  const remaining = total - preview.length;
+  const language = i18n.resolvedLanguage ?? i18n.language;
+  // Some locales format unit lists without separators; provider names need a visible boundary.
+  const providerPreview = /^(zh|ja)(-|$)/i.test(language ?? "")
+    ? preview.join("、")
+    : preview.join(", ");
+  const previewLabel = t("createAgent.runMode.subscription.footnotePreview", "支持 {{providers}}", {
+    providers: providerPreview,
+  });
+
+  const thinkingField = <ThinkingControlField control={thinkingControl} selection={thinkingSelection} onChange={setThinking} readOnly={busy} />;
 
   return (
     <div {...stylex.props(afs.createSourceStep)}>
       <AgentCreateIntro />
-      <AgentCreateModeCards selected={selected} busy={busy} onSelect={onSelect} />
+      <AgentCreateModeCards
+        selected={selected}
+        busy={busy}
+        onSelect={onSelect}
+        footnotes={total > 0 ? {
+          subscription: (
+            <span {...stylex.props(afs.createSourceSubscriptionFootnote)}>
+              <span title={previewLabel} {...stylex.props(afs.createSourceSubscriptionPreview)}>
+                {previewLabel}
+              </span>
+              {remaining > 0 && (
+                <span {...stylex.props(afs.createSourceSubscriptionCount)}>
+                  {t("createAgent.runMode.subscription.footnoteRemaining", "等 {{count}} 个", { count: remaining })}
+                </span>
+              )}
+            </span>
+          ),
+        } : undefined}
+      />
 
       {selected === "platform" ? (
         <AgentCreatePlatformPanel
@@ -1292,6 +1164,7 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           busy={busy}
           isSubmitting={isSubmitting}
           canCreate={canCreatePlatform}
+          thinkingField={thinkingField}
           onAdvancedEdit={handleAdvanced}
           onCreate={handleCreate}
         />
@@ -1314,12 +1187,10 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           model={model}
           setModel={setModel}
           activePresetFields={activePresetFields}
-          reasoningEffort={apiReasoningEffort}
-          setReasoningEffort={setApiReasoningEffort}
-          selectReasoningEffort={selectApiEffort}
           busy={busy}
           isSubmitting={isSubmitting}
           canCreate={canCreateApi}
+          thinkingField={thinkingField}
           onAdvancedEdit={handleAdvanced}
           onCreate={handleCreate}
         />
@@ -1333,7 +1204,6 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           applySubPreset={applySubPreset}
           subscriptionPresetOptions={subscriptionPresetOptions}
           subCustomProviderUrl={subCustomProviderUrl}
-          setSubCustomProviderUrl={setSubCustomProviderUrl}
           subApiKey={subApiKey}
           setSubApiKey={setSubApiKey}
           credentialSynced={credentialSynced}
@@ -1345,15 +1215,13 @@ const AgentCreateSourceStep: React.FC<AgentCreateSourceStepProps> = ({
           subModel={subModel}
           setSubModel={setSubModel}
           activePresetFields={activePresetFields}
-          reasoningEffort={subReasoningEffort}
-          setReasoningEffort={setSubReasoningEffort}
-          selectReasoningEffort={selectSubEffort}
           draftRequiresDesktopOAuth={draft.requiresDesktopOAuth}
           oauth={oauth}
           navigate={navigate}
           busy={busy}
           isSubmitting={isSubmitting}
           canCreate={canCreateSubscription}
+          thinkingField={thinkingField}
           onAdvancedEdit={handleAdvanced}
           onCreate={handleCreate}
         />

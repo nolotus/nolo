@@ -1,3 +1,4 @@
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
 import "./SpaceContentList.css";
 import React, { memo, useCallback, useState } from "react";
 import { SpaceContent, Agent } from "app/types";
@@ -30,7 +31,13 @@ import {
   isSpaceContentImage,
 } from "./spaceContentMedia";
 
+function SpaceThumbnail({ url, title, spaceId }: { url: string | null; title: string; spaceId?: string }) {
+  const src = useWebMediaSrc(url, { spaceId });
+  return src ? <img src={src} alt={title} className="item-icon__img" loading="lazy" /> : <LuFile aria-label={title} />;
+}
+
 interface SpaceContentListProps {
+  spaceId?: string;
   items: SpaceContent[];
   viewMode: "grid" | "list";
   isSelectionMode: boolean;
@@ -50,6 +57,7 @@ interface SpaceContentListProps {
 
 const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
   items,
+  spaceId,
   viewMode,
   isSelectionMode,
   selectedKeys,
@@ -304,12 +312,7 @@ const SpaceContentListComponent: React.FC<SpaceContentListProps> = ({
               >
                 <div className="item-icon">
                   {isImage ? (
-                    <img
-                      src={imageUrl || ""}
-                      alt={item.title}
-                      className="item-icon__img"
-                      loading="lazy"
-                    />
+                    <SpaceThumbnail url={imageUrl} title={item.title} spaceId={spaceId} />
                   ) : (() => {
                     const t = item.type?.toLowerCase();
                     const k = item.contentKey;

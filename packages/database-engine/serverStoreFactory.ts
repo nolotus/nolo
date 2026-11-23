@@ -3,6 +3,7 @@ import path from "path";
 import { Level } from "level";
 
 import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { withPublicationBatch } from "./publicationBatch";
 import type { AuthorityStore } from "./authorityStoreTypes";
 import { createLegacyServerDb, type LegacyServerDb } from "./legacyServerDb";
 import { createLevelAuthorityStore } from "./levelAuthorityStore";
@@ -162,10 +163,10 @@ export function getOrCreateServerStoreRuntime(
   }
 
   if (!globalScope.__serverAuthorityStore) {
-    globalScope.__serverAuthorityStore = createAuthorityStoreForDriver(
+    globalScope.__serverAuthorityStore = withPublicationBatch(createAuthorityStoreForDriver(
       driver,
       dbPath
-    );
+    ));
     globalScope.__serverAuthorityStoreDriver = driver;
   } else if (!cachedDriver) {
     globalScope.__serverAuthorityStoreDriver = driver;

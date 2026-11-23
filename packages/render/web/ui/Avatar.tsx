@@ -4,6 +4,7 @@ import React, { useCallback, useMemo } from "react";
 import { LuUser, LuBot } from "react-icons/lu";
 import { useImageLoadFallback } from "app/hooks/useImageLoadFallback";
 
+import { useWebMediaSrc } from "./useWebMediaSrc";
 import { avatarStyles } from "./avatar.styles";
 
 interface AvatarProps {
@@ -53,7 +54,8 @@ export const Avatar: React.FC<AvatarProps> = ({
   style = {},
   ...props
 }) => {
-  const { shouldRenderImage, handleImageError } = useImageLoadFallback(src);
+  const mediaSrc = useWebMediaSrc(src);
+  const { shouldRenderImage, handleImageError } = useImageLoadFallback(mediaSrc);
 
   const avatarType = useMemo(() => {
     if (type === "auto") {
@@ -88,7 +90,7 @@ export const Avatar: React.FC<AvatarProps> = ({
     if (shouldRenderImage) {
       return (
         <img
-          src={src!}
+          src={mediaSrc!}
           alt={name}
           {...stylex.props(avatarStyles.image)}
           onError={handleImageError}

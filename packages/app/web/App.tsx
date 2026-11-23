@@ -1,3 +1,5 @@
+import { WebMediaSources } from "render/web/ui/useWebMediaSrc";
+import { selectRuntimeCurrentServer } from "app/stateViews/runtime";
 import { useAccountSession } from "identity/useAccountSession";
 // 文件路径：app/web/App.tsx
 
@@ -78,6 +80,7 @@ export default function App({ hostname, manageClientLocales = false, guestLocale
   // 避免 hydrate 首帧 userId 不匹配导致 React 丢弃 SSR DOM → 白屏。
   const { userId, currentUser } = useIdentity();
   const session = useAccountSession();
+  const mediaServer = useAppSelector(selectRuntimeCurrentServer);
   const runtimeOrigin =
     typeof window !== "undefined" && typeof window.location?.origin === "string"
       ? window.location.origin
@@ -369,8 +372,10 @@ export default function App({ hostname, manageClientLocales = false, guestLocale
               <DesktopActionGateDialog />
             </Suspense>
           ) : null}
-          {mainElement}
-          {state?.backgroundLocation && modalElement}
+          <WebMediaSources server={mediaServer} sessionKey={settingsSessionKey} token={session.transition === "idle" ? session.activeToken ?? undefined : undefined}>
+            {mainElement}
+            {state?.backgroundLocation && modalElement}
+          </WebMediaSources>
         </>
       ) : <ClientLocalePending {...locale} />}
     </ClientLocaleScopeContext.Provider>

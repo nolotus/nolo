@@ -62,13 +62,19 @@ export type EndpointCapability = (typeof ENDPOINT_CAPABILITIES)[number];
 /**
  * 隔离边界。§2.6 草案的 `"os-sandbox" | "namespace" | "vm"` 是一个子集：
  * 补 `"none"`（显式声明「没有边界」，而不是缺席）与 `"container"`（本机 docker 沙盒）。
+ *
+ * 运行期词汇表单独导出：清单/审计类脚本要校验「记录里的隔离值是否还在本词汇内」，
+ * 只在类型里存在时这种校验只能靠各脚本自己抄一份常量（漂移不可见）。
  */
-export type EndpointIsolationBoundary =
-  | "none"
-  | "os-sandbox"
-  | "namespace"
-  | "container"
-  | "vm";
+export const ENDPOINT_ISOLATION_BOUNDARIES = [
+  "none",
+  "os-sandbox",
+  "namespace",
+  "container",
+  "vm",
+] as const;
+
+export type EndpointIsolationBoundary = (typeof ENDPOINT_ISOLATION_BOUNDARIES)[number];
 
 /** 宿主平台，只作为事实出现在入参里（本文件不读 `process.platform`）。 */
 export type HostPlatform = "linux" | "darwin" | "win32" | "other";
