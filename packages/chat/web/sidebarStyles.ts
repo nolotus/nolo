@@ -1065,4 +1065,31 @@ export const sidebarStyles = stylex.create({
   sidebarUserSectionDropdownMenu: {
     minWidth: "250px",
   },
+  workDialogShowMoreButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minHeight: "28px",
+    marginTop: "var(--space-1)",
+    padding: "4px var(--sidebar-row-pad)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderSubtle)",
+    borderRadius: "var(--radius-sm)",
+    backgroundColor: "transparent",
+    color: "var(--textSecondary)",
+    fontSize: "var(--fontSize-xs)",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background-color 0.15s ease, color 0.15s ease",
+    ":hover": {
+      backgroundColor: "var(--backgroundHover)",
+      color: "var(--text)",
+    },
+    ":focus-visible": {
+      outline: "none",
+      boxShadow: "0 0 0 2px var(--focusRing, var(--primary))",
+    },
+  },
 });

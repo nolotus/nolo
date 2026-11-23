@@ -1,4 +1,16 @@
 
+## 0.252.0-alpha.2 (2026-11-23)
+
+### Bug Fixes
+
+* **database:** skip remote replication for server-authoritative token-stats keys ([f8d001e](https://github.com/nolotus/bun-nolo/commit/f8d001e1c3b90c75afe1bccfd656c755e140355e))
+
+### Performance Improvements
+
+* **chat:** cap sidebar auto-load rounds and add progressive render window for large dialog groups ([7a2d2e2](https://github.com/nolotus/bun-nolo/commit/7a2d2e29c80e43124a224d8c52aeee55de65ccba))
+* **server:** replace full dialog-* scans in stale sweep and recovery with active run index ([a2a938c](https://github.com/nolotus/bun-nolo/commit/a2a938c606b2c1fd6ebd75634fc404d262f9b9be))
+
+
 ## 0.252.0-alpha.1 (2026-11-23)
 
 ### Features

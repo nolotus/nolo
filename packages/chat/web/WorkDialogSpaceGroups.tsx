@@ -484,7 +484,7 @@ export function WorkDialogCategoryGroups({
     name: string,
   ) => void;
   onCategoryDeleted?: (spaceId: string, categoryId: string) => void;
-  children: (rows: WorkCategoryGroup["rows"]) => React.ReactNode;
+  children: (rows: WorkCategoryGroup["rows"], categoryId?: string | null) => React.ReactNode;
 }) {
   const { t } = useTranslation("space");
   const collapsed = useWorkSpacePreferences(userId, "categories");
@@ -526,7 +526,7 @@ export function WorkDialogCategoryGroups({
                   sidebarStyles.workCategoryContents,
                 )}
               >
-                {children(group.rows)}
+                {children(group.rows, group.id)}
               </div>
             )}
           </section>

@@ -10,6 +10,8 @@ export interface OwnedDialogPagesState {
   error: string | null;
   hasMore: boolean;
   pendingSourceCount: number;
+  /** 尚未在途、未失败且游标未耗尽的可立即拉取来源数。 */
+  idlePendingSourceCount?: number;
   /**
    * 游标快照：任一笔源游标推进（含耗尽为 null）时变化。
    * 展示层据此判断自动续页「这一轮是否真的往前走了」，
@@ -29,6 +31,7 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
   const [loading, setLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [pendingSourceCount, setPendingSourceCount] = useState(0);
+  const [idlePendingSourceCount, setIdlePendingSourceCount] = useState(0);
   const generation = useRef(0);
   const inFlight = useRef(new Set<string>());
   const failed = useRef(new Set<string>());
@@ -47,6 +50,7 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
     setError(null);
     const count = enabled && currentUserId && currentToken ? servers.length : 0;
     setPendingSourceCount(count);
+    setIdlePendingSourceCount(count);
     setHasMore(count > 0);
     setLoading(false);
     const effectGeneration = generation.current;
@@ -61,8 +65,11 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
     if (!enabled || !currentUserId || !currentToken || servers.length === 0) return;
     const run = generation.current;
     const updateStatus = () => {
-      const count = servers.filter((server) => !failed.current.has(server) && cursors.current.get(server) !== null).length;
+      const pending = servers.filter((server) => !failed.current.has(server) && cursors.current.get(server) !== null);
+      const count = pending.length;
+      const idleCount = pending.filter((server) => !inFlight.current.has(server)).length;
       setPendingSourceCount(count);
+      setIdlePendingSourceCount(idleCount);
       setHasMore(count > 0 || failed.current.size > 0);
       setError(failed.current.size ? `${failed.current.size} 个服务器的历史查询失败，可点击下方加载按钮重试。` : null);
       setLoading(inFlight.current.size > 0);
@@ -125,5 +132,7 @@ export function useOwnedDialogPages(enabled: boolean): OwnedDialogPagesState {
     : "";
   return { identityKey, records: sameIdentity ? pageState.records : [], error: sameIdentity ? error : null,
     loading: sameIdentity && loading, hasMore: sameIdentity && hasMore,
-    pendingSourceCount: sameIdentity ? pendingSourceCount : 0, cursorKey, loadMore };
+    pendingSourceCount: sameIdentity ? pendingSourceCount : 0,
+    idlePendingSourceCount: sameIdentity ? idlePendingSourceCount : 0,
+    cursorKey, loadMore };
 }
