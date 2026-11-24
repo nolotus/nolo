@@ -13,6 +13,16 @@ import { createLevelAuthorityStore } from "../database-engine/levelAuthorityStor
 import { createCliAuthorityBrokerSocketInvoker } from "../database-engine/cliAuthorityBrokerClient";
 
 type BrokerProcessOptions = Pick<CliAuthorityBrokerServerOptions, "endpoint" | "dbPath" | "metadataPath" | "healthPath">;
+// Set by the test preload, never inferred from a user's NOLO_HOME path.
+const testOwnedBroker = () => process.env.NOLO_TEST_AUTHORITY_BROKER_LIFETIME === "1";
+
+function stopOnParentExit(stop: () => void): void {
+  // An unread pipe retains EOF even if the parent exits during startup.
+  process.stdin.once("end", stop);
+  process.stdin.once("error", stop);
+  process.stdin.resume();
+}
+
 type StartupFailure = { message: string; code?: string; ownerPid?: number; cause?: StartupFailure };
 
 function describeFailure(error: unknown, depth = 0): StartupFailure {
@@ -36,6 +46,7 @@ async function launchBroker(options: BrokerProcessOptions, detached: boolean): P
   if (!dbPath || !metadataPath || !healthPath) throw new Error("Missing authority broker paths");
   const entrypoint = isCompiledBinary() ? [] : [resolveCliEntrypointPath(import.meta.url)];
   const { PATH, HOME, USERPROFILE, LOCALAPPDATA, SystemRoot, TMPDIR, TEMP, TMP } = process.env;
+  const testOwned = testOwnedBroker();
   const child = spawn(getHostRuntimeExecutable(), [
     ...entrypoint, detached ? "__authority-broker-supervise" : "__authority-broker",
     endpoint, resolve(dbPath), resolve(metadataPath), resolve(healthPath),
@@ -43,9 +54,16 @@ async function launchBroker(options: BrokerProcessOptions, detached: boolean): P
   ], {
     detached,
     windowsHide: true,
-    stdio: ["ignore", "pipe", "ignore"],
-    env: { PATH, HOME, USERPROFILE, LOCALAPPDATA, SystemRoot, TMPDIR, TEMP, TMP, NOLO_HOME: dirname(dirname(resolve(dbPath))) },
+    // Only tests hold a lifetime pipe. Production deliberately outlives its launcher.
+    stdio: [testOwned ? "pipe" : "ignore", "pipe", "ignore"],
+    env: {
+      PATH, HOME, USERPROFILE, LOCALAPPDATA, SystemRoot, TMPDIR, TEMP, TMP,
+      NOLO_HOME: dirname(dirname(resolve(dbPath))),
+      ...(testOwned ? { NOLO_TEST_AUTHORITY_BROKER_LIFETIME: "1" } : {}),
+    },
   });
+  // A crashed child can close its read end before a graceful shutdown request.
+  child.stdin?.on("error", () => {});
   const output = child.stdout!;
   try {
     await new Promise<void>((resolve, reject) => {
@@ -81,6 +99,7 @@ async function launchBroker(options: BrokerProcessOptions, detached: boolean): P
     });
     return child;
   } catch (error) {
+    child.stdin?.end();
     child.unref();
     throw error;
   } finally {
@@ -96,6 +115,7 @@ export async function superviseCliAuthorityBrokerProcess(args: string[]): Promis
   const requestStop = () => stop.abort();
   process.once("SIGTERM", requestStop);
   process.once("SIGINT", requestStop);
+  if (testOwnedBroker()) stopOnParentExit(requestStop);
   process.stdout.on("error", () => {});
   let ready = false;
   try {
@@ -129,9 +149,11 @@ export async function superviseCliAuthorityBrokerProcess(args: string[]): Promis
           logger.warn("Authority broker storage probe failed", error, { endpoint, workerPid: child.pid, failures });
         }
       }
+      invoke.close?.();
       if (child.exitCode === null && child.signalCode === null) {
         if (!stop.signal.aborted) logger.warn("Restarting unresponsive authority broker worker", { endpoint, workerPid: child.pid });
-        child.kill("SIGTERM");
+        if (child.stdin) child.stdin.end();
+        else child.kill("SIGTERM");
         const killed = await Promise.race([exited.then(() => true), delay(5_000, false, { ref: false })]);
         if (!killed) {
           child.kill("SIGKILL");
@@ -150,6 +172,7 @@ export async function superviseCliAuthorityBrokerProcess(args: string[]): Promis
   } finally {
     process.off("SIGTERM", requestStop);
     process.off("SIGINT", requestStop);
+    if (testOwnedBroker()) process.stdin.destroy();
   }
 }
 
@@ -171,6 +194,7 @@ export async function runCliAuthorityBrokerProcess(args: string[]): Promise<void
       createStore: () => createLevelAuthorityStore(dbPath!),
     });
     const close = () => {
+      if (testOwnedBroker()) process.stdin.destroy();
       void broker.close().catch((error) => {
         getLogger("cli.authorityBroker").error("Authority broker worker shutdown failed", error);
         process.exit(1);
@@ -178,6 +202,7 @@ export async function runCliAuthorityBrokerProcess(args: string[]): Promise<void
     };
     process.once("SIGTERM", close);
     process.once("SIGINT", close);
+    if (testOwnedBroker()) stopOnParentExit(close);
     process.stdout.write('{"ok":true}\n');
   } catch (error) {
     process.exitCode = 1;

@@ -1,4 +1,11 @@
 
+## 0.252.0-alpha.3 (2026-11-24)
+
+### Bug Fixes
+
+* **cli:** tie test-owned authority broker lifetime to launcher exit ([86f69a0](https://github.com/nolotus/bun-nolo/commit/86f69a0bf6209b9d41f17d6b06dfeecc22f47926))
+
+
 ## 0.252.0-alpha.2 (2026-11-23)
 
 ### Bug Fixes
