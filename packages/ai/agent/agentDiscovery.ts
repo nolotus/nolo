@@ -150,6 +150,29 @@ export interface PlanningCaller {
   agentKey?: string;
   effectiveModel?: string;
   runKind?: "interactive" | "subtask";
+  /**
+   * 调用者自身所属凭据池（可选透传，主要供测试或已知凭据的宿主使用）。
+   * 未传时由 agentKey 在候选集内反查——不引入任何新增网络或存储读取。
+   */
+  credentialGroup?: string | null;
+}
+
+/**
+ * 调用者自身的 `credentialGroup`：显式传参优先，其次按 agentKey 在候选集内反查。
+ * 只认非空字符串；解析不出就是「未知」，不参与任何异池判定。
+ */
+function resolveCallerCredentialGroup<T extends SafeAgentSummary>(
+  agents: T[],
+  caller: PlanningCaller | undefined,
+): string | undefined {
+  const explicit = caller?.credentialGroup;
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  const callerKey = typeof caller?.agentKey === "string" && caller.agentKey.trim()
+    ? caller.agentKey : undefined;
+  if (!callerKey) return undefined;
+  const own = agents.find((agent) => agent.agentKey === callerKey);
+  const group = own?.credentialGroup;
+  return typeof group === "string" && group.length > 0 ? group : undefined;
 }
 
 export interface PlanningRecommendation {
@@ -478,7 +501,9 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
       : { agents: projectedAgents, groups: credentialGroups };
 
   const tierHints: NonNullable<AgentDiscoveryResult["tierHints"]> = {};
-  const tierHintPreferences = new Map<DispatchDifficulty, { priority: number; resetAt: number; price: number }>();
+  const tierHintPreferences =
+    new Map<DispatchDifficulty, { priority: number; differentGroup: boolean; resetAt: number; price: number }>();
+  const callerCredentialGroup = resolveCallerCredentialGroup(sortedAgents, options.caller);
   for (const agent of sortedAgents) {
     const { agentKey, name, model, modelTier, requiresPaidApproval, availabilityStatus } = agent;
     if (!agentKey || requiresPaidApproval !== false || modelTier === "unknown" ||
@@ -488,10 +513,19 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     const current = tierHintPreferences.get(modelTier);
     // Sorted agents are already grouped by priority; never replace a higher-priority hint.
     if (current && current.priority !== priority) continue;
+    // 同档同优先级内优先与调用者异池（例如 Antigravity/Claude/ChatGPT OAuth 主座
+    // 优先把执行任务交给 DeepSeek/GLM 等独立池通道）。未知 credentialGroup 的候选
+    // 不算「确认异池」，不因缺少凭据信息插队；调用者凭据未知时整条规则不生效。
+    const differentGroup = callerCredentialGroup !== undefined &&
+      Boolean(agent.credentialGroup) && agent.credentialGroup !== callerCredentialGroup;
     const resetAt = nearestFundedSubscriptionReset(agent, now);
     const price = resetAt === Infinity ? meteredUnitPrice(agent) : Infinity;
-    if (current && (resetAt > current.resetAt || (resetAt === current.resetAt && price >= current.price))) continue;
-    tierHintPreferences.set(modelTier, { priority, resetAt, price });
+    if (current && current.differentGroup !== differentGroup) {
+      if (current.differentGroup) continue;
+    } else if (current && (resetAt > current.resetAt || (resetAt === current.resetAt && price >= current.price))) {
+      continue;
+    }
+    tierHintPreferences.set(modelTier, { priority, differentGroup, resetAt, price });
     tierHints[modelTier] = { agentKey, name, model };
   }
 

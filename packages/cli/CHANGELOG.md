@@ -1,4 +1,11 @@
 
+## 0.254.0-alpha.1 (2026-11-24)
+
+### Features
+
+* **agent:** prefer cross-credentialGroup candidates within same priority in tierHints ([7cbeb77](https://github.com/nolotus/bun-nolo/commit/7cbeb77b6ced6bc6cbfee68bc906b9bdd843d4dd))
+
+
 ## 0.253.0-alpha.1 (2026-11-24)
 
 ### Features
