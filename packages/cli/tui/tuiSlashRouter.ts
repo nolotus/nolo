@@ -394,6 +394,7 @@ export async function runSubmittedSlashLine(
     };
     history.turns.length = 0;
     history.toolDetails = [];
+    history.lastTurnToolDetailStart = 0;
     history.currentRole = null;
     history.currentContent = "";
     history.scrollTop = 0;
@@ -786,6 +787,7 @@ export async function runSubmittedSlashLine(
         const restored = loadedTurns.slice(-MAX_TUI_HISTORY_TURNS);
         history.turns.length = 0;
         history.toolDetails = [];
+        history.lastTurnToolDetailStart = 0;
         history.turns.push(...restored);
         history.currentRole = null;
         history.currentContent = "";

@@ -225,6 +225,7 @@ import {
   appendToCurrentTurn,
   appendLocalTurn,
   createHistoryOutputStream,
+  formatToolDetails,
   createTurnHistory,
   finalizeCurrentTurn,
   getAllTurnEntries,
@@ -2068,9 +2069,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
     directUserSubmission = false,
   ): Promise<boolean> => {
-    if (line.trim() === "/tools") {
+    const toolsCommand = line.trim().match(/^\/tools(?:\s+(last))?$/i);
+    if (toolsCommand) {
       emitCommandOutput(
-        history.toolDetails?.join("") ||
+        formatToolDetails(history, Boolean(toolsCommand[1])) ||
           themeText(t("noToolDetails"), "muted", resolveCliColorEnabled()),
       );
       return false;
@@ -3744,7 +3746,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
           if (busySlashCommand === "/tools") {
             recordWorkspaceInputHistory(expandedSubmitForHistory);
-            printStreamSafeNotice(history.toolDetails?.join("") || t("noToolDetails"));
+            const last = trimmedText.split(/\s+/)[1]?.toLowerCase() === "last";
+            printStreamSafeNotice(formatToolDetails(history, last) || t("noToolDetails"));
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;

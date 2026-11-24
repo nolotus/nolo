@@ -254,7 +254,7 @@ export function createCliTurnOutput(params: CliTurnOutputOptions) {
 
   const writeVisibleAssistantChunk = (chunk: string) => {
     if (!chunk) return;
-    if (!assistantLabelManaged) formatToolEvent.reset?.();
+    if (!assistantLabelManaged || tuiNarrationPromoted) formatToolEvent.reset?.();
     const parsed = processThinkChunk(chunk, thinkState);
     thinkState = parsed.state;
     if (!parsed.content && !parsed.reasoning) return;

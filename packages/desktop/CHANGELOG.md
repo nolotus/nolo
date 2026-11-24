@@ -1,4 +1,17 @@
 
+## 0.273.0-alpha.1 (2026-11-24)
+
+### Features
+
+* **cli:** collapse consecutive TUI Run output and add /tools last ([4e4609d](https://github.com/nolotus/bun-nolo/commit/4e4609d838b29913090d8276a96473f3d6ede36b))
+* **core:** expand read-only shell gist coverage and reject side-effect flags ([a09697a](https://github.com/nolotus/bun-nolo/commit/a09697a789ecd842063352476e46d7a3eb4b2089))
+* **space:** 空间内 EPUB 在线阅读器 v1 ([f2ac37f](https://github.com/nolotus/bun-nolo/commit/f2ac37fdb715fa19c081475d3988b9ea3eb9e477)), closes [#g](https://github.com/nolotus/bun-nolo/issues/g)
+
+### Bug Fixes
+
+* **space-upload:** 支持任意文件类型，并阻止主动内容同源内联 ([9472768](https://github.com/nolotus/bun-nolo/commit/947276846927becb2eb0a90ad5ec289dcf6c426a))
+
+
 ## 0.272.0-alpha.1 (2026-11-24)
 
 ### Features

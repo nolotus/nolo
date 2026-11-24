@@ -1083,7 +1083,7 @@ function normalToolGistRaw(event: LocalAgentToolEvent): string {
     if (query || path) return formatSearchItemQuery(query, path);
   }
   if (isRunToolName(toolName)) {
-    const command = typeof metadata.command === "string" ? metadata.command : "";
+    const command = typeof metadata.command === "string" ? metadata.command : typeof metadata.cmd === "string" ? metadata.cmd : "";
     if (command) {
       // 2026-11-15 owner 定调：Run 行改「可读摘要」投影。此前是整条命令
       // 平铺上屏（2026-09-02 的「全量安全投影」），多段 && 复合命令会占满
@@ -1130,8 +1130,8 @@ function normalToolGist(event: LocalAgentToolEvent): string {
 }
 
 /** >500ms 才显示，避免每行都挂 `(0s)` 噪音；<1s 用 ms，其余一位小数 s。 */
-function formatNormalToolDuration(elapsedMs: unknown): string {
-  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs <= 500) return "";
+function formatNormalToolDuration(elapsedMs: unknown, includeThreshold = false): string {
+  if (typeof elapsedMs !== "number" || !Number.isFinite(elapsedMs) || elapsedMs < 500 || (elapsedMs === 500 && !includeThreshold)) return "";
   if (elapsedMs < 1000) return `${Math.round(elapsedMs)}ms`;
   return `${(elapsedMs / 1000).toFixed(1)}s`;
 }
@@ -1374,7 +1374,19 @@ export const TUI_TREE_TOOLS = {
   Fetch: ["fetchWebpage"],
 } as const;
 export type TuiTreeKind = keyof typeof TUI_TREE_TOOLS;
-export type TuiTreePayload = { kind: TuiTreeKind; summary: string; fallback: string; previousRow?: string; appendOnly?: boolean; details?: string };
+export type TuiTreePayload = {
+  kind: TuiTreeKind;
+  summary: string;
+  fallback: string;
+  previousRow?: string;
+  appendOnly?: boolean;
+  details?: string;
+  lines?: string[];
+  previousLines?: string[];
+  finalizedSummary?: string;
+};
+
+const RUN_WINDOW_SIZE = 3;
 
 export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
   flush?: () => string;
@@ -1383,7 +1395,7 @@ export type ToolEventFormatter = ((event: LocalAgentToolEvent) => string) & {
 };
 
 function toolDetails(event: LocalAgentToolEvent, line: string): string {
-  const command = event.metadata?.command;
+  const command = event.metadata?.command ?? event.metadata?.cmd;
   return isRunToolName(event.toolName) && typeof command === "string"
     ? `${toolRowDetailLine(line)}${safeApprovalMultilineText(command)}\n`
     : toolRowDetailLine(line);
@@ -1425,6 +1437,45 @@ export function createToolEventFormatter(
     lastRow?: string;
     activity: ToolActivityProjection;
   } | null = null;
+  let runGroup: { count: number; elapsedMs: number; recent: Array<{ gist: string; duration: string }>; rows: string[] } | undefined;
+  const formatRunGroup = (event: LocalAgentToolEvent, line: string): string => {
+    const group = (runGroup ??= { count: 0, elapsedMs: 0, recent: [], rows: [] });
+    const elapsed = event.elapsedMs;
+    group.count++;
+    if (typeof elapsed === "number" && Number.isFinite(elapsed) && elapsed > 0) group.elapsedMs += elapsed;
+
+    // safeAskText also applies redactSecrets and the secret-like-string guard.
+    const gist = safeAskText(normalToolGist(event)) || toolLabel(event.toolName);
+    group.recent.push({ gist, duration: formatNormalToolDuration(elapsed) });
+    if (group.recent.length > RUN_WINDOW_SIZE) group.recent.shift();
+
+    const payload: TuiTreePayload = { kind: "Run", summary: "", fallback: line, details: toolDetails(event, line) };
+    if (group.count <= RUN_WINDOW_SIZE) {
+      group.rows.push(line.replace(/\n$/, ""));
+      payload.appendOnly = true;
+    } else {
+      const budget = Math.max(1, resolveHistoryLayoutGeometry(process.stdout.columns).contentWidth - displayWidth("◈ "));
+      const fit = (text: string) => themeText(truncateByDisplayWidth(text, budget), "muted", colorEnabled);
+      const total = formatNormalToolDuration(group.elapsedMs, true);
+      const timing = total ? t("runGroupTiming", total) : "";
+      const count = String(group.count);
+      const prefix = `▸ ${toolIcon("execShell")} · `;
+      payload.previousLines = group.rows;
+      payload.lines = [
+        fit(prefix + t("runGroupHeader", count, timing)),
+        fit(`  … ${t("runGroupCollapsed", String(group.count - RUN_WINDOW_SIZE))}`),
+        ...group.recent.map(({ gist, duration }) => {
+          const leafPrefix = "  ✓ ";
+          const leafTail = duration ? ` · ${duration}` : "";
+          const gistBudget = Math.max(0, budget - displayWidth(leafPrefix + leafTail));
+          return fit(`${leafPrefix}${truncateByDisplayWidth(gist, gistBudget)}${leafTail}`);
+        }),
+      ];
+      payload.finalizedSummary = fit(prefix + t("runGroupFinal", count, timing));
+      group.rows = payload.lines;
+    }
+    return `${TUI_TREE_MARKER}${JSON.stringify(payload)}${TUI_TREE_END}\n`;
+  };
   const treeKind = (name: string): TuiTreeKind | null =>
     (Object.keys(TUI_TREE_TOOLS) as TuiTreeKind[]).find(kind =>
       (TUI_TREE_TOOLS[kind] as readonly string[]).includes(name)) ?? null;
@@ -1477,15 +1528,19 @@ export function createToolEventFormatter(
   };
 
   const formatTreeEvent = (event: LocalAgentToolEvent, call: { toolName: string; argumentsPreview?: string } | undefined): string | null => {
-    if (event.type === "tool-error") tree = null;
+    if (event.type === "tool-error") {
+      tree = null;
+      runGroup = undefined;
+    }
     if (!opts.tuiTrees || event.type !== "tool-result") return null;
     if (isFailedToolResult(event) || event.metadata?.failed || event.metadata?.timedOut || readActionGate(event.metadata?.actionGate) || event.metadata?.permissionRequest) {
       tree = null;
+      runGroup = undefined;
       return null;
     }
     const name = event.toolName || call?.toolName || "tool";
     const kind = treeKind(name);
-    if (!kind) { tree = null; return null; }
+    if (!kind) { tree = null; runGroup = undefined; return null; }
     const activity = projectToolActivity({
       key: event.toolCallId, toolName: name, args: event.metadata,
       state: "success", attention: [], mode: "ordinary",
@@ -1503,8 +1558,14 @@ export function createToolEventFormatter(
       (kind === "Run" && activity.readOnly === true);
     if (!isReadOnlyExploration) {
       tree = null;
-      return null;
+      if (event.metadata?.actionGate) {
+        runGroup = undefined;
+        return null;
+      }
+      const runEvent = name === event.toolName ? event : { ...event, toolName: name };
+      return formatRunGroup(runEvent, formatNormalToolLine(runEvent, call, colorEnabled, opts));
     }
+    runGroup = undefined;
     let item = "";
     const m = event.metadata ?? {};
     if (kind === "Run") {
@@ -1548,6 +1609,7 @@ export function createToolEventFormatter(
   };
   const format = ((event: LocalAgentToolEvent): string => {
     if (event.type === "tool-call") {
+      if (!isRunToolName(event.toolName)) runGroup = undefined;
       pending.set(event.toolCallId, {
         toolName: event.toolName,
         argumentsPreview: event.argumentsPreview,
@@ -1571,8 +1633,9 @@ export function createToolEventFormatter(
     }
     return line;
   }) as ToolEventFormatter;
-  format.reset = () => { tree = null; lastFamilyId = undefined; scope++; };
+  format.reset = () => { tree = null; runGroup = undefined; lastFamilyId = undefined; scope++; };
   format.consume = (event: LocalAgentToolEvent) => {
+    runGroup = undefined;
     if (event.type === "tool-call") {
       pending.set(event.toolCallId, {
         toolName: event.toolName,

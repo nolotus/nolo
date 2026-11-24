@@ -72,7 +72,7 @@ export function appendStreamSafeNotice(
   }
   deps.appendLocalTurn(history, "", text);
   // 关键：重开 assistant 流式段，否则后续 chunk 会因 currentRole===null 丢失。
-  if (wasStreamingAssistant) deps.startTurn(history, "assistant");
+  if (wasStreamingAssistant) deps.startTurn(history, "assistant", { continueAssistantTurn: true });
 }
 
 /** appendStreamSafeNotice 只需要 TurnHistory 的这几个可变字段。 */
@@ -84,7 +84,7 @@ export interface TurnHistoryLike {
 
 export interface StreamSafeNoticeDeps {
   appendLocalTurn: (history: any, command: string, output: string) => void;
-  startTurn: (history: any, role: any) => void;
+  startTurn: (history: any, role: any, options?: { continueAssistantTurn?: boolean }) => void;
 }
 
 export function createTurnInjectionInbox<

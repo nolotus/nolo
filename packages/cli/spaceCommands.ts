@@ -29,6 +29,54 @@ const VALID_INVITE_ROLES = new Set<string>([
   MemberRole.GUEST,
 ]);
 
+/**
+ * MIME type used for `space upload`, inferred from the file extension.
+ *
+ * Ask: space upload originally accepted YAML only. Books, PDFs and other
+ * documents are the common case, so the command stores any file; the type is
+ * inferred here and unknown extensions fall back to a generic binary type
+ * rather than rejecting the upload.
+ */
+const UPLOAD_MIME_BY_EXTENSION: Record<string, string> = {
+  ".yaml": "application/yaml",
+  ".yml": "application/yaml",
+  ".json": "application/json",
+  ".csv": "text/csv",
+  ".tsv": "text/tab-separated-values",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+  ".pdf": "application/pdf",
+  ".epub": "application/epub+zip",
+  ".mobi": "application/x-mobipocket-ebook",
+  ".azw3": "application/vnd.amazon.ebook",
+  ".doc": "application/msword",
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".ppt": "application/vnd.ms-powerpoint",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ".odt": "application/vnd.oasis.opendocument.text",
+  ".rtf": "application/rtf",
+  ".zip": "application/zip",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  // Deliberately NOT mapped: active content (.html/.htm/.svg/.xhtml). The server
+  // stores this mime and replays it as Content-Type on file reads; public/space
+  // reads are served inline (no Content-Disposition) from the app origin
+  // (packages/database/server/routes/fileRead.ts buildFileContentHeaders), so a
+  // mapped text/html would make the CLI a stored-XSS uploader. Those extensions
+  // fall back to application/octet-stream and download instead of rendering.
+};
+
+export function resolveUploadMimeType(extension: string): string {
+  const normalized = extension.trim().toLowerCase();
+  const key = normalized.startsWith(".") ? normalized : `.${normalized}`;
+  return UPLOAD_MIME_BY_EXTENSION[key] ?? "application/octet-stream";
+}
+
 function hasHelpArg(args: string[]) {
   return args.includes("--help") || args.includes("-h");
 }
@@ -104,7 +152,10 @@ Options:
   --json                       Print machine-readable JSON.
 
 Note:
-  Currently only YAML files (.yaml, .yml) are supported.
+  Any file type is accepted as long as the file name has a non-empty extension
+  (book.epub); the stored MIME type is inferred from that extension. .yaml/.yml
+  map to application/yaml, unknown and active-content extensions (.html, .svg)
+  fall back to application/octet-stream.
 `);
 }
 
@@ -363,9 +414,12 @@ export async function runSpaceUploadCommand(
   if (!filePath?.trim()) throw new Error("space upload requires --file <path>.");
 
   const ext = extname(filePath).toLowerCase();
-  if (ext !== ".yaml" && ext !== ".yml") {
-    throw new Error("Only YAML files (.yaml, .yml) are supported for space upload.");
+  if (!ext || ext === ".") {
+    throw new Error(
+      "space upload requires a file name with a non-empty extension (the extension decides the stored MIME type), e.g. book.epub",
+    );
   }
+  const mimeType = resolveUploadMimeType(ext);
 
   const { authToken, userId } = requireTokenUser(args, deps.env);
   const serverUrl = resolveServerUrl(args, deps.env);
@@ -375,7 +429,6 @@ export async function runSpaceUploadCommand(
   const fileContent = readFileSync(filePath);
   const spaceKey = createSpaceKey.space(spaceId);
   const uploadName = basename(filePath);
-  const mimeType = "application/yaml";
   const now = Date.now();
   const nowIso = new Date(now).toISOString();
 

@@ -13,6 +13,7 @@ import { useRightSidebar } from "render/layout/RightSidebarContext";
 import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
 import { buildObjectAssistantSidebarId } from "chat/dialog/objectAssistantRegistry";
 import { isImageResourceLike } from "app/utils/fileUtils";
+import { isEpubReaderTarget } from "../epub/epubParser";
 import FileDropZone from "../components/FileDropZone";
 import { uploadAndAddFileToSpace } from "../content/contentThunks";
 import { useSpaceData } from "../hooks/useSpaceData";
@@ -802,6 +803,14 @@ const SpaceContent: React.FC = () => {
       }));
   const previewIsPage =
     !!previewItem && (previewType === "page" || previewItem.contentKey.startsWith("page-"));
+  // EPUB 只对文件类条目生效，并与 table / docx / image / page 显式互斥。
+  const previewIsEpub =
+    !!previewItem &&
+    !previewIsTable &&
+    !previewIsDocx &&
+    !previewIsImage &&
+    !previewIsPage &&
+    isEpubReaderTarget(previewItem);
 
   return (
     <FileDropZone onFilesAdded={handleFilesAdded}>
@@ -981,6 +990,7 @@ const SpaceContent: React.FC = () => {
           previewItem={previewItem}
           previewIsTable={previewIsTable}
           previewIsDocx={previewIsDocx}
+          previewIsEpub={previewIsEpub}
           previewIsImage={previewIsImage}
           previewIsPage={previewIsPage}
           previewRouteKey={previewRouteKey}

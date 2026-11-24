@@ -202,7 +202,7 @@
     },
     "packages/cli": {
       "name": "nolo-cli",
-      "version": "0.255.0-alpha.1",
+      "version": "0.256.0-alpha.1",
       "bin": {
         "nolo": "index.js",
       },
@@ -282,7 +282,7 @@
     },
     "packages/desktop": {
       "name": "desktop",
-      "version": "0.272.0-alpha.1",
+      "version": "0.273.0-alpha.1",
       "dependencies": {
         "electrobun": "2.0.7",
         "rcedit": "^5.0.2",
@@ -1069,7 +1069,7 @@
 
     "@pnpm/npm-conf": ["@pnpm/npm-conf@3.0.3", "", { "dependencies": { "@pnpm/config.env-replace": "^1.1.0", "@pnpm/network.ca-file": "^1.0.1", "config-chain": "^1.1.11" } }, "sha512-//0sR/cow/s4ICQaYoAobOl4aU8cjU6x/V24V7XkKotb9+O+3zySIYp146vpaobYHnxa4pZX8NkV54Z5AwbDKA=="],
 
-    "@primer/octicons": ["@primer/octicons@19.42.0", "", { "dependencies": { "object-assign": "^4.1.1" } }, "sha512-MEcHxVxNHu1I2Ndk5Mcwp7tfBiDk/EpytDJgKOfE2ldqIczWucVrZNeNU4wtEN5mnNudZ0YL5G0spax3bSMT4w=="],
+    "@primer/octicons": ["@primer/octicons@19.43.0", "", { "dependencies": { "object-assign": "^4.1.1" } }, "sha512-sOFYFCvZm6Nk7SgjfGk801rWIN2XzwsbDrDLzJcQi+YeeFBWMCgEX9OPJc7/9HDYAUF3LeYiAFgXFDWeiPl1kA=="],
 
     "@radix-ui/primitive": ["@radix-ui/primitive@1.2.0", "", {}, "sha512-KABY+VMIRPJL+Vyzv/335FEhXXD/xDv8BMb1kl48/aXJZMH0LtHCTx5ga5RnxaEP3nZHtmTLf1P9vanmFX46bw=="],
 
@@ -3267,7 +3267,7 @@
 
     "remark-stringify": ["remark-stringify@11.0.0", "", { "dependencies": { "@types/mdast": "^4.0.0", "mdast-util-to-markdown": "^2.0.0", "unified": "^11.0.0" } }, "sha512-1OSmLd3awB/t8qdoEOMazZkNsfVTeY4fTsgzcQFdXNq8ToTN4ZGwrMnlda4K6smTFKD+GRV6O48i6Z4iKgPPpw=="],
 
-    "remend": ["remend@1.5.0", "", {}, "sha512-A65+1l1jPGiZZsLD6QqL7foG8KBK2xMIjlr5Vm8R3kGAnVinjxFhdhHf3/zU5wPHrrsC87KqHztG7p1TD5i1HQ=="],
+    "remend": ["remend@1.5.1", "", {}, "sha512-Mvum2BFoAlLukpqIb5bCzzvjdNQk4w9OasdKEUuVkXTEPlWpiN3pRCbbSgOXWZIxbQFB16YL/s4D7PMnQ3oU5Q=="],
 
     "render": ["render@workspace:packages/render"],
 

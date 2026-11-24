@@ -9,6 +9,7 @@ import DocxPreviewDialog from "render/web/ui/modal/DocxPreviewDialog";
 import PagePreviewDialog from "render/web/ui/modal/PagePreviewDialog";
 import Button from "render/web/ui/Button";
 import ImagePreviewFetcher from "../components/ImagePreviewFetcher";
+const EpubReaderDialog = React.lazy(() => import("../epub/EpubReaderDialog"));
 
 interface SpaceContentOverlaysProps {
   spaceId?: string;
@@ -20,6 +21,7 @@ interface SpaceContentOverlaysProps {
   previewItem: SpaceContentType | null;
   previewIsTable: boolean;
   previewIsDocx: boolean;
+  previewIsEpub: boolean;
   previewIsImage: boolean;
   previewIsPage: boolean;
   previewRouteKey: string;
@@ -37,6 +39,7 @@ const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
   previewItem,
   previewIsTable,
   previewIsDocx,
+  previewIsEpub,
   previewIsImage,
   previewIsPage,
   previewRouteKey,
@@ -89,6 +92,16 @@ const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
         />
       )}
 
+      {previewItem && previewIsEpub && (
+        <React.Suspense fallback={null}>
+          <EpubReaderDialog
+            contentKey={previewItem.contentKey}
+            title={previewItem.title}
+            onClose={onClosePreview}
+          />
+        </React.Suspense>
+      )}
+
       {previewItem && previewIsImage && (
         <ImagePreviewFetcher
           contentKey={previewItem.contentKey}
@@ -108,7 +121,7 @@ const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
         />
       )}
 
-      {previewItem && !previewIsDocx && !previewIsTable && !previewIsImage && !previewIsPage && (
+      {previewItem && !previewIsDocx && !previewIsEpub && !previewIsTable && !previewIsImage && !previewIsPage && (
         <Dialog
           isOpen={!!previewItem}
           onClose={onClosePreview}

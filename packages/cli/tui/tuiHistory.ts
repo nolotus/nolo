@@ -64,6 +64,11 @@ export type TurnBlock = {
   content: string;
 };
 
+type StreamingTurnBlock = TurnBlock & {
+  /** Exact span in currentContent; avoids searching prose or later tool output. */
+  runWindow?: { start: number; finalizedSummary: string };
+};
+
 export type Turn = {
   role: TurnRole;
   content: string;
@@ -99,9 +104,10 @@ export type TurnHistory = {
   turns: Turn[];
   currentRole: TurnRole | null;
   currentContent: string;
-  currentBlocks: TurnBlock[];
+  currentBlocks: StreamingTurnBlock[];
   /** Uncollapsed tool rows for the on-demand /tools view. */
   toolDetails?: string[];
+  lastTurnToolDetailStart?: number;
   scrollTop: number;
   followBottom: boolean;
   hasMoreAbove?: boolean;
@@ -292,9 +298,16 @@ export function createTurnHistory(): TurnHistory {
   };
 }
 
-export function startTurn(history: TurnHistory, role: TurnRole) {
+export function formatToolDetails(history: TurnHistory, last: boolean): string {
+  return (last ? history.toolDetails?.slice(history.lastTurnToolDetailStart ?? 0) : history.toolDetails)?.join("") ?? "";
+}
+
+export function startTurn(history: TurnHistory, role: TurnRole, options?: { continueAssistantTurn?: boolean }) {
   if (history.currentRole !== null && history.currentContent) {
     finalizeCurrentTurn(history);
+  }
+  if (role === "assistant" && !options?.continueAssistantTurn) {
+    history.lastTurnToolDetailStart = history.toolDetails?.length ?? 0;
   }
   history.currentRole = role;
   history.currentContent = "";
@@ -314,7 +327,7 @@ function appendCurrentBlock(
 ) {
   if (!chunk) return;
   const last = history.currentBlocks.at(-1);
-  if (last?.kind === kind) {
+  if (last?.kind === kind && !last.runWindow) {
     last.content = applyTerminalOutputToText(last.content, chunk);
   } else {
     history.currentBlocks.push({
@@ -326,12 +339,28 @@ function appendCurrentBlock(
 
 export function finalizeCurrentTurn(history: TurnHistory) {
   if (history.currentRole !== null) {
+    let content = history.currentContent;
+    const blocks: TurnBlock[] = [];
+    // Collapse back-to-front so each window's recorded offset still applies.
+    for (let index = history.currentBlocks.length - 1; index >= 0; index--) {
+      const block = history.currentBlocks[index];
+      const window = block.runWindow;
+      const end = window ? window.start + block.content.length : 0;
+      if (window && content.slice(window.start, end) === block.content) {
+        const summary = `${window.finalizedSummary}\n`;
+        content = content.slice(0, window.start) + summary + content.slice(end);
+        blocks.push({ kind: block.kind, content: summary });
+      } else {
+        blocks.push({ kind: block.kind, content: block.content });
+      }
+    }
+    blocks.reverse();
     history.turns.push({
       role: history.currentRole,
-      content: compactTurnContent(history.currentContent),
+      content: compactTurnContent(content),
       ...(history.currentRole === "assistant" && history.currentBlocks.length > 0
         ? {
-            blocks: history.currentBlocks
+            blocks: blocks
               .map((block) => ({
                 ...block,
                 content: compactTurnContent(block.content),
@@ -375,9 +404,18 @@ function readTreePayload(chunk: string): TuiTreePayload {
   return JSON.parse(chunk.slice(TUI_TREE_MARKER.length).replace(/\u0002\n?$/, ""));
 }
 
-function applyTreeRewrite(text: string, chunk: string): string | null {
-  if (!chunk.startsWith(TUI_TREE_MARKER)) return null;
-  const payload = readTreePayload(chunk);
+function applyTreeRewrite(text: string, payload: TuiTreePayload): string | null {
+  if (payload.previousLines && payload.lines) {
+    // Walk just the tail and require a complete, contiguous row-by-row match.
+    let end = text.length - Number(text.endsWith("\n"));
+    for (let i = payload.previousLines.length - 1; i >= 0; i--) {
+      if (end < 0) return null;
+      const start = end === 0 ? 0 : text.lastIndexOf("\n", end - 1) + 1;
+      if (stripAnsi(text.slice(start, end)) !== stripAnsi(payload.previousLines[i])) return null;
+      end = start - 1;
+    }
+    return `${text.slice(0, end + 1)}${payload.lines.join("\n")}\n`;
+  }
   const tree = `▸ ${payload.summary}`;
   const hadTrailingNewline = text.endsWith("\n");
   const body = hadTrailingNewline ? text.slice(0, -1) : text;
@@ -411,38 +449,53 @@ export function applyOutputChunkToCurrentTurn(
   kind: TurnBlock["kind"] = "assistant",
 ): boolean {
   if (kind === "tool") {
+    const payload = chunk.startsWith(TUI_TREE_MARKER) ? readTreePayload(chunk) : null;
     const details = (history.toolDetails ??= []);
-    details.push(
-      chunk.startsWith(TUI_TREE_MARKER)
-        ? (readTreePayload(chunk).details ?? readTreePayload(chunk).fallback)
-        : // 详情里把行首图标还原成双语族名（Read/读取…）：/tools 永远读得懂。
-          toolRowDetailLine(chunk),
-    );
+    details.push(payload ? (payload.details ?? payload.fallback) : toolRowDetailLine(chunk));
     // Match transcript retention rather than accumulating an unbounded log.
-    while (details.length > MAX_TUI_HISTORY_TURNS * 10) details.shift();
-    if (chunk.startsWith(TUI_TREE_MARKER)) {
-      const payload = readTreePayload(chunk);
-      if (payload.appendOnly) {
+    while (details.length > MAX_TUI_HISTORY_TURNS * 10) {
+      details.shift();
+      history.lastTurnToolDetailStart = Math.max(0, (history.lastTurnToolDetailStart ?? 0) - 1);
+    }
+    if (payload) {
+      const appendFallback = () => {
         history.currentContent = applyTerminalOutputToText(history.currentContent, payload.fallback);
         appendCurrentBlock(history, kind, payload.fallback);
+      };
+      if (payload.appendOnly) {
+        appendFallback();
         return true;
       }
-      const rewrittenTree = applyTreeRewrite(history.currentContent, chunk);
-      if (rewrittenTree === null) {
-        // Only the newest result is new: earlier items are already visible.
-        // Return false to reset the formatter, independently of repainting.
-        const safe = readTreePayload(chunk).fallback;
-        history.currentContent = applyTerminalOutputToText(history.currentContent, safe);
-        appendCurrentBlock(history, kind, safe);
-        return false;
-      }
-      const treeContent = rewrittenTree;
-      history.currentContent = treeContent;
       const lastBlock = history.currentBlocks.at(-1);
-      const treeBlock = `▸ ${readTreePayload(chunk).summary}\n`;
-      if (lastBlock?.kind === "tool") lastBlock.content = applyTreeRewrite(lastBlock.content, chunk) ?? `${lastBlock.content}${treeBlock}`;
-      else history.currentBlocks.push({ kind: "tool", content: treeBlock });
-      return true;
+      const rewrittenTree = applyTreeRewrite(history.currentContent, payload);
+      if (payload.previousLines && payload.lines) {
+        const rewrittenBlock = lastBlock?.kind === "tool" ? applyTreeRewrite(lastBlock.content, payload) : null;
+        if (rewrittenTree !== null && rewrittenBlock !== null && lastBlock) {
+          const window = `${payload.lines.join("\n")}\n`;
+          const prefix = rewrittenBlock.slice(0, -window.length);
+          history.currentBlocks.pop();
+          if (prefix) history.currentBlocks.push({ kind: "tool", content: prefix });
+          history.currentBlocks.push({
+            kind: "tool",
+            content: window,
+            ...(payload.finalizedSummary !== undefined && {
+              runWindow: { start: rewrittenTree.length - window.length, finalizedSummary: payload.finalizedSummary },
+            }),
+          });
+          history.currentContent = rewrittenTree;
+          return true;
+        }
+      } else if (rewrittenTree !== null) {
+        history.currentContent = rewrittenTree;
+        const treeBlock = `▸ ${payload.summary}\n`;
+        if (lastBlock?.kind === "tool") lastBlock.content = applyTreeRewrite(lastBlock.content, payload) ?? `${lastBlock.content}${treeBlock}`;
+        else history.currentBlocks.push({ kind: "tool", content: treeBlock });
+        return true;
+      }
+      // Only the newest result is new: earlier items are already visible.
+      // Return false to reset the formatter, independently of repainting.
+      appendFallback();
+      return false;
     }
   }
   const next = applyTerminalOutputToText(history.currentContent, chunk);

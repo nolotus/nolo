@@ -97,6 +97,7 @@ function parseGit(rest: string): { action: string; object?: string; context?: st
   const tokens = shellWords(rest.split(/\s+\|\s+/)[0]!);
   if (!tokens) return null;
   let i = 0, context: string | undefined;
+  if (tokens.length === 1 && tokens[0] === "--version") return { action: "查版本", readOnly: true };
   while (tokens[i]?.startsWith("-")) {
     const option = tokens[i++]!;
     if (["-C", "-c", "--git-dir", "--work-tree"].includes(option)) {
@@ -126,17 +127,34 @@ function parseGit(rest: string): { action: string; object?: string; context?: st
     return null;
   }
   if (sub === "branch") {
-    let mode = "create", end = false;
+    let mode = "create", end = false, explicitList = false, listFilter = false;
     const operands: string[] = [];
-    for (const token of args) {
+    // 纯过滤选项（只影响列举结果），不会退化成创建/改动。
+    const BRANCH_FILTER_FLAGS = ["--merged", "--no-merged", "--contains", "--no-contains", "--points-at"];
+    for (let j = 0; j < args.length; j++) {
+      const token = args[j]!;
       if (!end && token === "--") { end = true; continue; }
       if (!end && token.startsWith("-")) {
         if (["-d", "-D", "--delete"].includes(token) && mode === "create") mode = "delete";
-        else if (["--list", "-a", "--all", "-r", "--remotes", "-v", "-vv", "--show-current"].includes(token) && mode === "create") mode = "list";
+        else if (token === "--list" && mode === "create") { mode = "list"; explicitList = true; }
+        else if (["-a", "--all", "-r", "--remotes", "-v", "-vv", "--verbose", "--show-current"].includes(token) && mode === "create") mode = "list";
+        else if (mode === "create" && (BRANCH_FILTER_FLAGS.includes(token) || BRANCH_FILTER_FLAGS.some(f => token.startsWith(`${f}=`)))) {
+          // `git branch --merged main` / `--contains HEAD` 是列举（要求一个 commit 参数）。
+          mode = "list"; listFilter = true;
+          if (BRANCH_FILTER_FLAGS.includes(token)) {
+            const value = args[j + 1];
+            if (!value || value.startsWith("-")) return null;
+            j++;
+          }
+        } else if (mode === "list" && ["-i", "--ignore-case", "-v", "-vv", "--verbose", "--no-color", "--color", "--column", "--no-column"].includes(token)) continue;
         else return null;
       } else operands.push(token);
     }
     if (mode === "delete" && operands.length === 1) return result("删除分支", operands[0], false);
+    // `git branch -v newbr` 实际会**创建**分支（`-v` 只是显示修饰），把它讲成
+    // 「列出分支 / 只读」就是编造。列举模式只有在显式 `--list`（可带 pattern）
+    // 或纯过滤选项（--merged/--contains…）在场时才允许带参数位。
+    if (mode === "list" && operands.length && !explicitList && !listFilter) return null;
     if (mode === "list" || !args.length) return result("列出分支", undefined, true);
     if (mode === "create" && operands.length >= 1 && operands.length <= 2) return result("创建分支", operands[0], false);
     return null;
@@ -149,7 +167,7 @@ function parseGit(rest: string): { action: string; object?: string; context?: st
       const tok = list[j]!;
       if (tok === "--") { out.push(...list.slice(j + 1)); break; }
       if (tok.startsWith("-")) {
-        if (["-m", "-F", "-b", "-B", "-n", "--max-count", "--format", "--pretty", "--since", "--until", "--author", "-U"].includes(tok)) j++;
+        if (["-m", "-F", "-b", "-B", "-n", "--max-count", "--format", "--pretty", "--since", "--until", "--author", "-U", "-L", "-S", "-G"].includes(tok)) j++;
         continue;
       }
       out.push(tok);
@@ -163,6 +181,62 @@ function parseGit(rest: string): { action: string; object?: string; context?: st
     case "rev-list": return result("统计提交", undefined, true);
     case "merge-base": return result("查共同祖先", undefined, true);
     case "rev-parse": return result("查仓库信息", undefined, true);
+    // 以下子命令在 git 里没有写/执行形态（例外一律单独把关），可安全折进探索树。
+    case "version": return result("查版本", undefined, true);
+    case "ls-files": return result("列跟踪文件", undefined, true);
+    case "ls-tree": {
+      const target = nonFlagArgs(args).find(isSafeGitTarget);
+      return result("看树", target ? clipShortText(target, 20) : undefined, true);
+    }
+    case "cat-file": {
+      const target = nonFlagArgs(args).find(isSafeGitTarget);
+      return result("看对象", target ? clipShortText(target, 20) : undefined, true);
+    }
+    case "show-ref":
+    case "for-each-ref": return result("查引用", undefined, true);
+    case "grep": {
+      // `-O` / `--open-files-in-pager` 会启动外部程序处理匹配文件，不属只读。
+      if (args.some(t =>
+        (t.startsWith("-") && !t.startsWith("--") && t.slice(1).includes("O")) ||
+        t === "--open-files-in-pager" ||
+        t.startsWith("--open-files-in-pager="),
+      )) return null;
+      return result("搜代码", extractSafeSearchTarget(args.join(" ")), true);
+    }
+    case "blame": {
+      const files = nonFlagArgs(args).filter(isSafeGitTarget);
+      const file = files[files.length - 1];
+      return result("查行作者", file ? baseName(file) ?? clipShortText(file, 20) : undefined, true);
+    }
+    case "describe": return result("查版本描述", undefined, true);
+    case "count-objects": return result("统计对象", undefined, true);
+    case "shortlog": return result("汇总提交", undefined, true);
+    case "check-ignore": {
+      const file = nonFlagArgs(args).find(isSafeGitTarget);
+      return result("查忽略规则", file ? baseName(file) : undefined, true);
+    }
+    case "reflog": {
+      // `git reflog expire|delete` 会改写/删除引用日志，不是只读查询。
+      const op = nonFlagArgs(args)[0];
+      if (op === "expire" || op === "delete" || op === "drop") return null;
+      return result("查引用日志", undefined, true);
+    }
+    case "remote": {
+      // `git remote add|set-url|remove|prune` 都写仓库；只放行纯列举。
+      if (nonFlagArgs(args).length) return null;
+      if (args.some(t => !["-v", "--verbose"].includes(t))) return null;
+      return result("查远端", undefined, true);
+    }
+    case "config": {
+      // 只有显式读取形式才认：`git config a b` 写值，`--unset`/`--add` 也是写。
+      const isReadForm = args.some(t => ["--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin"].includes(t)
+        || /^--(?:get|get-all|get-regexp|list|show-origin)(?:=|$)/.test(t));
+      if (!isReadForm) return null;
+      if (args.some(t => ["--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section", "-e", "--edit"].includes(t)
+        || /^--(?:unset|unset-all|add|replace-all|rename-section|remove-section|edit)(?:=|$)/.test(t))) return null;
+      const key = nonFlagArgs(args)[0];
+      return result("查配置", key && isSafeGitTarget(key) ? clipShortText(key, 24) : undefined, true);
+    }
     case "show": {
       const target = nonFlagArgs(args)[0];
       return result("看提交", isSafeGitTarget(target) ? clipShortText(target, 20) : undefined, true);
@@ -223,6 +297,28 @@ function baseName(path: string): string | undefined {
   const parts = cleaned.split("/").filter(Boolean);
   const base = parts.pop();
   return base || undefined;
+}
+
+/**
+ * 取命令里最后一个位置参数（文件/目录），跳过已知「选项取值」的下一枚词。
+ * 只读工具（diff/du/basename…）没有输出文件参数，最后一个位置参数就是被看的对象。
+ */
+function lastFileOperand(tokens: string[], valueFlags: ReadonlySet<string>): string | undefined {
+  let file: string | undefined;
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok === "--") {
+      const rest = tokens.slice(i + 1);
+      if (rest.length) file = rest[rest.length - 1];
+      break;
+    }
+    if (tok.startsWith("-")) {
+      if (!tok.includes("=") && valueFlags.has(tok)) i++;
+      continue;
+    }
+    file = tok;
+  }
+  return file;
 }
 
 /**
@@ -704,10 +800,83 @@ function classifySegment(segment: string): SegmentAction | null {
     }
     case "ps":
       return { verb: "查进程", readOnly: true };
-    case "sha256sum": {
+    case "sha256sum":
+    case "sha1sum":
+    case "md5sum":
+    case "sha512sum":
+    case "b2sum":
+    case "cksum": {
+      // 校验和只有 stdout 输出；`-c` 也只是读校验清单（无输出文件形态）。
       const tokens = shellWords(rest.split(/\s+\|\s+/)[0]!);
       const file = tokens?.find((t) => !t.startsWith("-"));
       return { verb: "算校验和", target: file ? baseName(file) : undefined, readOnly: true };
+    }
+    case "du": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const path = lastFileOperand(tokens, new Set(["-d", "--max-depth", "-B", "--block-size", "--files0-from", "--exclude", "-t", "--threshold", "--time-style"]));
+      return { verb: "查磁盘占用", target: path ? baseName(path) : undefined, readOnly: true };
+    }
+    case "df":
+      return { verb: "查磁盘空间", readOnly: true };
+    case "free":
+      return { verb: "查内存", readOnly: true };
+    case "nproc":
+      return { verb: "查 CPU 数", readOnly: true };
+    case "uptime":
+      return { verb: "查负载", readOnly: true };
+    case "id": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const user = tokens.find((t) => !t.startsWith("-"));
+      return { verb: "查身份", target: user ? clipShortText(user, 24) : undefined, readOnly: true };
+    }
+    case "hostname": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      // `hostname newname` / `hostname -F file` / `-b` 会改主机名；只有纯查询才算只读。
+      if (tokens.some((t) => ["-F", "--file", "-b", "--boot"].includes(t))) return null;
+      if (tokens.some((t) => !t.startsWith("-"))) return null;
+      return { verb: "查主机名", readOnly: true };
+    }
+    case "date": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      // `date -s '…'` / `date 010100002020` 会设置时钟；只有打印形式才算只读。
+      if (tokens.some((t) => ["-s", "--set", "-f", "--file"].includes(t) || t.startsWith("--set="))) return null;
+      const valueFlags = new Set(["-d", "--date", "-r", "--reference"]);
+      const positionals: string[] = [];
+      for (let i = 0; i < tokens.length; i++) {
+        const tok = tokens[i]!;
+        if (tok.startsWith("-")) {
+          if (!tok.includes("=") && valueFlags.has(tok)) i++;
+          continue;
+        }
+        positionals.push(tok);
+      }
+      // `+%Y-%m-%d` 是输出格式，不是要设置的时间值。
+      if (positionals.some((t) => !t.startsWith("+"))) return null;
+      return { verb: "查时间", readOnly: true };
+    }
+    case "basename": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const path = tokens.find((t) => !t.startsWith("-"));
+      return { verb: "取文件名", target: path ? baseName(path) : undefined, readOnly: true };
+    }
+    case "dirname": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      const path = tokens.find((t) => !t.startsWith("-"));
+      return { verb: "取所在目录", target: path ? clipShortText(path, 24) : undefined, readOnly: true };
+    }
+    case "diff":
+    case "cmp": {
+      const tokens = shellWords(stripTrailingPipe(rest));
+      if (!tokens) return null;
+      // diff/cmp 只输出到 stdout，没有输出文件参数。
+      const file = lastFileOperand(tokens, new Set(["-x", "--exclude", "-I", "--ignore-matching-lines", "-U", "--unified", "-C", "--context", "--label", "-L", "--to-file", "--from-file", "-S", "--starting-file", "--horizon-lines", "--tabsize", "-t"]));
+      return { verb: "对比文件", target: file ? baseName(file) : undefined, readOnly: true };
     }
     case "dnf":
     case "yum": {
@@ -752,8 +921,9 @@ function classifySegment(segment: string): SegmentAction | null {
       return { verb: "处理文本", readOnly: true };
     case "find": {
       // HIGH-1：`find -delete` / `find -exec rm` 是删除，不是查找。
+      // `-fprint`/`-fprint0`/`-fprintf`/`-fls` 会把结果写进文件，也属写操作。
       // 把破坏性动作说成只读是编造摘要（违背本模块的退化原则）。
-      if (/(?:^|\s)(?:-delete|-exec|-execdir|-ok|-okdir)(?:\s|$)/.test(rest)) return null;
+      if (/(?:^|\s)(?:-delete|-exec|-execdir|-ok|-okdir|-fprint|-fprint0|-fprintf|-fls)(?:\s|$)/.test(rest)) return null;
       return { verb: "查找文件", readOnly: true };
     }
     case "curl":
@@ -765,6 +935,8 @@ function classifySegment(segment: string): SegmentAction | null {
     case "yarn": {
       const tokens = shellWords(rest.split(/\s+\|\s+/)[0]!) ?? rest.split(/\s+/).filter(Boolean);
       const sub = tokens[0] ?? "";
+      // 单纯版本探针（`bun --version` / `npm -v`）是确定性只读查询。
+      if (tokens.length === 1 && ["-v", "-V", "--version"].includes(sub)) return { verb: "查版本", readOnly: true };
       if (sub === "test") {
         // 保留测试目标（第一个非 flag 参数），`bun test packages/cli/tui` → 「跑测试 cli/tui」
         const target = tokens.slice(1).find((t) => !t.startsWith("-"));
@@ -793,6 +965,7 @@ function classifySegment(segment: string): SegmentAction | null {
     case "python":
     case "python3": {
       const tokens = shellWords(rest.split(/\s+\|\s+/)[0]!) ?? [];
+      if (tokens.length === 1 && ["-V", "-v", "--version"].includes(tokens[0]!)) return { verb: "查版本", readOnly: true };
       if (tokens.includes("--inline-heredoc") || /(?:^|\s)-[A-Za-z]*c(?:\s|$)/.test(rest)) {
         return { verb: "执行内联脚本 (Python)", readOnly: false };
       }
@@ -801,6 +974,8 @@ function classifySegment(segment: string): SegmentAction | null {
     }
     case "node": {
       if (/(?:^|\s)-[A-Za-z]*e(?:\s|$)/.test(rest)) return null;
+      const nodeTokens = shellWords(stripTrailingPipe(rest));
+      if (nodeTokens?.length === 1 && ["-v", "-V", "--version"].includes(nodeTokens[0]!)) return { verb: "查版本", readOnly: true };
       const script = rest.split(/\s+/).find((t) => t && !t.startsWith("-"));
       return { verb: "执行脚本", target: baseName(script ?? ""), readOnly: false };
     }
@@ -971,8 +1146,13 @@ function summarizeActions(actions: SegmentAction[]): string {
  */
 const PIPELINE_FILTER_COMMANDS = new Set([
   "head", "tail", "cat", "wc", "sort", "uniq", "cut", "tr", "nl", "column",
-  "grep", "rg", "ag", "ack", "jq", "less", "more", "bat",
+  "grep", "egrep", "fgrep", "rg", "ag", "ack", "jq", "less", "more", "bat",
   "awk", "sed",
+  // 纯 stdout 文本/校验和工具：只读 stdin/文件，没有输出文件参数
+  // （写文件的 tee/xargs/split/xxd 之类**不在此列**）。
+  "diff", "cmp", "comm", "paste", "join", "fold", "expand", "unexpand",
+  "tac", "rev", "strings", "od", "base64",
+  "md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum",
 ]);
 
 /**
