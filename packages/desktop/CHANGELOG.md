@@ -1,4 +1,16 @@
 
+## 0.270.0-alpha.1 (2026-11-24)
+
+### Features
+
+* **agent:** strengthen tiered caller posture, callerModel wiring, and offload nudge ([6f80dc1](https://github.com/nolotus/bun-nolo/commit/6f80dc1a7138bb5e3fe2a9a0e069bc4b5e55075a))
+
+### Performance Improvements
+
+* **agent:** deduplicate shared credentialGroup quota in compact listAgents ([116fe90](https://github.com/nolotus/bun-nolo/commit/116fe903992072d3213b7ea1a22c3b2c6e1bce5a))
+* **tools:** deduplicate orchestration and workspace tool descriptions ([331134d](https://github.com/nolotus/bun-nolo/commit/331134d90857db2d761a4d167cc5306ae8558b8c))
+
+
 ## 0.269.0-alpha.3 (2026-11-24)
 
 ### Bug Fixes

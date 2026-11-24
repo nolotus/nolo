@@ -21,6 +21,7 @@
 import { scrubSecrets } from "../../agent-runtime/secretScrubber";
 import { sanitizeToolOutputText } from "../../agent-runtime/toolOutputSanitizer";
 import { LIST_AGENTS_PAGE_BUDGET } from "./toolOutputPolicy";
+import { promoteSharedCredentialGroupQuota } from "./safeAgentSummary";
 import { createTokenKey, createKey } from "database/keys";
 import {
   readSpeedSamplesProgress,
@@ -735,7 +736,17 @@ async function serializeCompactAgentPage(parsed: any, samples: SpeedSamplesByMod
     const speedContext = buildCandidateSpeedContext(typeof agent.model === "string" ? [agent.model] : [], samples, { snapshotAgeMs });
     // Speed observations can age or refresh between requests. Only candidate and
     // credential evidence belong to the reassembled, digest-verified payload.
-    const payload = { agent, credentialGroups: groups.filter((group: any) => group.credentialGroup === agent.credentialGroup) };
+    //
+    // 单候选载荷只由这个候选**自己**的内联快照决定：把整页的组配额提升结论
+    // 带进来会让 digest 随同页其它候选的配额刷新漂移（续取同一片段时报
+    // LIST_AGENTS_FRAGMENT_CHANGED）。所以这里按「前缀 = 就这一条」重跑提升——
+    // 单成员永远不会满足 ≥2 的合并条件，结果是 quotaRef 被还原成该条自己的
+    // `quota`、组条目不再带 quota。
+    const singleScoped = promoteSharedCredentialGroupQuota(
+      [agent],
+      groups.filter((group: any) => group.credentialGroup === agent.credentialGroup),
+    );
+    const payload = { agent: singleScoped.agents[0], credentialGroups: singleScoped.groups };
     let keyCollision = false;
     const cleanText = (value: string) => scrubSecrets(sanitizeToolOutputText(value)).cleaned;
     const sanitize = (value: unknown): unknown => {
@@ -773,13 +784,21 @@ async function serializeCompactAgentPage(parsed: any, samples: SpeedSamplesByMod
   }
 
   const makePage = (count: number) => {
-    const agents = candidates.slice(0, count);
-    const groupKeys = new Set(agents.map((agent) => agent.credentialGroup).filter(Boolean));
+    // 配额提升必须落在**实际尝试交付的前缀**上，而不是未裁剪的全集：
+    // 没有交付的候选的组额度不该被挂进这一页（几 KB 的组额度足以把
+    // 一条本来装得下的候选顶成 LIST_AGENTS_CANDIDATE_TOO_LARGE）。
+    const scoped = candidates.slice(0, count);
+    const groupKeys = new Set(scoped.map((agent) => agent.credentialGroup).filter(Boolean));
+    const promoted = promoteSharedCredentialGroupQuota(
+      scoped,
+      groups.filter((group: any) => groupKeys.has(group.credentialGroup)),
+    );
+    const agents = promoted.agents;
     const speedContext = buildCandidateSpeedContext(agents.map((agent) => agent.model).filter((model): model is string => typeof model === "string"), samples, { snapshotAgeMs });
     const nextOffset = offset + count;
     const hasMore = nextOffset < availableCount;
     return JSON.stringify({ ...parsed, offset, agents,
-      credentialGroups: groups.filter((group: any) => groupKeys.has(group.credentialGroup)),
+      credentialGroups: promoted.groups,
       hasMore, ...(hasMore ? { nextOffset } : {}),
       ...(speedContext ? { speedContext } : {}),
     });

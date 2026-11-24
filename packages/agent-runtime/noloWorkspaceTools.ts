@@ -88,6 +88,19 @@ export function filterNoloWorkspaceToolNames(toolNames?: string[]) {
   return (toolNames ?? []).filter(isNoloWorkspaceToolName);
 }
 
+/**
+ * readDialog / listAgents 的 description 与 `packages/ai/tools/noloWorkspaceReadTools.ts`
+ * 中的同名 schema 保持逐字同步（R-005 对齐）。两处不抽共享常量：ai 与 agent-runtime
+ * 已互相 import，再为一段字符串新增跨包依赖会把重图（app/identity 等）拖进本包的
+ * 运行时模块，得不偿失；措辞改动必须同时改两处。
+ */
+export const READ_DIALOG_TOOL_DESCRIPTION =
+  "Read a persisted dialog (meta + messages) by full dbKey (dialog-<userId>-<id>) or dialog URL; use listDialogs when unclear. A bare id only resolves for the currently logged-in user — pass user/server. For runs, do not poll a running dialog's full transcript: prefer controlAgentRun, else mode=\"status\" for a compact snapshot; read the transcript only after done/failed/cancelled. Response is budgeted: reasoning_content, tool_calls, tool results and metadata are head-truncated (truncated, messagesTotal/messagesReturned, estimatedOriginalChars/omittedChars). For review or verification, read mode=\"status\" plus the final verdict and take diffs from the worktree instead of pulling the full execution transcript.";
+
+/** 与 `packages/ai/tools/noloWorkspaceReadTools.ts` 的 listAgents description 逐字同步，见上。 */
+export const LIST_AGENTS_TOOL_DESCRIPTION =
+  "List agents for delegation. Default scope='all' dedupes the user's own/favorite agents (owned, OAuth, custom-API, local) with the public marketplace; scope='public' discovers shared/marketplace agents only. Public agents may consume platform credits — check billingSource. Each entry's agentKey is runnable (agent-<userId>-<id> / agent-pub-<id>): Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. Copy `agentKey` verbatim into startAgentRun. Returns planningRecommendation (reason, currentTier, requiresPaidApproval): advice when planning is needed, not authorization. Rate-limited agents are listed too: availabilityStatus/availabilityReason/nextAvailableAt are reference info — advisory annotations, not dispatch gates; unavailableCount counts them. Fan-out guard limits only same-batch concurrency (sharing a credential alone is not a dependency) unless allowUnknownCredential confirms.";
+
 export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
   const toolNames = new Set(args.toolNames ?? []);
   const tools: Array<Record<string, unknown>> = [];
@@ -114,7 +127,7 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
     limit: { type: "integer", description: "Maximum dialogs to return." },
     space: stringToolParam("Optional space id or URL."),
   });
-  add("readDialog", "Read one persisted dialog (metadata + messages) by full dbKey (dialog-<userId>-<id>) or URL. Use listDialogs first if target is unclear; a bare id resolves against the current user, pass user for someone else's dialog. Reading an agent run's dialog is fine at any time, but do not poll a still-running one through the full transcript: if controlAgentRun is available prefer it for live runs, otherwise use mode=\"status\" for a compact snapshot, and pull the full transcript once the run is done/failed/cancelled. The response is budgeted: reasoning_content, tool_calls arguments, tool result content and metadata are head-truncated with projection stats (truncated, messagesTotal/messagesReturned, estimatedOriginalChars/omittedChars). For review or verification, read mode=\"status\" plus the final verdict and take diffs from the worktree instead of pulling the full execution transcript.", {
+  add("readDialog", READ_DIALOG_TOOL_DESCRIPTION, {
     dialog: stringToolParam("Dialog dbKey (dialog-<userId>-<id>), dialog URL, or bare id (resolved against user/current account)."),
     mode: {
       type: "string",
@@ -149,7 +162,7 @@ export function buildNoloWorkspaceOpenAiTools(args: { toolNames?: string[] }) {
       description: "Confirmed dialog ids or dbKeys to delete.",
     },
   }, ["query"]);
-  add("listAgents", "List agents for delegation. Default scope='all' returns the user's favorites, owned, OAuth, custom API, and local agents plus the public marketplace; scope='public' discovers shared/marketplace agents only. Public agents may consume platform credits. Copy the agentKey verbatim; use the runnable agentKey exactly and do not infer it from the display name. publicOnly is deprecated compatibility for scope='public'.  Returns planningRecommendation: conditional advice only when planning is needed and the candidate is suitable; simple questions need no extra planning call. action self/delegate, reason, currentTier, optional agentKey/recommendedTier, poolComplete, requiresPaidApproval. Caller identity/model/runKind are host-owned, not tool arguments. Unknown tiers are not ranked; incomplete pools cannot establish a highest candidate. Bounded subtasks do not delegate planning. Recommendation is not authorization and never starts a run; paid channels require separate approval. All agents in the selected scope are listed; cooldown and quota status are advisory annotations, not dispatch gates.", {
+  add("listAgents", LIST_AGENTS_TOOL_DESCRIPTION, {
     query: stringToolParam("Optional case-insensitive search substring matching agent name, model, provider, handle, or agentKey."),
     scope: { type: "string", enum: ["all", "public"], description: "Discovery scope; all is the default and includes the public marketplace." },
     publicOnly: { type: "boolean", description: "Deprecated compatibility alias for scope='public'." },

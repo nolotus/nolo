@@ -88,7 +88,6 @@ import {
 } from "./pasteFlow";
 import { readClipboardText, writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
-import { fetchCiStatus, summarizeLatest } from "./ciStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import {
   applyTuiInputKey,
@@ -556,16 +555,6 @@ export function isClipboardImageFallbackEligible(error: unknown): boolean {
         ? String((error as { code?: unknown }).code)
         : undefined;
   return isTextFallbackEligibleCode(code);
-}
-
-export function shouldRefreshCiStatusOnStartup(
-  env: Record<string, string | undefined>,
-): boolean {
-  if (env.NOLO_CLI_CI_STATUS === "0") return false;
-  return (
-    env.NOLO_CLI_CI_STATUS === "1" ||
-    Boolean(env.NOLO_CI_SSH_HOST?.trim() || env.NOLO_CI_RAW_HOST?.trim())
-  );
 }
 
 async function runTuiWorkspace(options: WorkspaceOptions) {
@@ -1196,21 +1185,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     void detectGitStatusAsync(state.cwd).then((gitStatus) => {
       if (sessionEnded) return; // session exited while git ran — skip the stale repaint
       state = { ...state, gitStatus };
-      scheduleRender();
-    });
-  };
-
-  // 部署状态：仅在显式开启时查询（NOLO_CLI_CI_STATUS=1 或配置了自定义 CI SSH 目标）。
-  // 默认不向运维机发起后台 SSH，避免沙盒/测试/普通用户环境触发出向 :22 扫描风控。
-  // 失败静默：fetchCiStatus 已经保证不抛，这里再守一次 sessionEnded，
-  // 避免会话结束后仍用陈旧结果重绘。
-  const refreshCiStatus = (): void => {
-    if (!shouldRefreshCiStatusOnStartup(effectiveEnv)) return;
-    void fetchCiStatus(undefined, undefined, undefined, effectiveEnv).then((jobs) => {
-      if (sessionEnded) return;
-      const ciStatusLine = summarizeLatest(jobs);
-      if (!ciStatusLine) return;
-      state = { ...state, ciStatusLine };
       scheduleRender();
     });
   };
@@ -4161,7 +4135,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // query bytes would leak into that stream's input queue instead.
       if (!sawOsc11Reply && isTerminalDevice(input) && !isPtyxisTerminal()) requestTerminalBackgroundQuery();
       refreshGitStatus();
-      refreshCiStatus();
       await new Promise<void>((resolve) => {
         resolveDone = resolve;
         if (done) resolve(); // finish() may have run before we started waiting

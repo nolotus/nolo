@@ -73,7 +73,13 @@ const prependPromptMessage = (
   // dynamic suffix (no cache_control).  Summary changes won't invalidate
   // the prefix cache.
   if (isClaudeModel(resolvedModel)) {
-    const compiled = buildSystemPromptContext({ agentConfig, language, contexts, dispatchIntent });
+    const compiled = buildSystemPromptContext({
+      agentConfig,
+      language,
+      contexts,
+      dispatchIntent,
+      callerModel: agentConfig?.model,
+    });
     if (!compiled.content.trim()) return messages;
     const content = applyClaudeCache(
       compiled.stablePrefixContent,
@@ -92,7 +98,13 @@ const prependPromptMessage = (
     : {};
   // Codex needs the compiler's boundary across the Chat Completions proxy hop.
   if (preservePromptBoundary) {
-    const compiled = buildSystemPromptContext({ agentConfig, language, contexts, dispatchIntent });
+    const compiled = buildSystemPromptContext({
+      agentConfig,
+      language,
+      contexts,
+      dispatchIntent,
+      callerModel: agentConfig?.model,
+    });
     if (!compiled.content.trim()) return messages;
     return [{
       role: "system", content: compiled.content,
@@ -100,7 +112,7 @@ const prependPromptMessage = (
       ...promptProvenance,
     }, ...messages];
   }
-  const promptContent = generatePrompt({ agentConfig, language, contexts, dispatchIntent });
+  const promptContent = generatePrompt({ agentConfig, language, contexts, dispatchIntent, callerModel: agentConfig?.model });
   if (!promptContent.trim()) return messages;
   const systemMessage: PromptMessage = { role: "system", content: promptContent, ...promptProvenance };
   return [systemMessage, ...messages];

@@ -15,7 +15,7 @@ import {
 } from "./agentBilling";
 import type { AgentEconomicsSnapshot } from "../economics/economicsSnapshot";
 import { resolveEconomicsSnapshot } from "../economics/economicsSnapshot";
-import type { AgentQuota } from "./quotaSnapshot";
+import type { AgentQuota, QuotaWindow } from "./quotaSnapshot";
 import {
   resolveAgentAvailability,
   type AgentAvailabilityStatus,
@@ -44,6 +44,12 @@ export interface CredentialGroupSummary {
   credentialKind: CredentialKind;
   agentCount: number;
   availableAt?: number;
+  /**
+   * 组内多个 agent 的配额快照完全相同时，compact:true 投影把这份快照提升到这里，
+   * 各 agent 条目不再重复拷贝（见 promoteSharedCredentialGroupQuota）。
+   * 只有「本组 ≥2 个 agent 的窗口内容一致」时才存在；verbose/default 路径不产出。
+   */
+  quota?: CompactAgentQuota;
 }
 
 /**
@@ -668,7 +674,17 @@ export const COMPACT_AGENT_SUMMARY_FIELDS = [
 export type CompactSafeAgentSummary = Pick<
   SafeAgentSummary,
   (typeof COMPACT_AGENT_SUMMARY_FIELDS)[number]
->;
+> & {
+  /**
+   * 「本条的内联 `quota` 已提升到 `credentialGroups[].quota`」的显式指针，
+   * 值为该组的 `credentialGroup`（见 promoteSharedCredentialGroupQuota）。
+   *
+   * 存在的唯一理由是把「继承组配额」与「压根没有配额观测」区分开：少了它，
+   * 一条 `remaining: 0`（真耗尽）被提升后与「上游从未报过配额」在输出里长得一样。
+   * `quotaRef` 与 `quota` 互斥；两者都没有 = 未知，不是 0。
+   */
+  quotaRef?: string;
+};
 
 /**
  * 去掉值为 null/undefined 的键。"introduction": null 这类键只花字节不给信息；
@@ -683,6 +699,221 @@ export function omitNullishAgentSummaryFields<T extends object>(summary: T): T {
     }
   }
   return result as T;
+}
+
+/**
+ * `compact: true` 投影里的配额窗口：**只留派发决策真正要读的读数**，剔除
+ * `source` 诊断串（真实形态如
+ * `antigravity-oauth:https://daily-cloudcode-pa.googleapis.com:fetchAvailableModels:pool:hydrogen`）。
+ *
+ * `source` 只回答「这条窗口是哪个头/端点出的」，对「还能不能派、还剩多少、
+ * 什么时候复位」没有任何决策价值，却在 35 个 agent × 多窗口里重复几十次，
+ * 是 listAgents 输出里最纯的字节噪音。
+ */
+export type CompactQuotaWindow = {
+  scope: string;
+  utilization?: number;
+  remaining?: number;
+  limit?: number;
+  unit?: string;
+  resetAt?: number;
+};
+
+/**
+ * `compact: true` 投影里的配额快照。`plan` 同样剔除 `source`（同样是排障标记），
+ * 只留档位名与月度额度这两个「买的是哪个档」的事实。
+ */
+export type CompactAgentQuota = {
+  observedAt: number;
+  windows: CompactQuotaWindow[];
+  plan?: { name: string; monthlyCreditsUsd?: number };
+};
+
+function finiteOptionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * 纯函数：完整配额快照 → compact 投影（剔除 `source` 长诊断串，保留读数）。
+ *
+ * 保留：`observedAt` 与每窗口的 `scope`/`utilization`/`remaining`/`limit`/`unit`/`resetAt`。
+ * 注意 0 是有意义的读数（`remaining: 0` = 已耗尽），所以只按 `undefined` 判定缺失，
+ * 绝不按真值判断。已精简过的快照再进来是幂等的。
+ */
+export function compactQuotaForSummary(
+  quota: AgentQuota | CompactAgentQuota | undefined | null,
+): CompactAgentQuota | undefined {
+  if (!quota || !Array.isArray(quota.windows)) return undefined;
+  const observedAt = finiteOptionalNumber(quota.observedAt);
+  if (observedAt === undefined) return undefined;
+
+  const windows: CompactQuotaWindow[] = [];
+  for (const window of quota.windows as Array<Partial<QuotaWindow> | null | undefined>) {
+    if (!window || typeof window.scope !== "string" || !window.scope) continue;
+    const utilization = finiteOptionalNumber(window.utilization);
+    const remaining = finiteOptionalNumber(window.remaining);
+    const limit = finiteOptionalNumber(window.limit);
+    const resetAt = finiteOptionalNumber(window.resetAt);
+    const unit = typeof window.unit === "string" && window.unit ? window.unit : undefined;
+    windows.push({
+      scope: window.scope,
+      ...(utilization !== undefined ? { utilization } : {}),
+      ...(remaining !== undefined ? { remaining } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(unit !== undefined ? { unit } : {}),
+      ...(resetAt !== undefined ? { resetAt } : {}),
+    });
+  }
+  // 窗口全被过滤掉时仍保留 observedAt 与空数组：投影键集合与默认投影保持一致
+  // （既有的键集合契约见 safeAgentSummary.test.ts）。生产数据里 quota 带窗口，
+  // 不会走到这里；去重侧另外要求窗口非空，避免把「仅有观测时刻」也合并掉。
+  const rawPlan = (quota as AgentQuota).plan;
+  const planName = rawPlan && typeof rawPlan.name === "string" && rawPlan.name ? rawPlan.name : undefined;
+  const monthlyCreditsUsd = finiteOptionalNumber(rawPlan?.monthlyCreditsUsd);
+  const plan = planName
+    ? { name: planName, ...(monthlyCreditsUsd !== undefined ? { monthlyCreditsUsd } : {}) }
+    : undefined;
+
+  return {
+    observedAt,
+    windows,
+    ...(plan ? { plan } : {}),
+  };
+}
+
+/**
+ * compact:true 投影专用：同 credentialGroup 内「窗口内容完全相同」的配额只留一份。
+ *
+ * 为什么需要：本机一条 OAuth 凭据下常常挂着 4~6 个 agent，每个 agent 的 record
+ * 都带着同一份上游额度快照（同一账号、同一批窗口），JSON 里就连抄 4~6 遍。
+ * 那份数据是**凭据级事实**，不是 agent 级事实，属于 credentialGroups 该背的重量。
+ *
+ * 规则（保守、可预测）：
+ * - **前缀作用域**：只看本次传入的这一批 agents，绝不参考整页里别处的候选。
+ *   传入的若是上一次提升过的结果（被提升条目带 `quotaRef`、额度挂在组上），
+ *   先还原成条目自己的内联快照再重算——因此本函数是幂等的，分页裁剪与单候选
+ *   fragment 都能安全地在前缀上重跑。
+ * - 只对 `isOwned === true` 且带非空 `credentialGroup`（且该组确实在 `groups` 里
+ *   有条目）的候选参与提升；非自有 / 公开候选一律不参与（他们的组名会和调用者
+ *   自己的组撞名，但花的不是同一份预算）。
+ * - 聚合键是「窗口内容 + 精简后的 plan + `observedAt`」
+ *   （`JSON.stringify([windows, plan ?? null, observedAt ?? null])`）：
+ *   `plan`（档位名 + 月度额度）决定「买的是哪一档」，同窗口不同档不能合并；
+ *   `observedAt` **必须入键**，否则提升会把它改写成簇内最大值，而
+ *   `quotaRef` 的还原只能从 `credentialGroups[].quota` 取整份快照——
+ *   于是单候选 fragment 会拿到「别人的观测时刻」，等这条兄弟候选刷新退出
+ *   提升簇时又变回原值，续取同一片段直接报 `LIST_AGENTS_FRAGMENT_CHANGED`。
+ *   还原必须是 100% 无损的，代价只是不同 `observedAt` 的快照不再合并
+ *   （真实同批 OAuth 刷新各候选的 `observedAt` 本就一致，压缩收益不受影响）。
+ * - 只有「同组 ≥2 个 agent 共享同一窗口、plan 与 observedAt」时才提升；
+ *   提升上去的 `observedAt` 与这组成员完全一致（取它们共同的值）。
+ * - 被提升的条目去掉内联 `quota`，改写显式 `quotaRef: <credentialGroup>`：
+ *   「有 quotaRef 无 quota」= 读 credentialGroups[].quota；「两者都没有」= 未观测未知。
+ * - 一个组里有多个重复簇时，只提升**成员最多**的那一簇；其余照旧各自保留，
+ *   绝不把不同配额合成一份（误合并比多花字节危险得多）。
+ * - 单条、独有或窗口/plan 不同的配额一律留在 agent 自己身上。
+ * - 传入的 `groups[].quota` 一律按本次这批重算：没有达到提升条件就不输出组额度。
+ *
+ * 纯函数：不修改入参，返回新对象（无提升时原样返回）。
+ */
+export function promoteSharedCredentialGroupQuota<
+  TAgent extends {
+    credentialGroup?: string;
+    isOwned?: boolean;
+    quota?: CompactAgentQuota;
+    quotaRef?: string;
+  },
+>(
+  agents: TAgent[],
+  groups: CredentialGroupSummary[],
+): { agents: TAgent[]; groups: CredentialGroupSummary[] } {
+  if (!agents.length || !groups.length) return { agents, groups };
+  const groupByName = new Map(groups.map((group) => [group.credentialGroup, group]));
+
+  // 第一步：还原。`quotaRef` 只是「这份读数已经搬去 credentialGroups[]」的指针，
+  // 不是在条目上就地丢掉的事实——前缀重算必须先把它接回来。这样本函数对
+  // 「每条各带内联 quota」和「已被整页提升过」两种输入给出同一结论，
+  // 分页裁剪 / 单候选 fragment 只依赖自己看到的那个前缀。
+  const restored = agents.map((agent) => {
+    const ref = agent.quotaRef;
+    if (typeof ref !== "string") return agent;
+    const fromGroup = groupByName.get(ref)?.quota;
+    const rest = { ...agent } as TAgent & { quotaRef?: string };
+    delete rest.quotaRef;
+    if (fromGroup) rest.quota = fromGroup;
+    return rest;
+  });
+  // 组上那份额度一律先摘掉，只按本次传入的这一批重新提升：
+  // 否则「整页提升、只交付前缀」会把未交付候选的组额度挂到已交付的组条目上，
+  // 既顶爆单候选页（误判 TOO_LARGE），也让 fragment digest 随别的候选择漂移。
+  const bareGroups = groups.map(({ quota: _dropped, ...rest }) => rest as CredentialGroupSummary);
+
+  const slimQuota = restored.map((agent) => compactQuotaForSummary(agent.quota));
+  const byGroup = new Map<string, Map<string, number[]>>();
+  slimQuota.forEach((quota, index) => {
+    const agent = restored[index]!;
+    const groupKey = agent.credentialGroup;
+    // 只合并「有真实窗口」的快照：空窗口只是观测时刻，合并它没有字节收益。
+    if (!quota || quota.windows.length === 0) return;
+    // 非自有 / 公开候选绝不参与提升：OAuth 的 credentialGroup 就是 provider 名，
+    // 别人分享给你的 agent 会和调用者自己的同名组撞名，但花的不是同一份预算。
+    if (agent.isOwned !== true) return;
+    if (typeof groupKey !== "string" || !groupKey) return;
+    if (!groupByName.has(groupKey)) return;
+    const clusters = byGroup.get(groupKey) ?? new Map<string, number[]>();
+    // 等价签名必须同时含窗口、精简后的 plan 与 observedAt：
+    // - 同窗口不同档（PRO vs FREE）不是同一份事实，只比窗口会把后者的套餐信息静默抹掉；
+    // - observedAt 不入键则提升会篡改它（簇内最大值），而 quotaRef 只能整份还原，
+    //   单候选 fragment 因此拿到别人的观测时刻，续片会报 LIST_AGENTS_FRAGMENT_CHANGED。
+    const signature = JSON.stringify([
+      quota.windows,
+      quota.plan ?? null,
+      quota.observedAt ?? null,
+    ]);
+    const indices = clusters.get(signature) ?? [];
+    indices.push(index);
+    clusters.set(signature, indices);
+    byGroup.set(groupKey, clusters);
+  });
+
+  const promoted = new Map<string, CompactAgentQuota>();
+  const refFor = new Map<number, string>();
+  for (const [groupKey, clusters] of byGroup) {
+    let best: number[] | undefined;
+    for (const indices of clusters.values()) {
+      if (indices.length < 2) continue;
+      if (!best || indices.length > best.length) best = indices;
+    }
+    if (!best) continue;
+    // 簇内成员的 observedAt 按签名必然相同（见上），这里取首成员的值即可：
+    // 组额度必须能原样还原到每一个被提升的条目上，任何「取代表值」的加工都会
+    // 破坏无损性。
+    const observedAt = slimQuota[best[0]!]!.observedAt;
+    const { plan } = slimQuota[best[0]!]!;
+    promoted.set(groupKey, {
+      observedAt,
+      windows: slimQuota[best[0]!]!.windows,
+      ...(plan ? { plan } : {}),
+    });
+    for (const index of best) refFor.set(index, groupKey);
+  }
+
+  const nextAgents = restored.map((agent, index) => {
+    const ref = refFor.get(index);
+    if (!ref) return agent;
+    // 去掉内联副本，但留下显式指针：消费者据此分清「指向 credentialGroups[].quota」
+    // 与「既无 quota 也无 quotaRef = 未观测未知」。少了它，remaining: 0 的耗尽
+    // 和「上游从没报过配额」在输出里长得一模一样。
+    const rest = { ...agent } as TAgent & { quotaRef?: string };
+    delete rest.quota;
+    rest.quotaRef = ref;
+    return rest as TAgent;
+  });
+  const nextGroups = bareGroups.map((group) => {
+    const quota = promoted.get(group.credentialGroup);
+    return quota ? { ...group, quota } : group;
+  });
+  return { agents: nextAgents, groups: nextGroups };
 }
 
 /**
@@ -716,10 +947,23 @@ export const ULTRA_COMPACT_AGENT_SUMMARY_FIELDS = [
   ...AGENT_SUMMARY_TRAILING_FIELDS,
 ] as const;
 
-export type UltraCompactSafeAgentSummary = Pick<
-  SafeAgentSummary,
-  (typeof ULTRA_COMPACT_AGENT_SUMMARY_FIELDS)[number]
->;
+export type UltraCompactSafeAgentSummary = Omit<
+  Pick<SafeAgentSummary, (typeof ULTRA_COMPACT_AGENT_SUMMARY_FIELDS)[number]>,
+  "quota"
+> & {
+  /**
+   * 配额快照的 compact 形态（剔除 `source` 诊断串，见 compactQuotaForSummary）。
+   * 同 credentialGroup 内完全相同的快照会被提升到 credentialGroups[].quota，
+   * 这些 agent 条目上不再有 `quota`（见 promoteSharedCredentialGroupQuota）。
+   */
+  quota?: CompactAgentQuota;
+  /**
+   * 「本条的内联 `quota` 已提升到 `credentialGroups[].quota`」的显式指针
+   * （值为组名，如 `"antigravity"`）。与 `quota` 互斥；两者都没有 = 未观测未知，
+   * 绝不等于 `remaining: 0`。
+   */
+  quotaRef?: string;
+};
 
 export function toUltraCompactAgentSummary(
   summary: SafeAgentSummary
@@ -729,6 +973,18 @@ export function toUltraCompactAgentSummary(
     const value = summary[field];
     if (value !== null && value !== undefined) {
       compact[field] = value;
+    }
+  }
+  // 体积尾部只有一件事：quota 只留读数、丢掉 source 诊断串。
+  // `tools: []` 不省略——safeAgentSummary.test.ts 把「ultra 与 compact 的键集合一致」
+  // 当作既有投影契约（omitNullishAgentSummaryFields 也明确保留 falsy 的 []），
+  // 省下的 11 字节不值得让公开投影契约分叉。
+  if (compact.quota !== undefined) {
+    const quota = compactQuotaForSummary(compact.quota as AgentQuota);
+    if (quota) {
+      compact.quota = quota;
+    } else {
+      delete compact.quota;
     }
   }
   return compact as UltraCompactSafeAgentSummary;

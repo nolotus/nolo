@@ -129,7 +129,9 @@ export function buildCliEstimateSystemText(
   const guidance = buildRuntimeGuidanceBlocks(toolNames);
   // Same table the runtimes inject, so the estimate tracks the orchestration /
   // review-gate sections too.
-  const toolSections = resolveToolGuidedSections(toolNames);
+  const toolSections = resolveToolGuidedSections(toolNames, {
+    callerModel: opts.model?.trim() || undefined,
+  });
 
   // 回复准则：与装配线同一个入口（resolveResponseGuidelines），按宿主能力取。
   // 默认 unknown 只计行为段；显式 narrow/wide 时另计一份对应排版段，与相同能力的

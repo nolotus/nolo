@@ -1,4 +1,5 @@
 import { isSubtaskRun, type AgentRunKind } from "./agentRunIsolation";
+import { SUBTASK_SOFT_BUDGET_NOTICE_PREFIXES } from "../ai/agent/dispatchIntent";
 
 /**
  * Transitional API for dispatchers that still send cumulative run budgets.
@@ -34,8 +35,8 @@ export function resolveDispatchedSubtaskBudget(_args?: {
 export const DEFAULT_SUBTASK_SOFT_BUDGET_MILESTONE_1_TOOL_CALLS = 40;
 export const DEFAULT_SUBTASK_SOFT_BUDGET_MILESTONE_2_TOOL_CALLS = 80;
 
-export const SUBTASK_SOFT_BUDGET_MILESTONE_1_PREFIX = "[系统提示 · 子任务软预算提醒]";
-export const SUBTASK_SOFT_BUDGET_MILESTONE_2_PREFIX = "[系统提示 · 子任务强收敛提醒]";
+export const SUBTASK_SOFT_BUDGET_MILESTONE_1_PREFIX = SUBTASK_SOFT_BUDGET_NOTICE_PREFIXES[0];
+export const SUBTASK_SOFT_BUDGET_MILESTONE_2_PREFIX = SUBTASK_SOFT_BUDGET_NOTICE_PREFIXES[1];
 
 export type SubtaskSoftBudgetMilestoneLevel = 1 | 2;
 

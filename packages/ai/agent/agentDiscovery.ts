@@ -18,6 +18,8 @@ import {
   toSafeAgentSummary,
   omitNullishAgentSummaryFields,
   summarizeCredentialGroups,
+  promoteSharedCredentialGroupQuota,
+  type CompactAgentQuota,
 } from "./safeAgentSummary";
 import {
   isAgentUnavailableNow,
@@ -456,6 +458,25 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
         ? pagedAgents.map(toUltraCompactAgentSummary)
         : pagedAgents.map(toCompactAgentSummary);
 
+  // compact:true 的额外压缩：同一 credentialGroup 下窗口内容相同的 quota 只留一份，
+  // 提升到 credentialGroups[] 上（凭据级事实不该在 4~6 个 agent 条目里各抄一遍）。
+  // 只动输出投影，不动 sortedAgents：total/tierHints/availableCount 仍按完整摘要算。
+  // 注：下游按字节预算裁剪的分页器会在**实际交付的前缀**上重跑同一提升逻辑
+  // （candidateSpeedContext.ts），这里只负责不走分页时的整页结论。
+  type CompactQuotaCarrier = {
+    credentialGroup?: string;
+    isOwned?: boolean;
+    quota?: CompactAgentQuota;
+    quotaRef?: string;
+  };
+  const compacted =
+    options.compact === true && options.verbose !== true
+      ? (promoteSharedCredentialGroupQuota(
+          projectedAgents as unknown as CompactQuotaCarrier[],
+          credentialGroups,
+        ) as unknown as { agents: typeof projectedAgents; groups: typeof credentialGroups })
+      : { agents: projectedAgents, groups: credentialGroups };
+
   const tierHints: NonNullable<AgentDiscoveryResult["tierHints"]> = {};
   const tierHintPreferences = new Map<DispatchDifficulty, { priority: number; resetAt: number; price: number }>();
   for (const agent of sortedAgents) {
@@ -483,13 +504,13 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     ...(isTruncated ? { truncated: true } : {}),
     unavailableCount,
     availableCount: sortedAgents.length,
-    agents: projectedAgents,
+    agents: compacted.agents,
     planningRecommendation: recommendPlanning(
       sortedAgents, options.caller,
       !isTruncated && scope === "all" && !hasQuery && !options.poolRestricted,
     ),
     ...(Object.keys(tierHints).length > 0 ? { tierHints } : {}),
-    credentialGroups,
+    credentialGroups: compacted.groups,
   };
 }
 

@@ -105,6 +105,7 @@ export function generateResponseRequestBody(
       contexts,
       // 按当前用户输入检测派发意图：无意图只注入最小派发协议（安全硬门常在）。
       dispatchIntent: detectDispatchIntentFromMessages(msgs),
+      callerModel: agentConfig?.model,
     });
     // GPT-6.2 public Responses appends instructions after input. On full replay
     // keep the reusable part at the front of input for prefix caching.
