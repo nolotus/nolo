@@ -233,9 +233,8 @@ const TOOL_FAMILY_OVERRIDES: Record<string, ToolFamily> = {
   notifyUser: TOOL_FAMILIES.interaction,
   captureVisualState: TOOL_FAMILIES.capture,
   loadSkill: TOOL_FAMILIES.skill,
-  // 名字不切出已知系列词的两个注册工具（`weread*` / `toolquery`）：它们是
-  // 读书网关与工具查询，属于读取族；精确钉住以免退到兜底 🔧。
-  wereadGateway: TOOL_FAMILIES.read,
+  // 名字不切出已知系列词的工具（`toolquery`）：它是工具查询，属于读取族；
+  // 精确钉住以免退到兜底 🔧。
   toolquery: TOOL_FAMILIES.read,
 };
 
@@ -320,14 +319,14 @@ export const TOOL_FAMILY_RULES: readonly ToolFamilyRule[] = [
   { id: "delete", family: TOOL_FAMILIES.delete, test: startsWithWord("delete", "remove") },
   // 写入类：write* / edit* / apply* / create* / update* / import* / export* / convert* / translate*
   { id: "write", family: TOOL_FAMILIES.write, test: startsWithWord("write", "edit", "apply", "create", "update", "import", "export", "convert", "translate") },
-  // 读取/查询类：read* / query*（含 wereadGateway、toolquery 这类带 query/read 的名字）
+  // 读取/查询类：read* / query*（含 toolquery 这类带 query/read 的名字）
   { id: "read", family: TOOL_FAMILIES.read, test: hasWord("read", "query") },
   // 列表类：list*（空间、对话、用户空间）
   { id: "list", family: TOOL_FAMILIES.list, test: startsWithWord("list") },
   // 搜索类：search_workspace / search_all_spaces / searchDialogMessages …
   { id: "search", family: TOOL_FAMILIES.search, test: hasWord("search") },
-  // 抓取类：fetchWebpage / surfWeather
-  { id: "fetch", family: TOOL_FAMILIES.fetch, test: startsWithWord("fetch", "surf") },
+  // 抓取类：fetchWebpage
+  { id: "fetch", family: TOOL_FAMILIES.fetch, test: startsWithWord("fetch") },
   // 执行类：exec_shell / executeSql（shell 与本地诊断命令）
   { id: "run", family: TOOL_FAMILIES.run, test: startsWithWord("exec", "execute", "run") },
 ];
@@ -840,13 +839,9 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Evaluate JS in a tab, user-approved per call (--tab <id> --expr <js> [--await] [--timeout-ms N]) (Compatibility alias of `nolo browser eval`)",
     zh: "在标签页中执行 JS，每次调用需用户批准（--tab <id> --expr <js> [--await] [--timeout-ms N]）（`nolo browser eval` 的兼容别名）",
   },
-  "ci cancel": {
-    en: "Cancel an alpha deploy job",
-    zh: "取消 alpha 部署任务",
-  },
-  "ci status": {
-    en: "Show recent nolo-ci deploy jobs (alpha / main)",
-    zh: "查看最近的 nolo-ci 部署任务（alpha / main）",
+  "dialog trace": {
+    en: "Trace one dialog: messages, token usage and subagent runs (--json)",
+    zh: "追踪单个对话：消息、token 用量与子代理运行记录（--json）",
   },
   "dialog usage": {
     en: "Show dialog tokens, recorded duration and speed by basis",

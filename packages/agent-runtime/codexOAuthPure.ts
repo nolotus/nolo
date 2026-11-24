@@ -21,7 +21,7 @@ export function isCodexOAuthAgent(
     | undefined,
 ): boolean {
   if (!agent) return false;
-  const ref = agent.apiKeyRef?.trim().toLowerCase();
+  const ref = asTrimmedLowercaseString(agent.apiKeyRef);
   return ref === "chatgpt";
 }
 

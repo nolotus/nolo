@@ -33,6 +33,13 @@ export type CacheRunUsageSummary = {
   cached_tokens: number | null;
   /** `cached_tokens / input_tokens`（4 位小数）；`null` = 未知，input=0 → 0。 */
   cache_hit_ratio: number | null;
+  /**
+   * 输出 token 总量（各次调用的 `output_tokens` 相加，回退 Chat Completions
+   * 的 `completion_tokens`）。缺省 = 没有任何调用报过输出量（未知）——
+   * 缺失不写 0，避免「未知」被读成「实测 0 输出」。向后兼容：旧调用方
+   * 只读前三个字段，不因新增可选字段改变行为。
+   */
+  output_tokens?: number;
 };
 
 /** usageRecords 条目的结构（只取 usage 一个字段，避免与 hostAdapter 耦合）。 */
@@ -49,6 +56,15 @@ const isUsageObject = (usage: unknown): usage is Record<string, unknown> =>
 /** input token：`input_tokens` 优先，回退 Chat Completions 的 `prompt_tokens`。 */
 const readInputTokens = (usage: Record<string, unknown>): number =>
   finiteCount(usage.input_tokens) ?? finiteCount(usage.prompt_tokens) ?? 0;
+
+/**
+ * output token：`output_tokens` 优先，回退 Chat Completions 的
+ * `completion_tokens`。两个字段都没有 → `undefined`（= 这次调用没报输出量），
+ * 与「报了 0 输出」区分开。
+ */
+const readOutputTokens = (usage: Record<string, unknown>): number | undefined =>
+  finiteCount(usage.output_tokens) ?? finiteCount(usage.completion_tokens);
+
 
 /**
  * 命中率派生。三条硬约束（都有对应单测）：
@@ -69,10 +85,14 @@ export const computeCacheHitRatio = (
 const withRatio = (
   inputTokens: number,
   cachedTokens: number | null,
+  outputTokens?: number,
 ): CacheRunUsageSummary => ({
   input_tokens: inputTokens,
   cached_tokens: cachedTokens,
   cache_hit_ratio: computeCacheHitRatio(inputTokens, cachedTokens),
+  ...(typeof outputTokens === "number" && Number.isFinite(outputTokens)
+    ? { output_tokens: Math.max(0, Math.floor(outputTokens)) }
+    : {}),
 });
 
 /**
@@ -84,7 +104,11 @@ export const summarizeCacheUsage = (
 ): CacheRunUsageSummary | undefined => {
   if (!isUsageObject(usage)) return undefined;
   if (Object.keys(usage).length === 0) return undefined;
-  return withRatio(readInputTokens(usage), readCacheReadInputTokensOrNull(usage));
+  return withRatio(
+    readInputTokens(usage),
+    readCacheReadInputTokensOrNull(usage),
+    readOutputTokens(usage),
+  );
 };
 
 /**
@@ -100,6 +124,8 @@ export const summarizeCacheUsageRecords = (
   if (!records || records.length === 0) return undefined;
   let inputTokens = 0;
   let cachedTokens: number | null = 0;
+  let outputTokens = 0;
+  let sawOutput = false;
   let sawUsage = false;
   for (const record of records) {
     const summary = summarizeCacheUsage(record?.usage);
@@ -110,9 +136,13 @@ export const summarizeCacheUsageRecords = (
       cachedTokens === null || summary.cached_tokens === null
         ? null
         : cachedTokens + summary.cached_tokens;
+    if (typeof summary.output_tokens === "number") {
+      sawOutput = true;
+      outputTokens += summary.output_tokens;
+    }
   }
   if (!sawUsage) return undefined;
-  return withRatio(inputTokens, cachedTokens);
+  return withRatio(inputTokens, cachedTokens, sawOutput ? outputTokens : undefined);
 };
 
 /**
@@ -133,5 +163,12 @@ export const mergeCacheUsageSummaries = (
     left.cached_tokens === null || right.cached_tokens === null
       ? null
       : left.cached_tokens + right.cached_tokens;
-  return withRatio(inputTokens, cachedTokens);
+  // 输出量同口径：任一侧未知则只有已知的一侧（都不写就整体省略）。
+  const outputTokens =
+    typeof left.output_tokens === "number" && typeof right.output_tokens === "number"
+      ? left.output_tokens + right.output_tokens
+      : typeof left.output_tokens === "number"
+        ? left.output_tokens
+        : right.output_tokens;
+  return withRatio(inputTokens, cachedTokens, outputTokens);
 };

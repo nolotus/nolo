@@ -36,6 +36,15 @@ export type ResultFrontMatterInput = {
    * 展开为三行，语义见下方 entries 注释。
    */
   cacheUsage?: CacheRunUsageSummary;
+  /**
+   * 三个轻量观测字段（与 RunRecord 同名字段同一次写入，零额外 I/O）：
+   * - inputTokens / outputTokens：run 级 token 总量（来自 cacheUsage）；
+   * - modelTier：本次 run 生效的模型档位（selectionCheck.modelTier 优先，
+   *   否则按 model 解析）。缺失 = 未知，不写 `unknown` 冒充。
+   */
+  inputTokens?: number;
+  outputTokens?: number;
+  modelTier?: string;
 };
 
 /**
@@ -134,6 +143,10 @@ export function buildResultFrontMatter(input: ResultFrontMatterInput): string {
     ["cacheInputTokens", input.cacheUsage?.input_tokens],
     ["cacheCachedTokens", input.cacheUsage?.cached_tokens],
     ["cacheHitRatio", input.cacheUsage?.cache_hit_ratio],
+    // run 级 token 总量与生效档位（结构化回溯用；缺省省略，绝不写 0/unknown）
+    ["inputTokens", input.inputTokens],
+    ["outputTokens", input.outputTokens],
+    ["modelTier", input.modelTier],
     ["dialogId", input.dialogId],
     ["server", input.server],
     ["serverSync", input.serverSync],

@@ -5,7 +5,6 @@ import { DELETE_SAFETY_RED_LINE } from "./deleteSafety";
 import { DISPATCH_BACKEND_POLICY } from "./dispatchBackendPolicy";
 import { DISPATCH_CANDIDATE_POLICY } from "./dispatchCandidatePolicy";
 import { PARALLEL_DISPATCH_DEFAULT_RULE } from "./parallelDispatchDefault";
-import { PLATFORM_RISK_CONTROL_RULE } from "./platformRiskControl";
 import { VERIFY_BEFORE_CONCLUDING_RULE } from "./verifyBeforeConcluding";
 import { WORKTREE_ISOLATION_PRELUDE } from "./worktreeIsolationPrelude";
 
@@ -32,7 +31,6 @@ export const PLATFORM_STATIC_LAYER_IDS = [
   "parallel-dispatch-default",
   "dispatch-backend-policy",
   "dispatch-candidate-policy",
-  "platform-risk-control",
   "consultation-mode",
   "worktree-isolation-prelude",
 ] as const;
@@ -74,12 +72,6 @@ export function buildPlatformStaticContextLayers(): PlatformStaticContextLayer[]
       owner: "platform",
       cacheScope: "static",
       content: DISPATCH_CANDIDATE_POLICY,
-    },
-    {
-      id: "platform-risk-control",
-      owner: "platform",
-      cacheScope: "static",
-      content: PLATFORM_RISK_CONTROL_RULE,
     },
     {
       id: "consultation-mode",

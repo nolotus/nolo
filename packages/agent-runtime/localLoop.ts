@@ -215,6 +215,12 @@ export type LocalAgentTurnInput = {
    * 行为段恒注入，排版段只在能力已知时注入一份——无法确认时不要猜。
    */
   responseViewport?: ResponseViewport;
+  /**
+   * 可选：宿主当次扫描确认「当前模型已是免付费池顶」（池内无更高且免付费的候选）。
+   * 仅 true 时轻档姿态换成池顶姿态，不再让轻主模型空找高档；缺省 undefined 时
+   * 与既往输出逐字节相同（会话常量，宿主只算一次，不在轮内翻转）。
+   */
+  callerIsPoolTop?: boolean;
   timeoutMs?: number;
   background?: boolean;
   noStream?: boolean;
@@ -518,6 +524,7 @@ export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
   "cliWhoami",
   "cliDoctor",
   "listProcesses",
+  "readProcessOutput",
   "fetchWebpage",
   "exa_search",
 ]);
@@ -1101,6 +1108,9 @@ export async function runLocalAgentTurn(
     // 恒定），显式透传后由 resolveToolGuidedSections 按档位追加一句短指引；
     // 模型缺失/推不出档位时不追加文本，前缀缓存稳定性不受影响。
     callerModel: agentConfig.model,
+    // 池顶姿态：宿主启动会话时按内存中已有的候选池算一次（零网络 I/O），
+    // 会话内恒定；不传时不改动任何既有字节。
+    callerIsPoolTop: input.callerIsPoolTop,
   });
   // 宿主自己注入过记忆使用指引吗？CLI/TUI/desktop 在本函数之前用
   // `buildMemoryUseGuidanceLayer({ promptBlock })` 按「有 overlay 就注入」放过一份

@@ -354,7 +354,50 @@ export async function runDialogUsageCommand(
     return 1;
   }
   const dialogId = dialogKey.startsWith("dialog-") ? extractCustomId(dialogKey) : dialogKey;
-  const api = { server: resolveServerUrl(args, env), token };
+  const collected = await collectDialogUsageRecords(args, deps, { dialogKey, dialogId });
+  collected.records.sort((a, b) => b.createdAt - a.createdAt);
+  output.write(formatDialogUsage(collected.dialogKey, collected.records, collected.source));
+  return 0;
+}
+
+/** 一条对话的逐次调用 token 明细读取结果。 */
+export type DialogUsageCollection = {
+  dialogKey: string;
+  dialogId: string;
+  records: TokenRecord[];
+  source: UsageRecordSource;
+};
+
+/**
+ * 读取某条对话的逐次调用 token 明细：远端 usage records 优先，拿不到再回退
+ * 本机 LevelDB（同源、同口径）。抽出来给 `dialog usage` 与 `dialog trace`
+ * 共用，避免两个命令各写一份分页 + 回退逻辑而渐渐走样。
+ */
+export async function collectDialogUsageRecords(
+  args: string[],
+  deps: {
+    env?: EnvLike;
+    fetchPage?: typeof fetchUsageRecordsPage;
+    /** 本地用量仓储（测试注入假的实现）。 */
+    readLocalRecords?: LocalUsageRecordReader;
+  },
+  target: { dialogKey: string; dialogId: string },
+  /**
+   * 已解析的服务器基址（由调用方传入，例如 `dialog trace` 的 `target.base`）。
+   * 传了就必须用它：消息快照与用量查询必须命中同一台服务器，否则会读到
+   * 「另一台机器上同名对话」的用量。未传时行为与过去完全一致。
+   */
+  serverBase?: string,
+): Promise<DialogUsageCollection> {
+  const env = deps.env ?? process.env;
+  const token = resolveAuthToken(args, env);
+  if (!token) throw new Error("dialog usage requires login. Run `nolo login`.");
+  const { dialogKey, dialogId } = target;
+  const resolvedServerBase = serverBase?.trim();
+  const api = {
+    server: resolvedServerBase || resolveServerUrl(args, env),
+    token,
+  };
   const fetchPage = deps.fetchPage ?? fetchUsageRecordsPage;
   const records: TokenRecord[] = [];
   const endTime = Date.now();
@@ -406,7 +449,5 @@ export async function runDialogUsageCommand(
     }
   }
   if (records.length === 0 && remoteError) throw remoteError;
-  records.sort((a, b) => b.createdAt - a.createdAt);
-  output.write(formatDialogUsage(dialogKey, records, source));
-  return 0;
+  return { dialogKey, dialogId, records, source };
 }

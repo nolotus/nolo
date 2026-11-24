@@ -18,10 +18,7 @@ import {
   SYSTEM_DEFAULT_AGENT_ID,
 } from "app/settings/settingSlice";
 import { noloAgentId } from "core/init";
-import {
-  BUILTIN_AGENT_CREATOR_AGENT_KEY,
-  BUILTIN_APP_BUILDER_AGENT_KEY,
-} from "core/builtinAgents";
+import type { SpecialistSkillSlug } from "ai/skills/specialistSkills";
 import { toErrorMessage } from "core/errorMessage";
 import { asTrimmedString } from "core/trimmedString";
 import { useNavigate } from "app/routing";
@@ -39,6 +36,7 @@ import {
   useQuickChatMode,
   takePendingQuickChatDraft,
   type QuickChatMode,
+  type QuickChatSpecialistSkillSlug,
 } from "./quickChatFlow";
 import type { QuickChatSubmission } from "./QuickChatRuntime";
 import { prewarmPageLoader } from "render/page/pageLoaderPreload";
@@ -365,14 +363,29 @@ const QuickChat: React.FC<QuickChatProps> = ({
         return;
       }
       setDraft(chip.prompt);
-      setSubmission({ text: chip.prompt, agentId: chip.action === "specialist" ? chip.agentKey : null });
+      // 专职入口不再写死专用内置 Agent：沿用用户在输入框当前选中的 Agent
+      // （无选中则由 runtime 走默认档 nolo 本体），只把「内置专职技能」作为
+      // 对话级挂载物交给 runtime。
+      setSubmission({
+        text: chip.prompt,
+        agentId: null,
+        ...(chip.action === "specialist"
+          ? { specialistSkillSlug: chip.skillSlug }
+          : {}),
+      });
       prewarmPageLoader();
       activateRuntime();
     },
     [activateRuntime, navigate]
   );
 
-  // `/chat?launch=feedback` 等直达入口：挂载后自动以专职 agent 开一轮对话，只触发一次。
+  /** 未登录暂存草稿时一并带回来的专职技能（登录往返恢复，消费一次）。 */
+  const [pendingSpecialistSkillSlug, setPendingSpecialistSkillSlug] =
+    useState<QuickChatSpecialistSkillSlug | null>(null);
+
+  // `/chat?launch=...` 直达入口：挂载后自动开一轮对话，只触发一次。
+  // - `launch=feedback`：受控官方反馈 Agent（服务端只豁免它跨租户写表/通知）。
+  // - `launch=create-app*`：当前选中 Agent + 内置 app-builder 技能。
   const launchSpecialist = useMemo(
     () => resolveQuickChatLaunchSpecialist(launch),
     [launch]
@@ -381,17 +394,29 @@ const QuickChat: React.FC<QuickChatProps> = ({
   // 登录回跳后恢复草稿；放在 effect 而非 state 初始化，避免 StrictMode 双调用时读取即清除导致丢失。
   useEffect(() => {
     const pending = takePendingQuickChatDraft();
-    if (pending) setDraft(pending);
+    if (!pending) return;
+    if (pending.text) setDraft(pending.text);
+    if (pending.specialistSkillSlug) {
+      setPendingSpecialistSkillSlug(pending.specialistSkillSlug);
+    }
   }, []);
   useEffect(() => {
     if (!launchSpecialist || hasLaunchedRef.current) return;
     hasLaunchedRef.current = true;
+    const prompt = t(launchSpecialist.promptKey, launchSpecialist.promptFallback);
+    if (launchSpecialist.target === "agent") {
+      setDraft(prompt);
+      setSubmission({ text: prompt, agentId: launchSpecialist.agentKey });
+      prewarmPageLoader();
+      activateRuntime();
+      return;
+    }
     handleChipClick({
       action: "specialist",
-      agentKey: launchSpecialist.agentKey,
-      prompt: t(launchSpecialist.promptKey, launchSpecialist.promptFallback),
+      skillSlug: launchSpecialist.skillSlug,
+      prompt,
     });
-  }, [handleChipClick, launchSpecialist, t]);
+  }, [activateRuntime, handleChipClick, launchSpecialist, t]);
 
   useEffect(() => {
     if (isRuntimeActive) return;
@@ -562,6 +587,7 @@ const QuickChat: React.FC<QuickChatProps> = ({
               surface={surface}
               spaceId={spaceId}
               submission={submission}
+              pendingSpecialistSkillSlug={pendingSpecialistSkillSlug}
               isEmptyState={isEmptyState}
               pendingShellFiles={pendingShellFiles}
               onPendingShellFilesConsumed={handlePendingShellFilesConsumed}
@@ -726,7 +752,7 @@ const QuickChatShell: React.FC<QuickChatShellProps> = ({
 
 type QuickChatChipAction =
   | { action: "prompt"; prompt: string }
-  | { action: "specialist"; agentKey: string; prompt: string }
+  | { action: "specialist"; skillSlug: SpecialistSkillSlug; prompt: string }
   | { action: "download" };
 
 interface QuickChatChip {
@@ -765,7 +791,7 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({
         icon: <LuBot size={16} aria-hidden="true" />,
         action: {
           action: "specialist",
-          agentKey: BUILTIN_AGENT_CREATOR_AGENT_KEY,
+          skillSlug: "agent-creator",
           prompt: t("quickChat.chipCreateAgentPrompt", "帮我创建一个Agent"),
         },
       },
@@ -775,7 +801,7 @@ const QuickChatChips: React.FC<QuickChatChipsProps> = ({
         icon: <LuLayoutGrid size={16} aria-hidden="true" />,
         action: {
           action: "specialist",
-          agentKey: BUILTIN_APP_BUILDER_AGENT_KEY,
+          skillSlug: "app-builder",
           prompt: t("quickChat.chipCreateAppPrompt", "帮我创建一个应用"),
         },
       },

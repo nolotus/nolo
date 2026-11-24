@@ -39,7 +39,7 @@ export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number] |
 
 /** 每个 action 在 `action` 参数描述里的那一句（顺序由调用方给的 actions 决定）。 */
 const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
-    recoverPreparedWriter: "recoverPreparedWriter=仅本地：显式撤销同一 attemptId 的 fenced-launch-v1 prepared writer 并释放 claim；granted、legacy、unknown 或 attempt 不匹配均拒绝；不终止进程、不提供 force",
+    recoverPreparedWriter: "recoverPreparedWriter=仅本地：撤销同一 attemptId 的 fenced-launch-v1 prepared writer 并释放 claim；granted/legacy/unknown 或 attempt 不匹配均拒绝；不终止进程、不提供 force",
     list: "list=列出 run（省略 runId）",
     status: "status=查单条 run 状态 + 可选日志；终态结论在 resultFile（先 readFile lines:\"1-60\"，按需续读全文），缺失按「无结论」处理",
     stop: "stop=取消 run",
@@ -83,14 +83,14 @@ export function buildControlAgentRunFunctionSchema(opts?: {
         description:
             `观察/控制后台 agent run（action：${actionList}）。` +
             (wake
-                ? "本环境有终态唤醒（terminal wake）：run 派发后直接收尾，宿主在终态接回父对话。"
+                ? "本环境有终态唤醒（terminal wake）：派发后直接收尾，宿主在终态接回父对话；不用于等待完成或持续跟踪进度，不要用连续查状态代替等待。"
                 : hasWait
                     ? "startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。"
-                    : "startAgentRun 拿到 runId 后跟进度、追加指令或叫停。") +
+                    : "startAgentRun 拿到 runId 后追进度、追加指令或叫停。") +
             (hasWait
                 ? "阻塞等待（wait action）冻结对话，仅限 ①<100s 且马上要用结果 ②用户要求同步 ③无并行工作。"
                 : wake
-                    ? "无阻塞等待，只用于控制与异常诊断，不用于等待完成或持续跟踪进度；不要用连续查状态代替等待。"
+                    ? "无阻塞等待，只用于控制与异常诊断。"
                     : ""),
         parameters: {
             type: "object",
@@ -109,78 +109,77 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                 runId: {
                     type: "string",
                     description:
-                        "目标 run 的 ID（startAgentRun 返回的 runId）。action=list 时省略。",
+                        "目标 run 的 runId（startAgentRun 返回）；action=list 时省略。",
                 },
                 ...(actions.includes("recoverPreparedWriter") ? { attemptId: {
                     type: "string",
-                    description: "recoverPreparedWriter 必填：status 返回的 writerLaunch.attemptId；必须与目标 prepared attempt 完全相同。环境变量仅 locator，不授予恢复权限。",
+                    description: "recoverPreparedWriter 必填：status 返回的 writerLaunch.attemptId，必须完全相同；env 仅 locator，不授予恢复权。",
                 } } : {}),
                 dialogKey: {
                     type: "string",
                     description:
-                        "可选。append 的 dialog dbKey；给了 runId 时由它推导。本地 CLI 只给 dialogKey = 向该用户活着的普通 CLI dialog 投递通知（进队列，不启动 run/模型；离线返回 unsupported/offline）。",
+                        "可选。append 的 dialog dbKey，给了 runId 时由它推导。本地 CLI 只给 dialogKey＝向该用户活着的 CLI dialog 投递通知（进队列，不启动 run/模型；离线返回 unsupported/offline）。",
                 },
                 userInput: {
                     type: "string",
                     description:
-                        "action=append 时追加的新指令或纠偏文本。",
+                        "action=append 时的追加指令或纠偏文本。",
                 },
                 mode: {
                     type: "string",
                     enum: ["enqueue", "continue"],
                     description:
-                        "可选。append 模式：enqueue=入队供下轮消费；continue=终态续跑（需 runId；本地 CLI 只给 dialogKey 时仅 enqueue）。缺省按 run 状态适配。",
+                        "append 模式：enqueue=入队供下轮消费；continue=终态续跑（需 runId）；缺省按 run 状态适配。",
                 },
                 ...(hasWait
                     ? {
                           timeoutMs: {
                               type: "number",
                               description:
-                                  "可选。action=wait 的等待上限（毫秒），默认 100000。超时返回 status=\"timeout\"（不是失败），可稍后重试或改用 status/stop。",
+                                  "可选。action=wait 的等待上限（毫秒），默认 100000；超时返回 status=\"timeout\"（不是失败），可稍后重试或改 status/stop。",
                               default: 100000,
                           },
                       }
                     : {}),
                 includeCheckpoint: {
                     type: "boolean",
-                    description: "可选。仅 status 且 true 时返回脱敏有界的 checkpoint；默认不返回，不改变 run 终态。",
+                    description: "可选。仅 status 且 true 时返回脱敏有界 checkpoint；默认 false，不改变 run 终态。",
                 },
                 tailLines: {
                     type: "number",
                     description:
                         "可选。status：0=只返回摘要，>0=返回最近 N 行日志。" +
-                        "摘要的 resultFile 是终态结论正文（先 readFile lines:\"1-60\"，按需续读全文；lastAssistantText 只是 2000 字摘要），缺失按用户中断处理、不判工具故障。" +
+                        "结论正文在 resultFile（先 readFile lines:\"1-60\"，按需续读；lastAssistantText 只是摘要），缺失按用户中断处理。" +
                         (wake
                             ? "含 progress（inFlight、idleMs），用于一次性判断是否卡住，不要反复调用。"
-                            : "含 progress（inFlight、idleMs），判断卡住与否，可疑才拉日志。"),
+                            : "含 progress（inFlight、idleMs），可疑才拉日志。"),
                     default: 0,
                 },
                 batchId: {
                     type: "string",
                     description:
-                        "可选。action=list 时只返回该批次的 run（startAgentRun 返回值或入参中的 batchId）。",
+                        "可选。action=list 时只返回该批次的 run（startAgentRun 的 batchId）。",
                 },
                 status: {
                     type: "string",
                     description:
-                        "可选。list 状态过滤，可逗号分隔（如 'running,orphaned'）。" +
-                        "与 statusFilter 同义，status 优先；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
+                        "可选。list 状态过滤，可逗号分隔（如 'running,orphaned'），优先于 statusFilter；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
                 },
                 statusFilter: {
                     type: "string",
                     enum: ["running", "done", "failed", "cancelled", "orphaned", "all"],
                     description:
-                        "可选。list 状态过滤，默认 all；与 status 同义（status 优先且支持多值）。",
+                        "可选。list 状态过滤，默认 all；与 status 同义（status 优先）。",
                 },
                 limit: {
                     type: "number",
                     description:
-                        "可选。local CLI 的 list/todo 限制条数，默认 10、上限 50；输出最多 8 KiB、按条目分页；server 不受此限。",
+                        "可选。local CLI 的 list/todo 条数上限，默认 10、上限 50；输出 ≤8 KiB 按条目分页；server 不受限。",
                 },
                 offset: {
                     type: "number",
                     description:
-                        "可选。list/todo 跳过前 N 条，配合 limit 翻页；默认 0。",
+                        "可选。list/todo 跳过前 N 条，默认 0。",
                 },
             },
             required: ["action"],

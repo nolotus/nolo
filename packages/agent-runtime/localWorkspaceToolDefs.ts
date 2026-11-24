@@ -27,7 +27,7 @@ export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "searchFiles", "captureVisualState",
-  "execShell", "launchProcess", "listProcesses",
+  "execShell", "launchProcess", "listProcesses", "readProcessOutput",
   "taskWait", "taskStop",
   "openDesktopPreview",
 ] as const;
@@ -37,7 +37,7 @@ const WORKSPACE_TOOL_NAMES = [
 // shell access would hand out dangling handles. openDesktopPreview is a pure
 // UI action (no process handle) and stays with the workspace-level tools.
 const SHELL_TOOL_NAMES = [
-  "execShell", "launchProcess", "listProcesses",
+  "execShell", "launchProcess", "listProcesses", "readProcessOutput",
   "taskWait", "taskStop",
 ] as const;
 
@@ -271,10 +271,8 @@ function buildLaunchProcessTool(): OpenAiCompatibleTool {
     function: {
       name: "launchProcess",
       description:
-        "Start a long-running ambient background process (dev server, watcher, REPL) and return immediately with {pid, label, taskId, status}. " +
-        "Real boundaries: this registers a tracked background task, but completion does NOT automatically start a new turn — the process is intentionally notice-only " +
-        "(an exited dev server must not silently burn a model turn). When it reaches a terminal state the bounded result (exitCode, duration, stdout/stderr tail) is recorded and " +
-        "surfaced as a notice injected only on your next real turn in the same conversation. Use listProcesses to inspect, taskWait to block for its terminal state, or taskStop to stop it. " +
+        "Start a long-running ambient background process (dev server, watcher, REPL) and return immediately with {pid, label, taskId, status}; with readyPattern it first waits for that regex in stdout/stderr (ANSI stripped) and returns ready/readyOutcome/matchedLine/waitedMs/tails. " +
+        "Boundaries: it registers a tracked background task, but completion does NOT automatically start a new turn — notice-only by design (an exited dev server must not burn a model turn). A terminal state records the bounded result (exitCode, duration, tails) and it is surfaced as a notice injected only on your next real turn in the same conversation. Inspect with listProcesses, read live logs with readProcessOutput, block for terminal state with taskWait, stop with taskStop. " +
         "For a finite job (tests, builds, batch) whose result must resume the conversation automatically, use execShell with background: true instead.",
       parameters: {
         type: "object",
@@ -291,6 +289,19 @@ function buildLaunchProcessTool(): OpenAiCompatibleTool {
             type: "boolean",
             description:
               "Keep process alive after session/conversation closes. Defaults to false.",
+          },
+          readyPattern: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Optional regex to wait for in stdout/stderr (ANSI stripped, line by line) before returning — e.g. a dev server ready banner. Omit to return immediately. Compiled into a linear-time matcher: backreferences (\\1-\\9) and lookarounds are rejected with `invalid-arguments`; while the process runs only newline-terminated lines are matched.",
+          },
+          readyTimeoutMs: {
+            type: "integer",
+            minimum: 100,
+            maximum: 120000,
+            description:
+              "Optional timeout in milliseconds for readyPattern (default 30000, clamped to 100..120000); on timeout the process keeps running and recent output tails are returned.",
           },
         },
         required: ["command"],
@@ -338,6 +349,60 @@ function buildListProcessesTool(): OpenAiCompatibleTool {
   };
 }
 
+function buildReadProcessOutputTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "readProcessOutput",
+      description:
+        "Read live or final stdout/stderr output from a tracked background process (launchProcess dev servers/watchers, promoted execShell tasks), and optionally wait for a regex pattern. " +
+        "Returns {outcome, taskId, status, exitCode?, cursor, stdout, stderr, truncated, cursorEvicted, matchedStream?, matchedLine?, waitedMs?, outputRef?}. " +
+        "Pass the returned `cursor` (\"<stdoutLines>:<stderrLines>\") to read or wait only on newer output; `cursorEvicted: true` means the 64KB live ring dropped earlier bytes. " +
+        "For inspecting running services and readiness logs — not for polling finite execShell background jobs (those wake the conversation on completion).",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            minLength: 1,
+            description: "Task id from launchProcess or listProcesses (e.g. \"ptask-...\").",
+          },
+          cursor: {
+            type: "string",
+            description:
+              "Optional incremental cursor (\"<stdoutLines>:<stderrLines>\") from a previous read or launchProcess call; omit to read the current tail.",
+          },
+          stream: {
+            type: "string",
+            enum: ["both", "stdout", "stderr"],
+            description: "Which stream(s) to read or match. Defaults to \"both\".",
+          },
+          maxChars: {
+            type: "integer",
+            minimum: 256,
+            maximum: 32000,
+            description: "Maximum characters per stream (default 8000, clamped to 256..32000).",
+          },
+          waitForPattern: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Optional regex to wait for (matched line-by-line, ANSI stripped) until matched, the process exits, or timeoutMs elapses. Linear-time matcher: backreferences (\\1-\\9) and lookarounds are rejected with `invalid-arguments`; while running only newline-terminated lines match.",
+          },
+          timeoutMs: {
+            type: "integer",
+            minimum: 0,
+            maximum: 120000,
+            description:
+              "Wait budget in milliseconds when waitForPattern is set (default 30000, clamped to 0..120000).",
+          },
+        },
+        required: ["taskId"],
+      },
+    },
+  };
+}
+
 // --- ProcessTask follow-up tools (Phase 1) -----------------------------------
 // These four only observe/stop tasks that already exist: a launchProcess task,
 // or an execShell command that exceeded its detach window and returned
@@ -354,9 +419,8 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
         + "Returns {outcome, status, exitCode?, cursor, events}: outcome \"terminal\" with status exited|failed|stopped when it finished, "
         + "outcome \"timeout\" with status \"running\" when it outlived the whole budget, "
         + "outcome \"not-found\" for an unknown taskId, or outcome \"evicted\" when the event trail aged out (never wait again in that case). "
-        + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer than that — go do other work and come back, rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
-        + "Pass a small timeoutMs for a cheap liveness peek instead of the full result. "
-        + "`cursor` is the highest event seq covered by this response.",
+        + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer — go do other work and come back rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
+        + "Pass a small timeoutMs for a cheap liveness peek. `cursor` is the highest event seq covered by this response.",
       parameters: {
         type: "object",
         properties: {
@@ -474,6 +538,7 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "launchProcess") return buildLaunchProcessTool();
   if (toolName === "openDesktopPreview") return buildOpenDesktopPreviewTool();
   if (toolName === "listProcesses") return buildListProcessesTool();
+  if (toolName === "readProcessOutput") return buildReadProcessOutputTool();
   if (toolName === "taskWait") return buildTaskWaitTool();
   if (toolName === "taskStop") return buildTaskStopTool();
   return null;

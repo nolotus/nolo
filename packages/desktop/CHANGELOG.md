@@ -1,4 +1,28 @@
 
+## 0.272.0-alpha.1 (2026-11-24)
+
+### Features
+
+* **agent-runtime:** add live process output reading and launchProcess readyPattern ([cfb07e9](https://github.com/nolotus/bun-nolo/commit/cfb07e95183bbf91c8cddabaee9b0794ab7365d7))
+* **agent:** add pool-relative callerIsPoolTop posture with server and CLI wiring ([54e0283](https://github.com/nolotus/bun-nolo/commit/54e028356375f6cf468957a6047bb003beebd5bf))
+* **cli:** add structured dialog trace CLI and RunRecord token/tier fields ([b57481d](https://github.com/nolotus/bun-nolo/commit/b57481dd959f26ebbeacce55bfb70a18773574d1))
+* **cli:** inline redacted result summary capsules in wake notifications ([d6208ef](https://github.com/nolotus/bun-nolo/commit/d6208ef1ded689e3e677352a6540e8fdce7eda6c))
+* **diagnostics:** add protected web tool error reporting ([7d9a8b9](https://github.com/nolotus/bun-nolo/commit/7d9a8b9b9e9ee6be0bd2a3c731c970bef0fb862d))
+* **diagnostics:** integrate protected tool error reporting and dedupe ([85927b9](https://github.com/nolotus/bun-nolo/commit/85927b94416d1e0724a39176fa130a564e83a308))
+* **sandbox:** support Space AGENTS.md and Space Skill Docs in hosted runs ([d64c933](https://github.com/nolotus/bun-nolo/commit/d64c9338ff66dd9d3be4ccf159b8b6df5b6b17a8))
+
+### Bug Fixes
+
+* **ci:** restore alpha release gate coverage ([5764358](https://github.com/nolotus/bun-nolo/commit/576435821fa5c27c33ab5361f46917a33080fa9c))
+* **cli:** make MCP tool exposure on-demand, align estimator env, and restore skill contract wording ([d0fe216](https://github.com/nolotus/bun-nolo/commit/d0fe216db85f14ff530e99f861474aa5e479f096))
+
+### Performance Improvements
+
+* **cli:** make structured questions opt-in ([9aca38a](https://github.com/nolotus/bun-nolo/commit/9aca38a15286093f544c16f29ee4f2ac8b51cbad))
+* **context:** shorten startAgentRun guidance ([c6c6f64](https://github.com/nolotus/bun-nolo/commit/c6c6f6448237625539cc42584038494cf9c7617a))
+* **context:** slim default prompt layers, tool schemas, and align CLI estimator ([5de53b7](https://github.com/nolotus/bun-nolo/commit/5de53b703c0362937a1084bcdd051cc742060c51))
+
+
 ## 0.271.0-alpha.1 (2026-11-24)
 
 ### Features

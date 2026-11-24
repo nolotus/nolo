@@ -78,13 +78,13 @@ export const commitSandboxArtifactFunctionSchema = {
 export const materializeSkillAssetsFunctionSchema = {
   name: "materializeSkillAssets",
   description:
-    "把平台内置的可执行技能脚本复制到当前 Sandbox 的 work/skills/<skill>/，只读来源、幂等：源目录是平台内置的仓库脚本（allowlist 硬编码，调用方无法指定路径），重复调用只会覆盖同名文件，不会叠加内容。",
+    "把平台内置的可执行技能脚本复制到当前 Sandbox 的 work/skills/<skill>/，只读来源、幂等：源目录是平台内置的仓库脚本（allowlist 硬编码，调用方无法指定路径），重复调用只会覆盖同名文件，不会叠加内容。若当前 run 绑定了 Space 且你有权访问该 Space，也可按名称/slug 物化该 Space 里已授权的 Space Skill Doc，落到 work/skills/<slug>/SKILL.md。",
   parameters: {
     type: "object",
     properties: {
       skill: {
         type: "string",
-        description: "技能名，必须是平台内置的可执行技能（例如 cad-analysis）；其它取值会被拒绝。",
+        description: "技能名：平台内置的可执行技能（例如 cad-analysis），或当前绑定 Space 内已授权的 Space 技能名/slug；其它取值会被拒绝。",
       },
     },
     required: ["skill"],

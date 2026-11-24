@@ -2,34 +2,85 @@ import { useState, useCallback } from "react";
 
 
 import type { PendingFile } from "chat/dialog/dialogSlice";
+import type { ReferenceItem } from "app/types";
 import { pendingAttachmentsToMessageParts } from "chat/messages/pendingAttachmentParts";
-import {
-  BUILTIN_FEEDBACK_AGENT_KEY,
-  BUILTIN_APP_BUILDER_AGENT_KEY,
-} from "core/builtinAgents";
 import { asTrimmedString } from "core/trimmedString";
+import { BUILTIN_FEEDBACK_AGENT_KEY } from "core/builtinAgents";
+import {
+  buildSpecialistRuntimeToolGrants,
+  buildSpecialistSkillReference,
+  type SpecialistSkillSlug,
+} from "ai/skills/specialistSkills";
 import { QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY } from "app/settings/quickChatTierDefaults";
 
 /**
- * `/chat?launch=<slug>` 支持的专职 agent 直达入口。
- * 只允许白名单里的 slug，避免 URL 参数能任意指定 agent 并自动发消息。
+ * 可以随草稿/入口携带的专职技能 slug（登录往返恢复用）。
+ * 刻意**不含 `feedback`**：反馈入口是服务端受控通道，见下方 launch 表。
  */
+export type QuickChatSpecialistSkillSlug = Extract<
+  SpecialistSkillSlug,
+  "app-builder" | "agent-creator"
+>;
+
+export const QUICK_CHAT_PENDING_SPECIALIST_SLUGS: readonly QuickChatSpecialistSkillSlug[] =
+  ["app-builder", "agent-creator"];
+
+export function isQuickChatPendingSpecialistSlug(
+  value: unknown,
+): value is QuickChatSpecialistSkillSlug {
+  return (
+    typeof value === "string" &&
+    (QUICK_CHAT_PENDING_SPECIALIST_SLUGS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * `/chat?launch=<slug>` 与首页芯片支持的专职能力入口。
+ *
+ * 两种落点，刻意不对称：
+ * - `skill`：应用构建 / AI 创建。能力已转内置 skill，Agent 由用户在输入框里的
+ *   当前选择决定（无选中走 `QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY` = 内置 nolo），
+ *   技能与工具随对话挂载，不再依赖某个专用预置 Agent。
+ * - `agent`：反馈入口继续走 `BUILTIN_FEEDBACK_AGENT_KEY`。它是服务端**受控官方
+ *   通道**——跨租户写「用户反馈」表与向管理员发紧急通知只豁免这个 key
+ *   （tableToolHandlers / modelUsageToolHandlers 的反馈入口白名单）。换成通用
+ *   Agent 会让普通用户写反馈 403，而放宽通用 Agent 跨租户写权限是安全降级。
+ *
+ * 只允许白名单里的 slug，避免 URL 参数能任意指定能力并自动发消息。
+ */
+export type QuickChatLaunchSpecialist =
+  | {
+      target: "agent";
+      agentKey: string;
+      promptKey: string;
+      promptFallback: string;
+    }
+  | {
+      target: "skill";
+      skillSlug: SpecialistSkillSlug;
+      promptKey: string;
+      promptFallback: string;
+    };
+
 export const QUICK_CHAT_LAUNCH_SPECIALISTS: Record<
   string,
-  { agentKey: string; promptKey: string; promptFallback: string }
+  QuickChatLaunchSpecialist
 > = {
   feedback: {
+    target: "agent",
     agentKey: BUILTIN_FEEDBACK_AGENT_KEY,
     promptKey: "quickChat.chipFeedbackAgentPrompt",
     promptFallback: "我要反馈",
   },
   "create-app": {
-    agentKey: BUILTIN_APP_BUILDER_AGENT_KEY,
+    target: "skill",
+    skillSlug: "app-builder",
     promptKey: "quickChat.chipCreateAppPrompt",
     promptFallback: "我想创建一个新应用",
   },
   "create-app-surf": {
-    agentKey: BUILTIN_APP_BUILDER_AGENT_KEY,
+    target: "skill",
+    skillSlug: "app-builder",
     promptKey: "quickChat.chipCreateAppSurfPrompt",
     promptFallback: "我想用冲浪模板构建我的冲浪工作台，包含实时浪况与风向潮汐数据，并支持添加和管理我的自定义浪点。",
   },
@@ -37,11 +88,34 @@ export const QUICK_CHAT_LAUNCH_SPECIALISTS: Record<
 
 export const resolveQuickChatLaunchSpecialist = (
   slug: string | null | undefined
-) => {
+): QuickChatLaunchSpecialist | null => {
   const key = asTrimmedString(slug);
   if (!key) return null;
   return QUICK_CHAT_LAUNCH_SPECIALISTS[key] ?? null;
 };
+
+/**
+ * 专职入口落到对话上的挂载物：技能引用（说明书）+ 工具授权（能力包）。
+ *
+ * 两者必须成套：`app-builder` 的工具由能力包持有、skill 侧 `toolNames` 为空
+ * （见 builtinSkillRegistry 的 CAPABILITY_SLUG_COLLISIONS 约定），只挂引用
+ * 会得到「有说明书没工具」的入口。
+ */
+export function buildQuickChatSpecialistLaunchArgs(args: {
+  skillSlug: SpecialistSkillSlug;
+  userId?: string | null;
+}): { extraReferences?: ReferenceItem[]; extraTools?: string[] } {
+  const userId = asTrimmedString(args.userId ?? "");
+  const extraTools = buildSpecialistRuntimeToolGrants(args.skillSlug);
+  return {
+    // 技能 page key 是 `page-<userId>-<skillId>`：没有 userId 就没有可挂的页，
+    // 此时不伪造引用（buildSpecialistSkillReference 会抛错）。
+    ...(userId
+      ? { extraReferences: [buildSpecialistSkillReference(args.skillSlug, userId)] }
+      : {}),
+    ...(extraTools.length > 0 ? { extraTools } : {}),
+  };
+}
 
 const QUICK_CHAT_DEBUG = false;
 
@@ -294,25 +368,96 @@ export function useQuickChatMode(): [QuickChatMode, (mode: QuickChatMode) => voi
 
 export const QUICK_CHAT_PENDING_DRAFT_KEY = "quickChatPendingDraft";
 
-/** 未登录发送时暂存输入，登录回到 /chat 后恢复。 */
-export function savePendingQuickChatDraft(text: string): void {
+/**
+ * 未登录暂存的草稿。
+ *
+ * `specialistSkillSlug` 必须一起暂存：否则未登录点「创建应用 / 创建 Agent」
+ * 跳登录回来后变成普通无技能对话（工具面与说明书全丢）。
+ * 白名单见 `QUICK_CHAT_PENDING_SPECIALIST_SLUGS`（不含 feedback：它走受控 Agent）。
+ */
+export type QuickChatPendingDraft = {
+  text: string;
+  specialistSkillSlug?: QuickChatSpecialistSkillSlug;
+};
+
+/** 新草稿信封的版本标记：只有精确命中它才按新格式解包。 */
+export const QUICK_CHAT_PENDING_DRAFT_ENVELOPE_KEY = "__noloQuickChatDraftV2";
+
+/** 未登录发送时暂存输入（含专职技能意图），登录回到 /chat 后恢复。 */
+export function savePendingQuickChatDraft(
+  text: string,
+  specialistSkillSlug?: SpecialistSkillSlug | null,
+  storage: Pick<Storage, "setItem"> | null = typeof sessionStorage !== "undefined"
+    ? sessionStorage
+    : null,
+): void {
+  if (!storage) return;
   try {
-    if (typeof sessionStorage !== "undefined") {
-      sessionStorage.setItem(QUICK_CHAT_PENDING_DRAFT_KEY, text);
-    }
+    // 显式信封 + 版本号：不能把用户自己输入的 `{"name":"demo"}` 之类文本
+    // 误判成内部格式（见 takePendingQuickChatDraft）。
+    const payload = {
+      [QUICK_CHAT_PENDING_DRAFT_ENVELOPE_KEY]: 1,
+      text,
+      ...(isQuickChatPendingSpecialistSlug(specialistSkillSlug)
+        ? { specialistSkillSlug }
+        : {}),
+    };
+    storage.setItem(QUICK_CHAT_PENDING_DRAFT_KEY, JSON.stringify(payload));
   } catch {
     // 存储不可用时忽略
   }
 }
 
-/** 读取并清除暂存草稿；无则返回空串。 */
-export function takePendingQuickChatDraft(): string {
+/**
+ * 读取并清除暂存草稿；无则返回 null。
+ *
+ * 只有精确命中信封（`__noloQuickChatDraftV2 === 1` 且 `text` 是字符串）才按
+ * 新格式解包；其它一切情况——旧版本写入的裸文本、用户自己输入的 JSON
+ *（如 `{"name":"demo"}`）、半截非法 JSON——都原样当作普通草稿返回，绝不返回
+ * null 把草稿丢掉。
+ */
+export function takePendingQuickChatDraft(
+  storage: Pick<Storage, "getItem" | "removeItem"> | null = typeof sessionStorage !==
+  "undefined"
+    ? sessionStorage
+    : null,
+): QuickChatPendingDraft | null {
+  if (!storage) return null;
+  let value = "";
   try {
-    if (typeof sessionStorage === "undefined") return "";
-    const value = sessionStorage.getItem(QUICK_CHAT_PENDING_DRAFT_KEY) ?? "";
-    if (value) sessionStorage.removeItem(QUICK_CHAT_PENDING_DRAFT_KEY);
-    return value;
+    value = storage.getItem(QUICK_CHAT_PENDING_DRAFT_KEY) ?? "";
+    if (!value) return null;
+    storage.removeItem(QUICK_CHAT_PENDING_DRAFT_KEY);
   } catch {
-    return "";
+    return null;
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    // 半截非法 JSON：原样当普通草稿，不能丢。
+    return { text: value };
+  }
+  if (
+    !parsed ||
+    typeof parsed !== "object" ||
+    (parsed as Record<string, unknown>)[QUICK_CHAT_PENDING_DRAFT_ENVELOPE_KEY] !== 1 ||
+    typeof (parsed as { text?: unknown }).text !== "string"
+  ) {
+    return { text: value };
+  }
+  const envelope = parsed as {
+    text: string;
+    specialistSkillSlug?: unknown;
+  };
+  const specialistSkillSlug = isQuickChatPendingSpecialistSlug(
+    envelope.specialistSkillSlug,
+  )
+    ? envelope.specialistSkillSlug
+    : undefined;
+  return {
+    text: envelope.text,
+    ...(specialistSkillSlug ? { specialistSkillSlug } : {}),
+  };
 }

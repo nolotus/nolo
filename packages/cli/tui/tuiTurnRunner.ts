@@ -89,7 +89,7 @@ import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecu
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import { classifyFailureSubclass } from "../../ai/agent/agentAvailabilityShared";
-import { backfillRunRecordParentDialog } from "../agentRunControl";
+import { backfillRunRecordParentDialog, resolveRunsDir } from "../agentRunControl";
 import type { SelfUpdateExecution } from "../updateCommands";
 import type { SpawnFn, spawnProcess } from "../processSpawn";
 import type { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
@@ -548,7 +548,10 @@ async function runAgentChat(
   const childRunNoticeBlocks =
     injectedChildRunNoticeItems.length > 0
       ? [{
-          content: buildWakeMessage(injectedChildRunNoticeItems, Date.now()),
+          content: buildWakeMessage(injectedChildRunNoticeItems, Date.now(), {
+            // WAKE-003-CONFIG：与 run 注册表同一有效 runs 目录（尊重自定义 NOLO_HOME）。
+            trustedResultDirs: [resolveRunsDir(env)],
+          }),
           cacheScope: "turn" as const,
         }]
       : [];

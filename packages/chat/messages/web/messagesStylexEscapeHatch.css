@@ -514,24 +514,6 @@ html[data-nolo-desktop="1"] [data-hook~="messages-esc-tr-body"]::-webkit-scrollb
   aspect-ratio: 16 / 10;
   max-height: min(420px, 52vh);
 }
-/* ziwei 标题装饰（旧 1962 / 2183-2196）：伪元素 + 内容注入走 hook */
-[data-hook~="messages-esc-ziwei-title"]::before {
-  content: "✦";
-  opacity: 0.55;
-  font-size: 12px;
-  letter-spacing: 0.3em;
-}
-[data-hook~="messages-esc-ziwei-center-title"]::before,
-[data-hook~="messages-esc-ziwei-center-title"]::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--primary) 35%, transparent));
-}
-[data-hook~="messages-esc-ziwei-center-title"]::after {
-  background: linear-gradient(270deg, transparent, color-mix(in srgb, var(--primary) 35%, transparent));
-}
-
 @media (max-width: 640px) {
   [data-hook~="messages-esc-g-grid-cols-1"] [data-hook~="messages-esc-g-img-card"] {
     max-height: min(300px, 46vh);

@@ -175,6 +175,95 @@ function resolveCallerCredentialGroup<T extends SafeAgentSummary>(
   return typeof group === "string" && group.length > 0 ? group : undefined;
 }
 
+/** 池姿态调用者身份：configured agentKey（用于排除自身）+ 实际运行模型。 */
+export interface FreePoolCaller {
+  /** 调用者自己的 agentKey；与候选同 key 时该候选不参与「外部更高档」比较。 */
+  agentKey?: string | null;
+  /** 调用者**实际运行**的模型（可能与自身配置模型不同，例如配置 kimi-k3 实跑 flash）。 */
+  model?: string | null;
+}
+
+/** 池姿态候选的最小形状（server/CLI 端由 toSafeAgentSummary 投影而来）。 */
+export interface FreePoolCandidate {
+  agentKey?: string | null;
+  model?: unknown;
+  requiresPaidApproval?: boolean;
+}
+
+const asCallerModel = (
+  caller: FreePoolCaller | string | null | undefined,
+): string | null | undefined =>
+  typeof caller === "string" ? caller : caller?.model ?? null;
+
+const asCallerAgentKey = (
+  caller: FreePoolCaller | string | null | undefined,
+): string => {
+  if (typeof caller === "string" || !caller) return "";
+  return typeof caller.agentKey === "string" ? caller.agentKey.trim() : "";
+};
+
+/**
+ * 相对池姿态推导（纯函数，零 I/O）：当前调用者是否已是「免付费池顶」。
+ *
+ * 首参兼容两种形态：旧式 `string | null | undefined`（调用者模型），或
+ * `{ model, agentKey }` 对象（推荐——带上 agentKey 才能严格排除自身）。
+ *
+ * 三态（保守优先不误判）：
+ * - 候选池为空 → undefined（无结论，调用方按既有行为走）；
+ * - 调用者模型档位推不出（unknown）→ undefined；
+ * - 过滤掉自身（agentKey 相同）后没有外部候选 → true（单模型池，自身即池顶）；
+ * - 存在 requiresPaidApproval === false 且档位**严格更高**的外部候选 → false；
+ * - 存在无法排除为「更高免付费档」的外部候选（requiresPaidApproval !== true 且
+ *   [档位推不出，或扣费未知但档位更高]）→ undefined；
+ * - 否则（外部候选要么明确需付费，要么已知档位 <= 自身）→ true。
+ *
+ * 「排除自身」是关键：实际运行模型与自身配置模型不一致时（配置 kimi-k3、实跑
+ * flash），不排除自身会把自身那条更高档配置当成外部免费升档 → 误判 false。
+ */
+export function isCallerAtFreePoolTop(
+  caller: FreePoolCaller | string | null | undefined,
+  candidates: ReadonlyArray<FreePoolCandidate>,
+): boolean | undefined {
+  if (candidates.length === 0) return undefined;
+  const currentTier = resolveModelTier(asCallerModel(caller));
+  if (currentTier === "unknown") return undefined;
+  const currentRank = DISPATCH_TIER_RANK[currentTier];
+  const callerAgentKey = asCallerAgentKey(caller);
+  // 自身只有「两边都有 agentKey 且相同」才算自身；缺 key 时不做身份猜测。
+  const external = candidates.filter(
+    (candidate) =>
+      !(
+        typeof candidate.agentKey === "string" &&
+        candidate.agentKey &&
+        callerAgentKey &&
+        candidate.agentKey === callerAgentKey
+      ),
+  );
+  // 过滤自身后池内只剩自身（单模型池）：没有可比的外部候选，自身即池顶。
+  if (external.length === 0) return true;
+
+  const hasStrictlyHigherFree = external.some((candidate) => {
+    if (candidate.requiresPaidApproval !== false) return false;
+    const tier = resolveModelTier(candidate.model);
+    return tier !== "unknown" && DISPATCH_TIER_RANK[tier] > currentRank;
+  });
+  if (hasStrictlyHigherFree) return false;
+
+  // 任何「既不确定要付费、也无法证明档位不高于自己」的外部候选都让结论不可下。
+  const hasUnresolvableCandidate = external.some((candidate) => {
+    if (candidate.requiresPaidApproval === true) return false;
+    const tier = resolveModelTier(candidate.model);
+    if (tier === "unknown") return true;
+    if (candidate.requiresPaidApproval === undefined) {
+      return DISPATCH_TIER_RANK[tier] > currentRank;
+    }
+    return false;
+  });
+  if (hasUnresolvableCandidate) return undefined;
+
+  return true;
+}
+
 export interface PlanningRecommendation {
   /** Conditional advice only: the model decides whether planning and domain fit apply. */
   condition: "when_planning_needed_and_candidate_suitable";

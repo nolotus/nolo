@@ -47,6 +47,7 @@ export const DEFAULT_LOCAL_TOOLS = new Set([
   "execShell",
   "launchProcess",
   "listProcesses",
+  "readProcessOutput",
   // ProcessTask follow-up tools. Same tier as listProcesses: they observe/stop
   // tasks the agent itself already spawned, so their blast radius is strictly
   // narrower than launchProcess (which is default-enabled). Model-facing

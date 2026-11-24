@@ -121,6 +121,9 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       agentKey,
       userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
       responseViewport: TUI_RESPONSE_VIEWPORT,
+      // 估算必须看运行时那同一份 env：`NOLO_EXPOSE_MCP_TOOLS=1` 会让 local 装配
+      // 多出 3 个 MCP 工具 schema，估算器若只看写死的 wake 开关就会低报。
+      env,
       ...resolveAgentModelIdentity({ agentKey, agentName }),
     }),
   };

@@ -20,6 +20,7 @@ import { selectIdentityToken } from "identity/selectors";
 import { isAbortError } from "core/abortError";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { extractCustomId } from "core/prefix";
+import { splitDialogKeyIdentity } from "core/dialogKeyIdentity";
 import type { RootState } from "app/store";
 import { performFetchRequest } from "./fetchUtils";
 import { createSSEParser } from "./parseMultilineSSE";
@@ -289,7 +290,11 @@ export const sendOpenAIResponseRequest = async ({
   fallbackBodyData?: any;
 }): Promise<CompletionMeta> => {
   const { dispatch, getState, signal: thunkSignal } = thunkApi;
-  const dialogId = extractCustomId(dialogKey);
+  // 与 `sendOpenAICompletionsRequest` 同一身份口径：core 的 `splitDialogKeyIdentity`
+  // 从 dialogKey 取 bare dialogId（UUID 形态的 id 含 '-'，旧的「最后一个 '-'」切法会截断，
+  // 使 msg 键与工具错误上报的 dialogId 都错）。解析不出身份时保留旧切法，不新增抛错。
+  const dialogId =
+    splitDialogKeyIdentity(dialogKey)?.dialogId ?? extractCustomId(dialogKey);
   const controller = new AbortController();
   thunkSignal.addEventListener("abort", () => controller.abort());
   const signal = controller.signal;

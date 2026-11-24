@@ -93,35 +93,10 @@ export type ApplyLineEditsArgs = {
 export const applyLineEditsFunctionSchema = {
     name: "applyLineEdits",
     description: [
-        "对指定文件按“行号”执行一组精确的文本编辑操作，而不是整文件重写。",
-        "",
-        "适用场景：",
-        "- 替换某个连续的行区间（一个函数体、一段 JSX 区块等）。",
-        "- 在某一行之前或之后插入若干行代码。",
-        "- 删除一段连续的行。",
-        "",
-        "约定：",
-        "- 所有行号均为 1-based（第一行为 1）。",
-        "- 建议一次调用只包含 1 个 edit；多个 edit 会顺序依次应用，后续 edit 的行号基于前一个 edit 应用后的结果。",
-        "",
-        "为了在行号有轻微偏差的情况下仍然成功修改，推荐同时提供 originalSnippet：",
-        "- 在规划编辑前，请先调用 readFile 工具获取最新的文件内容和行号信息。",
-        "- 若 readFile 使用了 startLine/endLine 只返回局部内容：",
-        "  - lines[0] 对应的真实行号为 lineOffset；",
-        "  - 计算 startLine/endLine 时需用 lineOffset + index。",
-        "- 对 replaceRange / deleteRange：",
-        "  - 在 readFile 返回的 lines 中，取出 startLine~endLine 对应的原始行文本，用 \\n 拼接后放入 originalSnippet。",
-        "- 对 insertBefore / insertAfter：",
-        "  - 取插入点附近的一行原始代码文本（通常是插入点当前这一行），放入 originalSnippet。",
-        "- 后端会：",
-        "  - 将传入的行号视为“粗定位”；",
-        "  - 然后在该行号附近优先搜索 originalSnippet；",
-        "  - 若找到，就以搜索结果为准自动修正编辑位置，从而提高成功率；",
-        "  - 若找不到，则退化为按行号硬改（与旧行为一致），不会因为 snippet 不匹配而额外报错。",
-        "",
-        "返回数据约定（rawData.response 中）：",
-        "- newContent：应用行级编辑后的完整文件内容（统一使用 \\n 作为换行符），用于“最终文件预览”。",
-        "- diff：基于原始内容与 newContent 的行级 diff（diffLines 结果），用于 UI 中的 Diff 视图。",
+        "对指定文件按“行号”执行一组编辑，而不是整文件重写：替换连续行区间、在某行前后插入若干行、删除连续行。",
+        "约定：行号均 1-based；一次调用尽量只含 1 个 edit；多个 edit 顺序应用，后续行号基于前一个 edit 后的结果。",
+        "强烈建议同时提供 originalSnippet 容错：先 readFile 取最新内容与行号（用了 startLine/endLine 时真实行号 = lineOffset + index）；replaceRange / deleteRange 用 startLine~endLine 的原始行文本以 \\n 拼接；insertBefore / insertAfter 取插入点附近一行的原始文本。后端把行号当“粗定位”，优先在附近搜索 originalSnippet 并对齐，搜不到才按行号硬改（不因 snippet 不匹配报错）。",
+        "返回 rawData.response：newContent（编辑后完整内容，统一 \\n）、diff（行级 diff，供 Diff 视图）。",
     ].join("\n"),
     parameters: {
         type: "object",
@@ -129,12 +104,12 @@ export const applyLineEditsFunctionSchema = {
             filePath: {
                 type: "string",
                 description:
-                    "要修改的文件相对项目根目录（bun-nolo）的路径，例如: packages/chat/src/messages/web/ToolMessageContent.tsx",
+                    "要修改的文件路径（相对项目根 bun-nolo），如 packages/chat/src/messages/web/ToolMessageContent.tsx",
             },
             edits: {
                 type: "array",
                 description:
-                    "要按顺序应用的一系列行级编辑操作。建议一次只传一个 edit，减少行号偏移带来的复杂性。",
+                    "按顺序应用的行级编辑；建议只传一个 edit。",
                 items: {
                     type: "object",
                     oneOf: [
@@ -144,22 +119,22 @@ export const applyLineEditsFunctionSchema = {
                                 startLine: {
                                     type: "number",
                                     description:
-                                        "期望被替换的起始行（包含），1-based。",
+                                        "替换起点行（含），1-based。",
                                 },
                                 endLine: {
                                     type: "number",
                                     description:
-                                        "期望被替换的结束行（包含），1-based，必须 >= startLine。",
+                                        "替换终点行（含），1-based，>= startLine。",
                                 },
                                 replacement: {
                                     type: "string",
                                     description:
-                                        "用于替换这段行区间的新文本（可以是多行或空字符串）。文本内部按 \\n 分行。",
+                                        "替换文本（可多行或空串），内部按 \\n 分行。",
                                 },
                                 originalSnippet: {
                                     type: "string",
                                     description:
-                                        "可选但强烈建议：startLine~endLine 对应的原始代码片段（用 \\n 拼接）。后端会优先在该行区附近搜索这段文本，并在行号略有偏差时自动对齐后再应用替换，从而大幅提高成功率。",
+                                        "可选但强烈建议：该行区间的原始文本（\\n 拼接）；后端就近搜索并对齐，行号有偏差时提高成功率。",
                                 },
                             },
                             required: ["type", "startLine", "endLine", "replacement"],
@@ -170,7 +145,7 @@ export const applyLineEditsFunctionSchema = {
                                 line: {
                                     type: "number",
                                     description:
-                                        "在第 line 行“之前”插入 content。1 <= line <= 文件总行数 + 1。",
+                                        "在 line 行之前插入；1 <= line <= 总行数 + 1。",
                                 },
                                 content: {
                                     type: "string",

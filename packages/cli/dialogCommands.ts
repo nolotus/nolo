@@ -575,7 +575,7 @@ function readDialogOwnerId(args: string[], env: Record<string, string | undefine
     "";
 }
 
-function resolveDialogReadTarget(args: string[], env: Record<string, string | undefined>, authToken: string) {
+export function resolveDialogReadTarget(args: string[], env: Record<string, string | undefined>, authToken: string) {
   const rawInput = readFirstPositional(args);
   if (!rawInput) return null;
   const preferredServer = readOption(args, "--server") ?? readOption(args, "--server-url");

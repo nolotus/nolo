@@ -16,6 +16,7 @@ import {
   collectConfirmedExecutedMessages,
 } from "ai/tools/toolRunStore";
 import { streamAgentChatTurn } from "ai/agent/agentSlice";
+import { reportToolExecutionErrorInBackground } from "ai/agent/toolErrorReport";
 
 import type { Message, ToolPayload, ToolErrorPayload } from "./types";
 import { toolResultNeedsUserConfirmation } from "./toolPresentation";
@@ -278,18 +279,32 @@ const processToolData = createAsyncThunk(
     }
 
     // ========= 分支二：auto 工具（包括 ask_user / readFile / execShell 等） =========
+    //
+    // `executorThrew` 只标记「`found.executor(...)` 自己抛了异常」：这是下面 catch
+    // 允许工具错误上报的唯一范围（见 catch 内说明）。执行成功之后的
+    // `toolRunSucceeded`/`toolRunSetPending`/payload 组装/返回都是状态层与持久化层，
+    // 它们抛出的异常仍按原语义走 catch（toolRunFailed + rejectWithValue），但不得冒充
+    // 该工具的执行失败被上报——否则管理员侧会看到与工具无关的假故障。
+    let toolResult: Awaited<ReturnType<typeof found.executor>>;
+    let executorThrew = false;
     try {
-      const toolResult = await found.executor(executionToolArgs, thunkApi, {
-        parentMessageId,
-        toolRunId,
-        agentKey,
-        effectiveModel: args.effectiveModel,
-        runKind: "interactive",
-        // 定档信号：这里是前台对话流式路径，来源恒为 chat；对话 id 用于数历史搜索。
-        ...(args.dialogId ? { dialogId: args.dialogId } : {}),
-        ...(args.userMessageId ? { userMessageId: args.userMessageId } : {}),
-        origin: "chat" as const,
-      });
+      try {
+        toolResult = await found.executor(executionToolArgs, thunkApi, {
+          parentMessageId,
+          toolRunId,
+          agentKey,
+          effectiveModel: args.effectiveModel,
+          runKind: "interactive",
+          // 定档信号：这里是前台对话流式路径，来源恒为 chat；对话 id 用于数历史搜索。
+          ...(args.dialogId ? { dialogId: args.dialogId } : {}),
+          ...(args.userMessageId ? { userMessageId: args.userMessageId } : {}),
+          origin: "chat" as const,
+        });
+      } catch (executorError) {
+        executorThrew = true;
+        // 原样重抛：外层 catch 的错误分类、结构化码、文案与失败语义一律不变。
+        throw executorError;
+      }
 
       const rawData = toolResult?.rawData ?? toolResult;
       const llmContext = asOptionalTrimmedString(toolResult?.llmContext);
@@ -406,6 +421,23 @@ const processToolData = createAsyncThunk(
           toolPayload,
           hasPendingInteraction: true,
         };
+      }
+
+      // 只有 `found.executor(...)` 自己抛出的异常才上报（`executorThrew`）。
+      // 上面 confirmationKey 分支是等待真人确认/授权，属于正常暂停点（工具层用结构化
+      // 错误码表达「需要确认」），不算异常，因此不上报。
+      // 执行成功后的状态写回/派发异常（toolRunSucceeded、toolRunSetPending、payload 组装）
+      // 也不是工具执行失败，同样不上报，但下面的失败收尾语义照旧。
+      // 上报是 best-effort：不 await、不重试，任何失败都不改变下面的 rejectWithValue 语义。
+      // 只传身份与异常本身：input / output / rawData 一律不进上报 body。
+      if (executorThrew) {
+        reportToolExecutionErrorInBackground({
+          thunkApi,
+          dialogId: args.dialogId,
+          callId: toolCallId,
+          toolName: canonicalName,
+          error: e,
+        });
       }
 
       const rawErrorResult =

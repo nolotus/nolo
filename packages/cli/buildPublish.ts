@@ -194,7 +194,7 @@ export async function buildPublishArtifactBundled(
 
   // Phase 2: 只保留含 native prebuild 的包为 external（npm 安装时需要平台 prebuild）。
   // 纯 JS 包全部 inline 进 bundle，配合 code splitting 进独立 chunk，
-  // 主入口 --help 不再加载 @reduxjs/toolkit / i18next / iztro 等 web/RN 依赖。
+  // 主入口 --help 不再加载 @reduxjs/toolkit / i18next 等 web/RN 依赖。
   //
   // ulid 必须保持 external：其 UMD 入口在初始化时调用 require("crypto") 获取安全
   // 随机数。一旦被 esbuild inline 进纯 ESM chunk，require 在 ESM 顶层不可用，

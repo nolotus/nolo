@@ -27,6 +27,7 @@ import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { extractCustomId } from "core/prefix";
+import { splitDialogKeyIdentity } from "core/dialogKeyIdentity";
 import {
     createThinkParserState,
     flushThinkParser,
@@ -756,7 +757,10 @@ export const sendOpenAICompletionsRequest = async ({
 }): Promise<CompletionMeta> => {
     const { dispatch, getState, signal: thunkSignal } = thunkApi;
 
-    const dialogId = extractCustomId(dialogKey);
+    // 与 web 的 `sendOpenAICompletionsRequest` 同一身份口径（core 唯一真值）：
+    // UUID 形态 dialogId 按旧的「最后一个 '-'」切法会被截断。解析不出身份时保留旧切法。
+    const dialogId =
+      splitDialogKeyIdentity(dialogKey)?.dialogId ?? extractCustomId(dialogKey);
     const controller = new AbortController();
     thunkSignal.addEventListener("abort", () => controller.abort());
     const signal = controller.signal;

@@ -59,6 +59,7 @@ import {
   buildQuickChatExtraParts,
   buildQuickChatFirstMessageText,
   buildQuickChatRouteState,
+  buildQuickChatSpecialistLaunchArgs,
   formatQuickChatDialogTitle,
   getQuickChatPerfNow,
   logQuickChatPerf,
@@ -66,6 +67,7 @@ import {
   QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY,
   savePendingQuickChatDraft,
 } from "./quickChatFlow";
+import type { SpecialistSkillSlug } from "ai/skills/specialistSkills";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import {
   BUILTIN_NOLO_AGENT_KEY,
@@ -137,11 +139,22 @@ export const takePendingQuickChatFiles = (
 export interface QuickChatSubmission {
   text: string;
   agentId: string | null;
+  /**
+   * 内置专职技能（feedback / agent-creator / app-builder）：随对话创建挂到
+   * `dialog.extraReferences`，并把该技能需要的工具（能力包）作为本轮
+   * `runtimeOptions.extraTools` 下发。入口不再绑定专用内置 Agent。
+   */
+  specialistSkillSlug?: SpecialistSkillSlug;
 }
 
 export interface QuickChatRuntimeProps {
   initialText?: string;
   initialAgentId?: string | null;
+  /**
+   * 登录往返恢复的专职技能意图（未登录点「创建应用 / 创建 Agent」时随草稿暂存）：
+   * 下一次发送时消费一次，把技能引用与工具面重新挂上。
+   */
+  pendingSpecialistSkillSlug?: SpecialistSkillSlug | null;
   surface?: QuickChatRuntimeSurface;
   /** Route-authoritative Space context; when set, wins over Redux for createDialog. */
   spaceId?: string;
@@ -163,6 +176,7 @@ const QUICK_CHAT_DEBUG = false;
 const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   initialText = "",
   initialAgentId = null,
+  pendingSpecialistSkillSlug = null,
   surface = "default",
   spaceId: spaceIdProp,
   submission,
@@ -230,11 +244,21 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
   const currentUserBalanceRef = useRef(currentUserBalance);
   const balanceLoadPromiseRef = useRef<Promise<number> | null>(null);
   const initialAgentIdRef = useRef(initialAgentId);
+  const pendingSpecialistSkillSlugRef = useRef<SpecialistSkillSlug | null>(
+    pendingSpecialistSkillSlug
+  );
   const areaRef = useRef<HTMLTextAreaElement>(null);
 
   React.useEffect(() => {
     initialAgentIdRef.current = initialAgentId;
   }, [initialAgentId]);
+
+  React.useEffect(() => {
+    // 只在新意图到来时重置；发送消费后会被置空，不能因为父组件重渲染又塞回来。
+    if (pendingSpecialistSkillSlug) {
+      pendingSpecialistSkillSlugRef.current = pendingSpecialistSkillSlug;
+    }
+  }, [pendingSpecialistSkillSlug]);
 
   React.useEffect(() => {
     currentUserBalanceRef.current = currentUserBalance;
@@ -378,9 +402,17 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     return balanceLoadPromiseRef.current;
   }, [accountSession, currentServer, currentUserId, token]);
 
-  const startQuickChat = useCallback(async (overrideText?: string, overrideAgentId?: string | null) => {
+  const startQuickChat = useCallback(async (
+    overrideText?: string,
+    overrideAgentId?: string | null,
+    overrideSpecialistSkillSlug?: SpecialistSkillSlug | null
+  ) => {
     const startedAt = getQuickChatPerfNow();
     const trimmedText = (overrideText ?? text).trim();
+    // 入口携带的专职技能：本轮显式 override 优先；否则取登录往返恢复的一次性
+    // 草稿意图（未登录时保存、登录回 /chat 后由 QuickChat 读回并传进来）。
+    const requestedSpecialistSkillSlug =
+      overrideSpecialistSkillSlug ?? pendingSpecialistSkillSlugRef.current ?? null;
     if (
       isStartingRef.current ||
       isSending ||
@@ -394,7 +426,8 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     // 未登录（有会话服务但无用户）：不发请求，保存草稿并跳登录，登录后回 /chat。
     // 会话初始化期间 currentUserId 暂为空，此时不能把已登录用户误判为未登录。
     if (accountSession && isIdentityInitialized && !currentUserId) {
-      savePendingQuickChatDraft(trimmedText);
+      // 把「这一轮要挂哪个内置专职技能」一起暂存，否则登录回来变成普通对话。
+      savePendingQuickChatDraft(trimmedText, requestedSpecialistSkillSlug);
       navigate("/login?returnTo=%2Fchat");
       return;
     }
@@ -431,6 +464,12 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
       const hasImages = filesArray.length > 0 || pendingFiles.length > 0;
       const firstMessageText = buildQuickChatFirstMessageText(trimmedText, hasImages);
       const specialistAgentId = overrideAgentId ?? initialAgentIdRef.current;
+      const specialistLaunch = requestedSpecialistSkillSlug
+        ? buildQuickChatSpecialistLaunchArgs({
+            skillSlug: requestedSpecialistSkillSlug,
+            userId: currentUserId,
+          })
+        : undefined;
       // 专职直达入口优先；其次首页选中的 agent（autoAgentId）；兜底走默认 agent（内置 nolo 本体）。
       const selectedAgentId = specialistAgentId || autoAgentId;
       const resolvedAgent = selectedAgentId
@@ -501,6 +540,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
             optimisticReturnBeforeWrite: true,
             spaceId: currentSpaceId,
             title: dialogTitle,
+            ...(specialistLaunch?.extraReferences?.length
+              ? { extraReferences: specialistLaunch.extraReferences }
+              : {}),
             ...(runtimeBinding ? { runtimeBinding } : {}),
           })
         ).unwrap();
@@ -511,6 +553,9 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         if (!dialogKey) {
           throw new Error("Dialog key is missing.");
         }
+        // 一次性，且只在**建对话成功**之后清空：技能引用已随对话持久化交接。
+        // 建对话失败（catch 里 return）时保留意图，用户重试发送不会丢专职能力。
+        pendingSpecialistSkillSlugRef.current = null;
         QUICK_CHAT_DEBUG && console.log("[QuickChatTrace] createDialog resolved", {
           dialogKey,
           dialogSpaceId,
@@ -604,6 +649,10 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
         ...(!selectedAgentId &&
           effectiveAgentId === QUICK_CHAT_AUTO_FALLBACK_AGENT_KEY
           ? { quickChatReasoningEffort: "max" as const }
+          : {}),
+        // 专职入口的工具授权：与技能引用成套下发，缺一半就是「有说明书没工具」。
+        ...(specialistLaunch?.extraTools?.length
+          ? { extraTools: specialistLaunch.extraTools }
           : {}),
       };
       const sendPromise = Promise.resolve(
@@ -699,7 +748,11 @@ const QuickChatRuntime: React.FC<QuickChatRuntimeProps> = ({
     // A chip is an explicit send, not an initializer for a new runtime. Use
     // its payload even when this runtime already owns a different draft.
     setText(submission.text);
-    void startQuickChat(submission.text, submission.agentId).catch((error) => {
+    void startQuickChat(
+      submission.text,
+      submission.agentId,
+      submission.specialistSkillSlug
+    ).catch((error) => {
       console.error("[QuickChat] automatic submit failed", error);
     });
   }, [submission, isSending, setText, startQuickChat]);

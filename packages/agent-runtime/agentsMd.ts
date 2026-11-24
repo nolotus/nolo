@@ -375,6 +375,63 @@ const renderSummarySections = (
 };
 
 /**
+ * 纯函数：把一份 AGENTS.md / CLAUDE.md 原文编译成 session 层（不碰磁盘）。
+ * 预算、摘要降级、截断 marker 与 `readAgentsMdLayerFromDisk` 完全同源；
+ * 输出只取决于入参（无时间戳等动态熵），同入参逐字节一致，保护 Prefix Cache。
+ * `content` 必须是已 trim 的非空正文；`raw` 为原文（用于「原文件字节数」marker）。
+ */
+export function buildAgentsMdLayerFromContent(
+  raw: string,
+  name: string,
+  filePath: string,
+): TurnContextLayer | null {
+  const content = raw.trim();
+  if (!content) return null;
+  const totalBytes = Buffer.byteLength(raw, "utf8");
+  const trimmedBytes = Buffer.byteLength(content, "utf8");
+  // 注入块头部也占预算：正文按预算截断后再拼头部会超出上限
+  const headerBytes = Buffer.byteLength(buildAgentsMdLayerHeader(name), "utf8");
+
+  if (headerBytes + trimmedBytes <= AGENTS_MD_MAX_BYTES) {
+    return buildAgentsMdLayer(content, name);
+  }
+
+  // 超预算：不再截断注入正文（截断会让模型看到一段「看似完整」的规则文本），
+  // 改为注入精简索引 + 完整文件绝对路径，模型按需 readFile 读全文。
+  const summaryBody = buildAgentsMdSummaryBody(content, filePath, {
+    // 正文预算 = 摘要上限 − 块头部：buildAgentsMdLayer 会再拼一次头部，
+    // 因此「头部 + 正文」才等于最终注入字节，不得超过摘要上限。
+    budgetBytes: AGENTS_MD_SUMMARY_MAX_BYTES - headerBytes,
+    fileName: name,
+  });
+  if (summaryBody) return buildAgentsMdLayer(summaryBody, name);
+
+  // 无可索引结构（例如单行长文本、纯代码块）：退回截断路径，避免完全失去内容。
+  const buildMarker = (omitted: number, withPath: boolean): string => {
+    const pathPart = withPath
+      ? `完整文件：${filePath}`
+      : `完整文件：工作区根目录的 ${name}`;
+    return `<!-- AGENTS.md truncated: 原文件 ${totalBytes} 字节，注入预算 ${AGENTS_MD_MAX_BYTES} 字节，已省略 ${omitted} 字节（上文可能缺少文件末尾的 commit/review 门禁细则，提交/评审前请读完整文件）。${pathPart} -->`;
+  };
+
+  // 正文预算固定：marker 单独占预留字节，正文长度因此与 marker 实际长度无关。
+  // 头部字节也要从正文预算里扣掉，保证「头部 + 正文 + 分隔 + marker」不超上限。
+  const bodyBudget =
+    AGENTS_MD_MAX_BYTES - AGENTS_MD_MARKER_RESERVE_BYTES - 2 - headerBytes;
+  const body = truncateAgentsMdContent(content, bodyBudget);
+  const bodyBytes = Buffer.byteLength(body, "utf8");
+  const omitted = Math.max(0, totalBytes - bodyBytes);
+
+  let marker = buildMarker(omitted, true);
+  if (Buffer.byteLength(marker, "utf8") > AGENTS_MD_MARKER_RESERVE_BYTES) {
+    // 路径过长导致 marker 超出预留：退化为不含路径的短 marker
+    marker = buildMarker(omitted, false);
+  }
+
+  return buildAgentsMdLayer(`${body}\n\n${marker}`, name);
+}
+
+/**
  * 只在宿主选定的工作区根查找候选，不遍历父目录或子目录。每轮重读，
  * 未改动时生成同样的 session 层；工作区切换、编辑、缺失或不可读不沿用旧内容。
  * 超预算保留索引；无法提取索引时保留带明确 marker 的正文前缀。
@@ -400,48 +457,7 @@ export function readAgentsMdLayerFromDisk(cwd: string): TurnContextLayer | null 
       const content = raw.trim();
       if (!content) continue;
 
-      const totalBytes = Buffer.byteLength(raw, "utf8");
-      const trimmedBytes = Buffer.byteLength(content, "utf8");
-      // 注入块头部也占预算：正文按预算截断后再拼头部会超出上限
-      const headerBytes = Buffer.byteLength(buildAgentsMdLayerHeader(name), "utf8");
-
-      if (headerBytes + trimmedBytes <= AGENTS_MD_MAX_BYTES) {
-        return buildAgentsMdLayer(content, name);
-      }
-
-      // 超预算：不再截断注入正文（截断会让模型看到一段「看似完整」的规则文本），
-      // 改为注入精简索引 + 完整文件绝对路径，模型按需 readFile 读全文。
-      const summaryBody = buildAgentsMdSummaryBody(content, filePath, {
-        // 正文预算 = 摘要上限 − 块头部：buildAgentsMdLayer 会再拼一次头部，
-        // 因此「头部 + 正文」才等于最终注入字节，不得超过摘要上限。
-        budgetBytes: AGENTS_MD_SUMMARY_MAX_BYTES - headerBytes,
-        fileName: name,
-      });
-      if (summaryBody) return buildAgentsMdLayer(summaryBody, name);
-
-      // 无可索引结构（例如单行长文本、纯代码块）：退回截断路径，避免完全失去内容。
-      const buildMarker = (omitted: number, withPath: boolean): string => {
-        const pathPart = withPath
-          ? `完整文件：${filePath}`
-          : `完整文件：工作区根目录的 ${name}`;
-        return `<!-- AGENTS.md truncated: 原文件 ${totalBytes} 字节，注入预算 ${AGENTS_MD_MAX_BYTES} 字节，已省略 ${omitted} 字节（上文可能缺少文件末尾的 commit/review 门禁细则，提交/评审前请读完整文件）。${pathPart} -->`;
-      };
-
-      // 正文预算固定：marker 单独占预留字节，正文长度因此与 marker 实际长度无关。
-      // 头部字节也要从正文预算里扣掉，保证「头部 + 正文 + 分隔 + marker」不超上限。
-      const bodyBudget =
-        AGENTS_MD_MAX_BYTES - AGENTS_MD_MARKER_RESERVE_BYTES - 2 - headerBytes;
-      const body = truncateAgentsMdContent(content, bodyBudget);
-      const bodyBytes = Buffer.byteLength(body, "utf8");
-      const omitted = Math.max(0, totalBytes - bodyBytes);
-
-      let marker = buildMarker(omitted, true);
-      if (Buffer.byteLength(marker, "utf8") > AGENTS_MD_MARKER_RESERVE_BYTES) {
-        // 路径过长导致 marker 超出预留：退化为不含路径的短 marker
-        marker = buildMarker(omitted, false);
-      }
-
-      return buildAgentsMdLayer(`${body}\n\n${marker}`, name);
+      return buildAgentsMdLayerFromContent(raw, name, filePath);
     } catch {
       /* skip unreadable */
     }

@@ -30,7 +30,6 @@ const DEFAULT_EXPANDED_TOOL_NAMES: Record<string, true> = {
   chatgptWebImageGenerate: true,
   openAIGptImageEdit: true,
   appDeploy: true,
-  ziweiChart: true,
   runStreamingAgent: true,
   read_x_post: true,
   ask_user: true,

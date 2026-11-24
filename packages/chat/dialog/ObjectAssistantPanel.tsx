@@ -23,11 +23,11 @@ import "./dialogStylexEscapeHatch.css";
 import {
   buildObjectAssistantRuntimeOptions,
   getObjectAssistantUiConfig,
-  getPreferredObjectAssistantKey,
   OBJECT_ASSISTANT_TO_SKILL,
   type ObjectAssistantKind,
 } from "./objectAssistantRegistry";
 import { buildBuiltinObjectSkillReference } from "ai/skills/builtinObjectSkills";
+import { buildSpecialistSkillReference } from "ai/skills/specialistSkills";
 
 interface ObjectAssistantPanelProps {
   kind: ObjectAssistantKind;
@@ -86,16 +86,20 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     }
   );
 
-  // app 分支保持原有预置 agent 逻辑不变；page/table/image/file 改用用户自己的
-  // agent（收藏 / 默认逻辑），不再现场创建 objectAssistant-<kind> 预置记录。
-  const preferredAgentKeys =
-    kind === "app" ? getPreferredObjectAssistantKey(kind, currentUser?.userId) : [];
+  // 五类对象助手统一走「用户当前选中的 Agent（收藏 / 默认）」：不再绑专用预置 agent，
+  // 空数组即交给 ArtifactAssistantPanel 的收藏/默认逻辑，也不在现场创建
+  // objectAssistant-<kind> 预置记录。
+  const preferredAgentKeys: string[] = [];
   const ui = getObjectAssistantUiConfig(kind);
 
-  // page/table/image/file 的对象技能作为对话级引用挂载：composer 切换到用户自己的 agent 后，
+  // 对象技能作为对话级引用挂载：composer 切换到用户自己的 agent 后，
   // 工具与操作指南（dialog.extraReferences）仍然生效。
+  // app 用专职内置 skill（app-builder）承载应用编辑能力，与其余四类的内置对象技能同构。
   const skillExtraReferences = useMemo(() => {
-    if (!currentUser?.userId || kind === "app") return undefined;
+    if (!currentUser?.userId) return undefined;
+    if (kind === "app") {
+      return [buildSpecialistSkillReference("app-builder", currentUser.userId)];
+    }
     return [buildBuiltinObjectSkillReference(OBJECT_ASSISTANT_TO_SKILL[kind], currentUser.userId)];
   }, [kind, currentUser?.userId]);
 

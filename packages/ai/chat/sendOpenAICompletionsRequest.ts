@@ -52,6 +52,7 @@ import { isAbortError } from "core/abortError";
 import { toErrorMessage } from "core/errorMessage";
 import { asOptionalTrimmedString } from "core/optionalString";
 import { extractCustomId } from "core/prefix";
+import { splitDialogKeyIdentity } from "core/dialogKeyIdentity";
 
 import { performFetchRequest } from "./fetchUtils";
 import { createSSEParser } from "./parseMultilineSSE";
@@ -1055,7 +1056,16 @@ export const sendOpenAICompletionsRequest = async ({
 }): Promise<CompletionMeta> => {
   const { dispatch, getState, signal: thunkSignal } = thunkApi;
 
-  const dialogId = extractCustomId(dialogKey);
+  // 对话身份取 core 的唯一真值解析（`splitDialogKeyIdentity`），不再用
+  // `extractCustomId`（= 「最后一个 '-' 之后」）：本地 CLI runtime 写入的是
+  // `crypto.randomUUID()` 形态 dialogId，按最后一段切会把 id 截成 12 位尾巴。
+  // 影响面（本函数内）：`msg:${dialogId}:${messageId}` 消息键、`createDialogMessageKeyAndId`，
+  // 以及一路传给工具执行（executeToolCall/toolThunks）/错误上报的 dialogId ——
+  // 服务端按 `dialog-<principal>-<dialogId>` 准入，截断后恒 403 dialog_not_owned。
+  // ULID / 历史非 ULID-UUID 形态下两者结果一致（core 的回退切法就是「最后一个 '-'」），
+  // 解析不出身份时保留旧切法，不新增抛错路径。
+  const dialogId =
+    splitDialogKeyIdentity(dialogKey)?.dialogId ?? extractCustomId(dialogKey);
   const controller = new AbortController();
   thunkSignal.addEventListener("abort", () => controller.abort());
   const signal = controller.signal;

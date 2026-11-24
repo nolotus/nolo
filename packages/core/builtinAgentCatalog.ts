@@ -104,14 +104,24 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   },
   {
     id: "01APPBUILDER00000001YAII3I",
+    // 2026-11 退场：应用构建能力已转为内置 skill（feedback / agent-creator /
+    // app-builder，见 ai/skills/specialistSkills.ts），入口统一走「用户当前
+    // 选中的 Agent + 对话级技能挂载」，不再需要专用预置 Agent。
+    // 保持 group: "builtin"（与 lifecycle 正交）以维持 BUILTIN_PLATFORM_AGENT_KEYS、
+    // 信任档与历史旧对话的回读/路由兼容；lifecycle=retired 让广场过滤掉它。
     group: "builtin",
+    lifecycle: "retired",
     name: "应用构建助手",
     provider: "nolo",
     model: "deepseek-flash",
   },
   {
     id: "01ECOMMERCEAG00000001PYQ2J",
+    // 已退场（淘宝/京东专用工具已下线）：group 与 lifecycle 正交——保持 builtin 组，
+    // 让 BUILTIN_PLATFORM_AGENT_KEYS / resolveAgentReadServers / 平台路由继续兼容
+    // 旧对话与硬 key 引用；lifecycle=retired 使 retiredCatalogIds() 在广场过滤它。
     group: "builtin",
+    lifecycle: "retired",
     name: "电商商品参数助手",
     // provider 必须是 "nolo"（平台托管命名空间）：平台价只注册在 nolo 下，
     // 写上游名 "openai" 会落零价虚拟模型（gpt-6-luna 在此口径下 cost=0 →
@@ -121,13 +131,22 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   },
   {
     id: "01NOLOAGENTCRT000000000001",
+    // AI 创建助手退场：能力转内置 skill agent-creator，入口走「用户当前选中的
+    // Agent + 对话级技能挂载」，保持 builtin 组做历史兼容。
     group: "builtin",
+    lifecycle: "retired",
     name: "AI 创建助手",
     provider: "nolo",
     model: "deepseek-flash",
   },
   {
     id: "01NOLOFEEDBACKA000000000R2",
+    // 刻意保持活跃、不退场（2026-11 复核）：反馈入口是**受控官方通道**——
+    // 服务端对「跨租户写用户反馈表」与「向管理员发紧急通知」有严格安全锁，
+    // 只豁免这个 key（tableToolHandlers / modelUsageToolHandlers 的
+    // 反馈入口白名单）。改成通用 Agent + feedback 技能会让普通用户写反馈报 403，
+    // 而给任意通用 Agent 打开跨租户写权限是不可接受的安全降级。
+    // 因此 app-builder / agent-creator 转内置 skill 退场，反馈入口继续在架。
     group: "builtin",
     name: "反馈入口",
     provider: "nolo",
@@ -135,7 +154,10 @@ export const BUILTIN_AGENT_CATALOG: BuiltinAgentCatalogEntry[] = [
   },
   {
     id: "01CHROMEOPR000000000001",
+    // 已退场：无生产 UI/路由入口；保持 builtin 组（同电商条目）以保留历史 key
+    // 的平台集群回读与路由，lifecycle=retired 保证广场不泄漏。
     group: "builtin",
+    lifecycle: "retired",
     name: "Chrome 操作员",
     provider: "nolo",
     model: "deepseek-flash",

@@ -16,9 +16,10 @@ export const TOOL_PACKS = {
   // search_all_spaces 已改为内置 skill（search-all-spaces），按需 loadSkill
   // 加载，不再随 CORE 常驻；全部视图（All View）运行时只给 recommended hint，
   // 不自动注入工具。search_workspace 保持常驻（分类视图的「当前空间」检索）。
-  // ask_user：Web/TUI 默认启用（CORE 常驻，用户可显式 disabledTools 关闭）；
-  // desktop 无交互通道，由 desktopAgentRuntimeTurnService.ts 经
-  // INTERACTION_REQUIRED_TOOL_NAMES 剥离。
+  // ask_user：Web 默认启用（CORE 常驻，用户可显式 disabledTools 关闭）；CLI/TUI
+  // 不再默认注入——它只在 agent 显式声明时出现在默认面之外（见
+  // packages/cli/client/localRuntimeTools.ts）。desktop 无交互通道，由
+  // desktopAgentRuntimeTurnService.ts 经 INTERACTION_REQUIRED_TOOL_NAMES 剥离。
   // show_interaction：Web/server 默认启用（CORE 常驻，轻量交互展示，非阻塞，
   // 用户可显式 disabledTools 关闭）。
   // queryModelUsage / queryUserGrowthReport：server-only 工具（web/CLI executor
@@ -62,6 +63,7 @@ export const TOOL_PACKS = {
     "execShell",
     "launchProcess",
     "listProcesses",
+    "readProcessOutput",
     "taskWait",
     "taskStop",
   ],
@@ -560,8 +562,9 @@ export function appendEnabledPackPromptPatches(
  *
  * 与 CORE 的区别：CORE 是「默认有、可关」，FORCED 是「CLI/桌面永远有」。
  *
- * 2026-08-25：ask_user 已重新加回 CORE——Web/TUI 默认启用（省去每个 agent 手写
- * "ask_user" 的 opt-in 开销），用户可在 agent 配置里显式 disabledTools 关闭。
+ * 2026-08-25：ask_user 曾加回 CORE——当时 Web/TUI 都默认启用；此后 CLI/TUI 已
+ * 撤出默认面（只在 agent 显式声明时挂载），Web 仍随 CORE 默认启用，用户可在
+ * agent 配置里显式 disabledTools 关闭。
  * desktop 端无交互通道，desktopAgentRuntimeTurnService.ts 经
  * INTERACTION_REQUIRED_TOOL_NAMES 剥离（见 agentRunIsolation.ts）。当前无强制工具。
  */

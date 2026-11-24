@@ -6,6 +6,7 @@
 import { findToolExecutor } from "ai/tools";
 import { getToolResultErrorData } from "ai/tools/toolResultError";
 import { stripModelToolArgs } from "ai/tools/stripModelConfirmationFlags";
+import { reportToolExecutionErrorInBackground } from "./toolErrorReport";
 
 interface ToolCall {
   id: string;
@@ -54,11 +55,19 @@ export async function executeToolCall(
     }
   })();
 
+  // 上报用的工具名列：能解析出执行器就报 canonicalName（与 toolThunks 的上报词表
+  // 一致），解析不到才退回模型给的原始名。模型会用别名（`exec_shell` / `bash` /
+  // `terminalCommand`…都由 `findToolExecutor` 归一成 `execShell`），若上报原始名，
+  // 同一工具会以两种名字入库，管理员侧的聚合与去重都会被拆成两拨。
+  // 只影响上报字段：控制台日志与返回文案保持原始名不变。
+  let reportedToolName = toolName;
+
   try {
     const toolDefinition = findToolExecutor(toolName);
     if (!toolDefinition) {
       return `[工具 "${toolName}" 未找到]`;
     }
+    reportedToolName = toolDefinition.canonicalName;
     const toolArgs = stripModelToolArgs(toolDefinition.canonicalName, parsedToolArgs);
     const result = await toolDefinition.executor(toolArgs, thunkApi, {
       parentMessageId: context?.parentMessageId ?? "",
@@ -82,6 +91,14 @@ export async function executeToolCall(
     return typeof raw === "string" ? raw : JSON.stringify(raw);
   } catch (err: any) {
     console.error(`[executeToolCall] tool "${toolName}" 执行失败:`, err);
+    // Web 端 best-effort 上报抛异常（不 await、不重试、失败不影响返回值）。
+    reportToolExecutionErrorInBackground({
+      thunkApi,
+      dialogId: context?.dialogId,
+      callId: tc.id,
+      toolName: reportedToolName,
+      error: err,
+    });
     const structured = getToolResultErrorData(err);
     if (structured?.rawData !== undefined) {
       const raw = structured.rawData;

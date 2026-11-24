@@ -100,53 +100,50 @@ export function buildStartAgentRunFunctionSchema(opts?: {
     return {
     name: "startAgentRun",
     description:
-        "启动一个 Agent 执行子任务。默认异步（fork+exec）：立即返回 runId 不阻塞对话；派发后先推进其它独立工作，再收尾等待终态通知，禁止轮询；controlAgentRun 用于控制（叫停/追加指令）与异常诊断。" +
-        "【派发纪律】同一轮应并发派发无真实依赖的多个 run；等待某个 run 的结果不得阻塞其它独立工作的推进。异步派发后，先继续推进本轮可执行的独立工作，再收尾等待终态；符合下述同步等待条件时仍可使用 wait:true。" +
-        "只有真实文件冲突/接口契约依赖/凭证或配额准入冲突/上游产物依赖才可串行（与系统提示「并行是默认」一致）。" +
-        "通道可用性仅对当次派发有效，派发前务必重新读取可用性，切勿复用此前失败结论；遇到 config_unresolved 类错误降级前重试一次；" +
-        "同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道）；未知凭证不假定相互独立，守卫仅限制这些候选彼此之间的同批并发，除非显式以 allowUnknownCredential 确认风险。无关通道与工作仍可并发。按任务能力与费用授权选择通道，不应仅因档位而预留通道。" +
+        "异步启动子任务并立即返回 runId；用 controlAgentRun 控制或诊断，勿轮询。" +
+        "同一轮应并发派发无真实依赖的多个 run；等待不得阻塞其它独立工作的推进。派发后先推进其它独立工作。" +
+        "派发前重查可用性；config_unresolved 降级前重试一次。同一凭证默认允许并发（受准入和限流约束）；仅确认凭证独立时用 allowUnknownCredential。" +
         (supportsWait
-            ? "要同步结果传 wait:true（会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且无并行工作；详见 wait 参数）。" +
-              "wait:true 时可用 resultMode 控制返回内容：full=完整输出；summary=只回头尾总结（防长输出撑爆上下文）。"
+            ? "符合下述同步等待条件时仍可使用 wait:true（冻结对话）：预计 <100s 且马上要用结果、用户明确要求同步、无并行工作可推进。resultMode：full=完整输出；summary=只回头尾总结。"
             : wakeEnabled
                 ? "只支持异步派发；run 到终态会自动通过 terminal wake 把父对话接回来；派发后先推进其它独立工作，再收尾等待唤醒，不要轮询"
                 : "只支持异步派发，startAgentRun 不提供同步等待；需要等终态时可用 controlAgentRun(wait)（若该 action 可用）；不要假设会自动 terminal wake"),
     parameters: {
         type: "object",
         properties: {
-            dimension: { type: "string", enum: ["general", "design_frontend", "writing"], default: "general", description: "任务领域优先于档位；仅供选人参考，不改变准入。" },
-            difficulty: { type: "string", description: "easy / normal / complex / extreme；默认 normal。已知跨档（所选 Agent 档位与 difficulty 不一致）且未给 selectionReason 时拒绝启动，同档或未知不拦；不自动换人。", default: "normal" },
-            selectionReason: { type: "string", description: "可选。跨档选择理由：所选 Agent 的模型档位与 difficulty 不一致时必须给出（如领域优势、用户指定）。只校验是否存在，不代表已核实真实性、用户授权或额度权限。", },
+            dimension: { type: "string", enum: ["general", "design_frontend", "writing"], default: "general", description: "任务领域，优先于档位；仅选人参考，不改变准入。" },
+            difficulty: { type: "string", description: "easy / normal / complex / extreme，默认 normal；所选 Agent 档位与之不一致（跨档）且未给 selectionReason 时拒绝启动，未知不拦。", default: "normal" },
+            selectionReason: { type: "string", description: "可选。跨档选择理由（如领域优势、用户指定）；只校验是否存在，不代表已核实真实性或授权。", },
             agentKey: {
                 type: "string",
                 description:
-                    "要启动的 Agent 可运行 dbKey，取自 listAgents / readAgent 的 agentKey（owned: agent-<userId>-<id>；public: agent-pub-<id>）；不接受 name/handle/bare id，省略或 'self' 表示当前 Agent。",
+                    "listAgents / readAgent 的 agentKey（agent-<userId>-<id> 或 agent-pub-<id>）；不接受 name/handle/裸 id，省略或 'self' 表示当前 Agent。",
             },
             task: {
                 type: "string",
                 description:
-                    "委托给该 Agent 的精简 brief。用共享引用（commit hash、路径:1-50、dialogId、artifact id）让子任务自行读取，严禁复制完整文件内容、全量 diff、长日志或仓库总说明。",
+                    "委托给该 Agent 的精简 brief。用共享引用（commit hash、路径:1-50、dialogId、artifact id）让子任务自读，不复制文件内容、diff、长日志或仓库说明。",
             },
             input: {
                 description:
-                    "可选。仅用于子任务无法通过本地文件或共享引用读取的真实外部输入（如 API 响应）；有共享引用时省略，不复制 task 内容。",
+                    "可选。仅子任务读不到的真实外部输入（如 API 响应）；有共享引用时省略，不复制 task 内容。",
             },
             agentName: {
                 type: "string",
-                description: "可选。覆盖运行卡片的 Agent 展示名；省略时按 agentKey 自动读取配置中的 name。",
+                description: "可选。覆盖运行卡片的展示名；省略取配置中的 name。",
             },
             title: {
                 type: "string",
                 description:
-                    `必填。子任务短标题（≤${RUN_TITLE_MAX} 字，一行，如「复审额度 diff」）；随运行记录持久化以区分并发 run，不得为空或仅空白。`,
+                    `必填。子任务短标题（≤${RUN_TITLE_MAX} 字，一行）；随运行记录持久化以区分并发 run，不得为空或纯空白。`,
             },
             workspaceIsolation: {
                 type: "string", enum: ["none", "auto"],
-                description: "可选。'none'（默认）原地启动；'auto'（仅 CLI 本地写型任务，readOnly=true 视为 'none'）为 Git 仓库建独立 worktree 并挂载依赖链接、为普通目录建轻量隔离副本（超限拒绝），返回 workspaceIsolation 元信息；服务端/沙盒不支持时报错。",
+                description: "可选。'none'（默认）原地启动；'auto' 为 Git 仓库建独立 worktree（挂依赖链接）、普通目录建轻量隔离副本（超限拒绝），仅 CLI 本地写型任务（readOnly=true 视为 'none'）；服务端/沙盒不支持时报错。",
             },
             cwd: {
                 type: "string",
-                description: "可选。子 run 工作目录（绝对路径），进程 cwd 与工具工作区都指向它（如派到另一 worktree）。只在 nolo CLI 本地路径生效，相对路径 / 不存在目录直接报错、不退化为默认目录；服务端派发收到即报错。不传沿用宿主 cwd。",
+                description: "可选。子 run 工作目录（绝对路径，如另一 worktree），进程 cwd 与工具工作区都指向它；仅 nolo CLI 本地生效，相对路径或不存在目录直接报错；服务端收到即报错；不传沿用宿主 cwd。",
             },
             // 刻意不向模型暴露 ephemeral：AI 不需要知道这个选项，不提供即默认持久化。
             // 非持久化 run 在失败/stall/输出被截断时不会留下任何可找回的结论，而
@@ -157,72 +154,71 @@ export function buildStartAgentRunFunctionSchema(opts?: {
             // Evidence never inherits a tier or bypasses selection_reason_required.
             continueDialogId: {
                 type: "string",
-                description: "可选。续跑当前用户已有的 dialog（不存在或不属于当前用户时显式报错，不新建）。仅用于同一定向闭合（核验上轮 finding），禁用于评审独立判断。必须显式传该 dialog 原本的 agentKey：省略会回落到当前编排者，等于换模型并作废其 prompt 缓存；确需换模型才传新 key 并说明理由。只有续跑才带此前对话历史；同一 agentKey 也不等于同一上下文。历史不可用则 run 直接失败（Strict continuation history load failed）。",
+                description: "可选。续跑当前用户已有的 dialog（不存在或非本人时显式报错，不新建），仅用于同一定向闭合，禁用于评审独立判断。必须显式传该 dialog 原本的 agentKey：省略会回落当前编排者，等于换模型并作废其 prompt 缓存。只有续跑才带此前对话历史；同一 agentKey 也不等于同一上下文。",
             },
             batchId: {
                 type: "string",
-                description: "可选。归组多个并行 run，供 controlAgentRun(list, batchId) 按批查询；未传时自动生成并随返回值带回。凭证隔离见 allowCredentialConcurrency。",
+                description: "可选。归组并行 run，供 controlAgentRun(list, batchId) 按批查询；未传自动生成并随返回值带回。",
             },
             credentialGroup: {
                 type: "string",
-                description: "可选。兼容 listAgents 的 credentialGroup 提示，非权威凭据身份：Web 守卫从应用配置的凭据 reference 解析，解析不到即未知（不视为独立），服务端仍做准入。",
+                description: "可选。listAgents 的 credentialGroup 提示，非权威身份：解析不到即未知（不视为独立）。",
             },
             allowUnknownCredential: {
                 type: "boolean",
-                description: "可选。显式确认「凭证归属未知」的并发风险后放行（等同 CLI --force-unknown-credential）；仅在确认两侧不共用上游凭证时使用。默认 false，未知凭证并发一律拒绝。",
+                description: "可选。显式确认「凭证归属未知」的并发风险后放行（同 CLI --force-unknown-credential）；默认 false，未知凭证并发拒绝。",
                 default: false,
             },
             allowCredentialConcurrency: {
                 type: "boolean",
                 description:
-                    "可选。同一凭证默认允许并发（受服务端准入预算约束；注意上游 429 限流，必要时降低并发或换通道），传 false 显式收紧为禁止同凭证并发。默认 true。",
+                    "可选。同一凭证默认允许并发；传 false 禁止同凭证并发。默认 true。",
                 default: true,
             },
             readOnly: {
                 type: "boolean",
                 description:
-                    "可选。为 true 时移除专用写/改/删工具（writeFile/editFile/deleteMemory 等），保留读取与 shell，适合 reviewer/审计。" +
-                    "shell 仍可写文件——不是沙箱，brief 仍需写明只读要求。默认 false；只由此参数显式声明，不从 task 文本推断。",
+                    "可选。true 时移除专用写/改/删工具（writeFile/editFile/deleteMemory 等），保留读取与 shell；shell 仍可写文件，不是沙箱。默认 false。" +
+                    "只由本参数声明，不从 task 文本推断。",
                 default: false,
             },
             trackTodo: {
                 type: "boolean",
-                description: "可选。为 true 时本次 run 记入 runtime todo（~/.nolo/todos.json），传了 batchId 时默认即记录；用 controlAgentRun(action:\"todo\") 查询。",
+                description: "可选。true 时记入 runtime todo（~/.nolo/todos.json），传 batchId 时默认记录；用 controlAgentRun(action:\"todo\") 查。",
             },
             ...(supportsWait
                 ? {
                       wait: {
                           type: "boolean",
                           description:
-                              "可选。为 true 时同步等待子任务完成并直接返回结果（订阅 SSE 等 done/failed），不返回 runId。" +
-                              "阻塞等待会冻结当前对话，仅限三种例外：① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 环境不支持终态唤醒且本轮无并行工作可推进。" +
-                              "默认 false（异步：返回 runId 后先推进其它独立工作，由宿主终态唤醒接回，不轮询）。",
+                              "可选。true 时同步等待并直接返回结果（订阅 SSE 等 done/failed），不返回 runId；" +
+                              "冻结对话，仅限 ①<100s 且马上要用 ②用户要求同步 ③无并行工作。默认 false（异步：返回 runId 后先推进其它独立工作，由宿主终态唤醒接回，不轮询）。",
                           default: false,
                       },
                       resultMode: {
                           type: "string",
                           enum: ["full", "summary"],
                           default: "full",
-                          description: "可选。full=完整输出；summary=只返回子任务总结（截断中间）。默认 full。",
+                          description: "可选。full=完整输出；summary=只返回子任务总结。默认 full。",
                       },
                   }
                 : {}),
             parentDialogId: {
                 type: "string",
-                description: "可选。父对话 id，用于建立父子对话归属关系。默认从运行时当前激活对话获取。",
+                description: "可选。父对话 id，默认取运行时当前对话。",
             },
-            imagePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, description: "本机 PNG/JPEG/WebP/GIF 绝对路径 1–4 张。仅 CLI host-local 执行器，须 runtimeKey=local、allowHostWrites=true；作首轮视觉输入，不传 URL/base64、不跨机上传。单图 2MiB、总 8MiB。" },
+            imagePaths: { type: "array", items: { type: "string" }, minItems: 1, maxItems: 4, description: "本机图片绝对路径 1–4 张（PNG/JPEG/WebP/GIF）；仅 CLI host-local，须 runtimeKey=local 且 allowHostWrites=true；作首轮视觉输入，不传 URL/base64；单图 2MiB、总 8MiB。" },
             runtimeKey: {
                 type: "string",
-                description: "可选。执行位置：listRuntimes 的稳定 key（local | server | machine:<machineId> | docker:<runtimeId> | instabox | gcp）。云后端按 run 计费（instabox 免费、gcp 按秒），点名即同意在该后端执行。填了只在那里执行；key 非法 / 未配置 / 机器离线或非本人所有时报错，不填用宿主默认。",
+                description: "可选。执行位置：listRuntimes 的 key（local | server | machine:<machineId> | docker:<runtimeId> | instabox | gcp）。云后端按 run 计费，点名即同意在该处执行；非法 / 未配置 / 机器离线或非本人所有时报错；不填用宿主默认。",
             },
             instaboxWorkspace: {
                 type: "string", enum: ["empty", "snapshot"],
-                description: "仅 runtimeKey=instabox 且仅本机 CLI 执行器支持，其他通道显式拒绝。默认 empty；snapshot 须提供 instaboxManifest。沙盒不兑现宿主 cwd，cwd + instabox 一律拒绝。",
+                description: "仅 runtimeKey=instabox 且本机 CLI；默认 empty，snapshot 须给 instaboxManifest。沙盒不兑现宿主 cwd，cwd + instabox 一律拒绝。",
             },
-            instaboxManifest: { type: "string", description: "snapshot 工作区的 manifest 文件路径；empty 不得提供。" },
-            instaboxArtifactDir: { type: "string", description: "宿主产物接收绝对路径；默认在本机 runs 下每次派发建独立 instabox-artifacts 目录。" },
-            instaboxAllowRemoteRelease: { type: "boolean", description: "显式允许远端释放；默认 false，不自动授权。" },
+            instaboxManifest: { type: "string", description: "snapshot 的 manifest 路径；empty 不得提供。" },
+            instaboxArtifactDir: { type: "string", description: "宿主产物接收绝对路径；默认在 runs 下每次派发建独立目录。" },
+            instaboxAllowRemoteRelease: { type: "boolean", description: "显式允许远端释放；默认 false。" },
             instaboxAllowPaid: { type: "boolean", description: "显式允许付费建机；默认 false，保留免费额度门禁。" },
             allowHostWrites: {
                 type: "boolean",

@@ -2459,12 +2459,6 @@ export default {
         loginRequired: "This content isn't visible via anonymous public access, or is temporarily unavailable. The current reader doesn't sign in, reuse accounts, or use cookies.",
         topComments: "Top comments",
       },
-      ziwei: {
-        openDoc: "Open document",
-        saveDoc: "Save",
-        savePrompt: "Save this chart",
-        saved: "Saved",
-      },
       create_agent_manual: "Create AI",
       newTable: "New Table",
     },
@@ -4886,12 +4880,6 @@ export default {
         loginRequired: "匿名公开访问不可见或暂不可用。当前读取器不会登录、复用账号或使用 cookie。",
         topComments: "热门评论",
       },
-      ziwei: {
-        openDoc: "打开文档",
-        saveDoc: "保存",
-        savePrompt: "保存这张命盘",
-        saved: "已保存",
-      },
       create_agent_manual: "创建AI",
       newTable: "新建表格",
     },
@@ -7304,12 +7292,6 @@ quickChat: {
         failedTitle: "小紅書帳號讀取失敗",
         loginRequired: "匿名公開訪問不可見或暫不可用。當前讀取器不會登入、复用帳號或使用 cookie。",
         topComments: "熱門評論",
-      },
-      ziwei: {
-        openDoc: "開啟文檔",
-        saveDoc: "儲存",
-        savePrompt: "儲存這張命盤",
-        saved: "已儲存",
       },
       create_agent_manual: "建立 AI",
       newTable: "新增表格",
@@ -9771,12 +9753,6 @@ quickChat: {
         loginRequired: "匿名の公開アクセスでは表示できないか、一時的に利用できません。現在のリーダーはログイン、アカウントの再利用、Cookie の使用を行いません。",
         topComments: "人気コメント",
       },
-      ziwei: {
-        openDoc: "ドキュメントを開く",
-        saveDoc: "保存",
-        savePrompt: "この命盤を保存",
-        saved: "保存しました",
-      },
       create_agent_manual: "AI を作成",
       newTable: "新しいテーブル",
     },
@@ -12201,12 +12177,6 @@ quickChat: {
             "loginRequired": "Dieser Inhalt ist über den anonymen öffentlichen Zugriff nicht sichtbar oder vorübergehend nicht verfügbar. Der aktuelle Reader meldet sich nicht an, verwendet keine Konten wieder und nutzt keine Cookies.",
             "topComments": "Top-Kommentare"
       },
-      "ziwei": {
-            "openDoc": "Dokument öffnen",
-            "saveDoc": "Speichern",
-            "savePrompt": "Dieses Diagramm speichern",
-            "saved": "Gespeichert"
-      },
       "create_agent_manual": "KI erstellen",
       "newTable": "Neue Tabelle"
 },
@@ -14630,12 +14600,6 @@ quickChat: {
             "failedTitle": "No se pudo cargar la cuenta de Xiaohongshu",
             "loginRequired": "Este contenido no es visible mediante acceso público anónimo o no está disponible temporalmente. El lector actual no inicia sesión, no reutiliza cuentas ni usa cookies.",
             "topComments": "Comentarios destacados"
-      },
-      "ziwei": {
-            "openDoc": "Abrir documento",
-            "saveDoc": "Guardar",
-            "savePrompt": "Guardar esta carta astral",
-            "saved": "Guardado"
       },
       "create_agent_manual": "Crear IA",
       "newTable": "Nueva tabla"

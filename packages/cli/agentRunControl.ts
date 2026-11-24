@@ -1,6 +1,7 @@
 import { attachMcpApprovalHost, type McpApprovalHost } from "./mcp/mcpApprovalTransport";
 import { getHostRuntimeExecutable, HOST_RUNTIME_CONTENT_IDENTITY, resolveExactRuntimeEntrypoint, RuntimeVersionMismatchError, AGENT_RUN_PROTOCOL, type RunStartupPhase } from "./agentRunProtocol";
 import type { SelectionCheck } from "../ai/agent/dispatchSelectionPolicy";
+import { resolveModelTier } from "../ai/agent/dispatchSelectionPolicy";
 import type { DispatchSpeedProvenance } from "../ai/agent/dispatchSpeedProvenance";
 import type { LocalRunAcceptance } from "./agentRunLocalWorkspace";
 import { attachShellApprovalHost, type ShellApprovalHost } from "./client/originShellApprovalTransport";
@@ -360,6 +361,20 @@ export type RunRecord = {
   /** Dispatch evidence only; never inherited as continuation admission. */
   cacheHitRatio?: number | null;
   cacheCachedTokens?: number | null;
+  /**
+   * 本 run 的输入 token 总量（`cacheUsage.input_tokens`，各次调用相加，含命中
+   * 部分）。缺省 = 未知（该 run 没有 provider 调用，或旧记录未写该字段）。
+   * 只读观测字段，不参与计费。
+   */
+  inputTokens?: number;
+  /** 本 run 的输出 token 总量（`cacheUsage.output_tokens`）。缺省 = 未知。 */
+  outputTokens?: number;
+  /**
+   * 本次 run 生效的模型档位：`selectionCheck.modelTier` 优先，否则按已解析的
+   * `model` 推导（ai/agent/dispatchSelectionPolicy）。缺省 = 未知（旧记录 /
+   * 无法判档的模型），绝不写 `"unknown"` 冒充已判档。
+   */
+  modelTier?: string;
   selectionCheck?: SelectionCheck;
   /** Timestamp the record was reconciled to a terminal status (orphaned). */
   reconciledAt?: string;
@@ -3051,6 +3066,19 @@ export function transitionRunToTerminal(
     if (update.cacheUsage) {
       record.cacheHitRatio = update.cacheUsage.cache_hit_ratio;
       record.cacheCachedTokens = update.cacheUsage.cached_tokens;
+      // 只读观测：token 总量与命中率同一次写入，缺失就保持未知（不填 0）。
+      if (typeof update.cacheUsage.input_tokens === "number") {
+        record.inputTokens = update.cacheUsage.input_tokens;
+      }
+      if (typeof update.cacheUsage.output_tokens === "number") {
+        record.outputTokens = update.cacheUsage.output_tokens;
+      }
+    }
+    // 生效档位：selectionCheck.modelTier（派发时的显式判定）优先；没有就按已
+    // 解析的 model 推导。推导结果是 "unknown" 且没有显式判定时省略字段。
+    const resolvedTier = record.selectionCheck?.modelTier ?? resolveModelTier(record.model);
+    if (resolvedTier !== "unknown" || record.selectionCheck?.modelTier) {
+      record.modelTier = resolvedTier;
     }
     record.endedAt = now().toISOString();
     let resultWriteFailed = false;
@@ -3099,6 +3127,9 @@ export function transitionRunToTerminal(
             cwd: record.cwd,
             continuedFrom: record.continuedFrom,
             ...(update.cacheUsage ? { cacheUsage: update.cacheUsage } : {}),
+            ...(typeof record.inputTokens === "number" ? { inputTokens: record.inputTokens } : {}),
+            ...(typeof record.outputTokens === "number" ? { outputTokens: record.outputTokens } : {}),
+            ...(record.modelTier ? { modelTier: record.modelTier } : {}),
           },
           update.lastAssistantText ?? "",
         );

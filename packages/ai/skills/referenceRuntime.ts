@@ -1,6 +1,7 @@
 import { asOptionalTrimmedString } from "core/optionalString";
 import { asNonEmptyStringArray } from "core/stringArray";
 import { resolvePageSkillMetadata } from "./skillDocProtocol";
+import { resolveSpecialistReferenceToolGrants } from "./specialistSkills";
 import { canonicalizeToolNames } from "ai/tools/toolNameAliases";
 
 export type SkillRuntimePageLike = {
@@ -9,7 +10,25 @@ export type SkillRuntimePageLike = {
   content?: string | null;
   meta?: unknown;
   tools?: string[];
+  [BUILTIN_SKILL_PAGE_MARKER]?: true;
 } | null;
+
+/**
+ * 「这一页由内置注册表可信合成」的运行时标记。
+ *
+ * 为什么需要：内置专职技能（app-builder / agent-creator）的能力包工具不在
+ * `skillConfig.toolNames` 里，只能在运行时按身份补齐。而 `page.title` /
+ * `skillConfig.name` 是**用户可编辑内容**——任何标题写成 "app-builder" 的普通
+ * DB 页面都能伪造这份授权。Symbol 键不随 JSON 序列化、DB 内容无法携带，只有
+ * `resolveBuiltinSkillPage` 这类合成路径能打上它，因此是唯一可信的授权来源。
+ */
+export const BUILTIN_SKILL_PAGE_MARKER: unique symbol = Symbol.for(
+  "nolo.builtinSkillPage",
+);
+
+export const isTrustedBuiltinSkillPage = (
+  page: SkillRuntimePageLike | null | undefined,
+): boolean => Boolean(page && page[BUILTIN_SKILL_PAGE_MARKER] === true);
 
 export type PageCapabilityExtraction = {
   directTools: string[];
@@ -81,6 +100,17 @@ export const extractRuntimePageCapabilities = (
   const directTools = asNonEmptyStringArray(content?.tools);
   const skillConfig = meta?.skillConfig;
   const skillTools = skillConfig?.toolNames ?? [];
+  // 内置专职技能（app-builder / agent-creator）的能力包工具不在
+  // skillConfig.toolNames 里（能力包持工具、skill 持协议，见
+  // builtinSkillRegistry 的 CAPABILITY_SLUG_COLLISIONS）。补齐只发生在
+  // **可信内置合成页**上：页面若来自用户 DB（标题/配置可任意编辑），一律不补。
+  const specialistTools = isTrustedBuiltinSkillPage(content)
+    ? resolveSpecialistReferenceToolGrants(skillConfig?.id, skillConfig?.name)
+    : [];
+  const hardSkillTools =
+    meta?.kind === "skill"
+      ? joinUniqueStrings(skillTools, specialistTools)
+      : [];
   const softSkillHints = asNonEmptyStringArray([
     skillConfig?.name,
     ...(meta?.recommendedSkills ?? []),
@@ -90,7 +120,7 @@ export const extractRuntimePageCapabilities = (
     directTools,
     hardSkillKeys: meta?.requiredSkills ?? [],
     softSkillKeys: meta?.recommendedSkills ?? [],
-    hardSkillTools: meta?.kind === "skill" ? skillTools : [],
+    hardSkillTools,
     softSkillHints,
     promptPatches: skillConfig?.promptPatch ? [skillConfig.promptPatch] : [],
     shouldUpgradeReference:
@@ -272,7 +302,22 @@ export async function resolveSkillGraphFromRoots(options: {
 
     const directTools = canonicalizeToolNames(page.tools ?? []);
     const skillTools = canonicalizeToolNames(meta?.skillConfig?.toolNames ?? []);
-    const mergedTools = joinUniqueStrings(directTools, skillTools);
+    // 续轮链路（服务端 agentRun + 客户端 streamAgentChatTurn 都走这里）只能看到
+    // 持久化的 dialog.extraReferences。内置专职技能的能力包工具不在
+    // skillConfig.toolNames 里，按页面身份补齐，否则第 2 轮起 app* / createAgent
+    // 等工具会静默消失。
+    // 授权来源必须可信：只有内置注册表合成的页面（Symbol 标记）才补齐；
+    // 用户 DB 页面哪怕 title / skillConfig.name 写成 "app-builder" 也不授权。
+    const specialistTools = isTrustedBuiltinSkillPage(page)
+      ? canonicalizeToolNames(
+          resolveSpecialistReferenceToolGrants(
+            canonicalIdentifier,
+            meta?.skillConfig?.id,
+            meta?.skillConfig?.name,
+          ),
+        )
+      : [];
+    const mergedTools = joinUniqueStrings(directTools, skillTools, specialistTools);
 
     target.visits.push({
       dbKey: page.dbKey,
