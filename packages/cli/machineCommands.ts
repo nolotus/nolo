@@ -35,6 +35,7 @@ import {
   createMachineToolInvokeHandlers,
   type MachineToolGrants,
 } from "./machineToolInvokeDispatch";
+import type { AttachedExecutionClientBridge } from "./attachedExecutionClientBridge";
 import {
   defaultConnectWebSocket,
   runHeartbeatLoop as defaultRunHeartbeatLoop,
@@ -55,21 +56,30 @@ type OutputLike = { write(chunk: string): unknown };
 // （agent.run / agent.run.cancel / connector.keepalive 等）原样交给
 // handleConnectorRunMessage。send 直接复用会话注入的 sender，回包
 // 格式由各自的 handler 决定（tool.invoke → tool.result）。
-type MachineWsMessageDemuxHandlers = {
+export type MachineWsMessageDemuxHandlers = {
   toolInvoke: {
     handleToolInvokeMessage: (
       message: string,
       send: (message: string) => void
     ) => Promise<string | null>;
   };
+  attachedExecution?: Pick<AttachedExecutionClientBridge, "handleWsMessage">;
 };
 
-async function handleMachineWsMessageDemux(
+export async function handleMachineWsMessageDemux(
   message: string,
   send: (message: string) => void,
   handlers: MachineWsMessageDemuxHandlers,
   runConnectorMessage: () => Promise<void>
 ) {
+  if (handlers.attachedExecution) {
+    try {
+      const handled = await handlers.attachedExecution.handleWsMessage(message, send);
+      if (handled) return;
+    } catch {
+      // execution.* 桥接器兜底吞错，绝不让单条帧击穿 WS 会话。
+    }
+  }
   try {
     const toolResult = await handlers.toolInvoke.handleToolInvokeMessage(message, send);
     if (toolResult !== null) return;
@@ -170,6 +180,7 @@ type MachineCommandDeps = {
   runHeartbeatLoop?: (options: HeartbeatLoopOptions) => Promise<void>;
   connectWebSocket?: (url: string, options: ConnectorWebSocketOptions) => Promise<void>;
   executeCli?: LocalCliExecutor;
+  attachedExecution?: Pick<AttachedExecutionClientBridge, "handleWsMessage">;
   validateWorkspaceLinks?: (cwd: string) => string[] | Promise<string[]>;
   spawnDaemon?: (args: {
     cmd: string[];
@@ -487,7 +498,10 @@ export async function runMachineConnectCommand(
           handleMachineWsMessageDemux(
             message,
             send,
-            { toolInvoke: toolInvokeHandlers },
+            {
+              toolInvoke: toolInvokeHandlers,
+              ...(deps.attachedExecution ? { attachedExecution: deps.attachedExecution } : {}),
+            },
             () =>
               handleConnectorRunMessage(
                 message,

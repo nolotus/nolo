@@ -1,4 +1,11 @@
 
+## 0.275.0-alpha.1 (2026-11-25)
+
+### Features
+
+* **agent-run:** add client execution bridge, cursor catch-up, and idempotent db batch contract ([bace172](https://github.com/nolotus/bun-nolo/commit/bace172e3562234e61cf5e718ed6af15042277e5))
+
+
 ## 0.274.0-alpha.1 (2026-11-25)
 
 ### Features
