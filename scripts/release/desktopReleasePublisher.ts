@@ -12,6 +12,7 @@ import {
 } from "../../packages/app/constants/desktopReleaseManifest";
 import { compareDesktopVersions } from "../../packages/core/desktop/desktopUpdatePolicy";
 import { DESKTOP_APP_VERSION } from "../../packages/desktop/desktopVersion";
+import { isDesktopUpdateManifestUploadName } from "../../packages/desktop/scripts/checksumSidecar";
 import {
   buildS3ObjectUrl,
   getS3ObjectSizeByRange,
@@ -840,7 +841,9 @@ export async function resolveDesktopPublishTargets(args: {
         uploadName,
         required: false,
         minBytes: 1,
-        ...(aliasUploadName ? { aliasUploadName } : {}),
+        // 文件本身已经是固定名时，别名与 uploadName 相同：这不是「重名冲突」，
+        // 也不能登记成第二个上传项，否则计划去重会把合法计划判成歧义。
+        ...(aliasUploadName && aliasUploadName !== uploadName ? { aliasUploadName } : {}),
       };
     });
 
@@ -859,7 +862,104 @@ export async function resolveDesktopPublishTargets(args: {
     }
   }
 
+  // 歧义必须在「可选件过滤掉与主件/alias 同名项」之前判定：否则跨目录同名文件会被
+  // 静默丢弃，导致「闸门校验的那份」和「实际上传的那份」不是同一个文件。
+  assertNoAmbiguousUploadSources({ primary, optional });
+
   return { primary, optional };
+}
+/**
+ * 远端对象名 → 它在发布计划里的角色。更新清单的 `artifact.file` 可能是版本化主件名
+ * （"primary"）、主件的固定名 alias（"alias"），或 optional 里的更新包（"optional"，
+ * 例如 Windows stable 的主件是 .exe、更新包是 `stable-win-x64-NoloDesktop-stable.tar.zst`）。
+ * 发布脚本据此决定是否需要把被引用对象提前到清单之前上传。
+ */
+export function buildDesktopUploadKindIndex(args: {
+  primary: readonly { uploadName: string; aliasUploadName?: string }[];
+  optional: readonly { uploadName: string; aliasUploadName?: string }[];
+}): Map<string, "primary" | "alias" | "optional"> {
+  const index = new Map<string, "primary" | "alias" | "optional">();
+  for (const target of args.primary) {
+    index.set(target.uploadName, "primary");
+    if (target.aliasUploadName) index.set(target.aliasUploadName, "alias");
+  }
+  for (const target of args.optional) {
+    if (!index.has(target.uploadName)) index.set(target.uploadName, "optional");
+    // optional 也可能带 alias（deb/rpm/安装器 tar.gz 的固定名），同样要在校验里可解析。
+    if (target.aliasUploadName && !index.has(target.aliasUploadName)) {
+      index.set(target.aliasUploadName, "alias");
+    }
+  }
+  return index;
+}
+
+/**
+ * 远端对象名 → 唯一来源，**在 optional 过滤之前**判定。
+ *
+ * 之前在「可选件过滤掉与主件/alias 同名的文件」之后才检查，于是跨目录的同名文件会被
+ * 静默丢弃：计划留下 A 目录的包，而边车闸门校验的是 B 目录那份，字节可能不同。
+ * 同一个物理文件重复出现（路径相同）不算歧义；其余同名一律 fail closed。
+ */
+export function assertNoAmbiguousUploadSources(args: {
+  primary: readonly { uploadName: string; aliasUploadName?: string; sourcePath: string }[];
+  optional: readonly { uploadName: string; sourcePath: string }[];
+}): void {
+  const claimed = new Map<string, string>();
+  const claim = (uploadName: string, sourcePath: string) => {
+    const key = uploadName.toLowerCase();
+    const resolved = resolve(sourcePath);
+    const previous = claimed.get(key);
+    if (previous && previous !== resolved) {
+      throw new Error(
+        `ambiguous desktop upload name ${uploadName}: ${previous} and ${sourcePath}`,
+      );
+    }
+    claimed.set(key, resolved);
+  };
+  for (const target of args.primary) {
+    claim(target.uploadName, target.sourcePath);
+    if (target.aliasUploadName) claim(target.aliasUploadName, target.sourcePath);
+  }
+  for (const target of args.optional) claim(target.uploadName, target.sourcePath);
+}
+
+/**
+ * 同一个远端对象名只能有一个来源。CI 按平台把产物下载到不同子目录时，两个目录里
+ * 同名但内容不同的清单/更新包会让「校验的」和「实际上传的」不是同一份；发布计划
+ * 必须在动手之前 fail closed，而不是靠上传循环的先后顺序去赌。
+ */
+export function assertUniqueDesktopUploadNames(
+  targets: readonly { uploadName: string; sourcePath: string }[],
+): void {
+  const seen = new Map<string, string>();
+  for (const target of targets) {
+    const key = target.uploadName.toLowerCase();
+    const previous = seen.get(key);
+    if (previous) {
+      throw new Error(
+        `ambiguous desktop upload name ${target.uploadName}: ${previous} and ${target.sourcePath}`,
+      );
+    }
+    seen.set(key, target.sourcePath);
+  }
+}
+
+/**
+ * 上传顺序（Electrobun 2.0.7 的发布契约）：先上更新包与 `*-checksum.json` 边车，
+ * `*-update.json` manifest 最后上。覆盖发布期间若 manifest 先到、边车还是旧的，
+ * 2.0.7 客户端会按旧边车校验新包而拒绝更新；见上游
+ * docs/src/content/docs/electrobun/guides/updates.mdx（publish packages and
+ * sidecars first, then the manifest）。
+ *
+ * 顺序内再按文件名排序，让上传计划可复现（readdir 顺序不保证稳定）。
+ */
+export function orderDesktopUploadsForPublish<T extends { uploadName: string }>(
+  targets: readonly T[],
+): T[] {
+  const rank = (uploadName: string) => (isDesktopUpdateManifestUploadName(uploadName) ? 1 : 0);
+  return [...targets].sort(
+    (a, b) => rank(a.uploadName) - rank(b.uploadName) || a.uploadName.localeCompare(b.uploadName),
+  );
 }
 
 export async function resolveDesktopReleaseUploadPlan(args: {
@@ -942,10 +1042,33 @@ export async function resolveDesktopReleaseUploadPlan(args: {
   postManifestUploadNames.push(legacyManifestUploadName);
   requiredUploadNames.push(channelManifestUploadName, legacyManifestUploadName);
 
+  // 同名对象只能来自一个文件：否则「发布前校验的那份」和「实际上传的那份」可能不同。
+  assertUniqueDesktopUploadNames([
+    ...primary.map((target) => ({ uploadName: target.uploadName, sourcePath: target.sourcePath })),
+    ...primary
+      .filter((target) => Boolean(target.aliasUploadName))
+      .map((target) => ({
+        uploadName: target.aliasUploadName as string,
+        sourcePath: target.sourcePath,
+      })),
+    ...optionalUploadPlan.map((target) => ({
+      uploadName: target.uploadName,
+      sourcePath: target.sourcePath,
+    })),
+    // optional 的固定名 alias 也要参与去重：两份不同版本的 .deb 会映射到同一个
+    // `nolo-desktop-*_amd64.deb`，不拦下来就会出现「同一远端名上传两次、后者覆盖前者」。
+    ...optionalUploadPlan
+      .filter((target) => Boolean(target.aliasUploadName))
+      .map((target) => ({
+        uploadName: target.aliasUploadName as string,
+        sourcePath: target.sourcePath,
+      })),
+  ]);
+
   return {
     ...targets,
     primary,
-    optional: optionalUploadPlan,
+    optional: orderDesktopUploadsForPublish(optionalUploadPlan),
     updateMetadata,
     requiredUploadNames,
     preManifestUploadNames,

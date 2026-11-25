@@ -11,6 +11,7 @@ import Button from "render/web/ui/Button";
 import ImagePreviewFetcher from "../components/ImagePreviewFetcher";
 
 interface SpaceContentOverlaysProps {
+  spaceId?: string;
   showBackToTop: boolean;
   onBackToTop: () => void;
   t: TFunction;
@@ -27,6 +28,7 @@ interface SpaceContentOverlaysProps {
 }
 
 const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
+  spaceId,
   showBackToTop,
   onBackToTop,
   t,
@@ -90,6 +92,7 @@ const SpaceContentOverlays: React.FC<SpaceContentOverlaysProps> = ({
       {previewItem && previewIsImage && (
         <ImagePreviewFetcher
           contentKey={previewItem.contentKey}
+          spaceId={spaceId}
           onClose={onClosePreview}
           alt={previewItem.title}
         />

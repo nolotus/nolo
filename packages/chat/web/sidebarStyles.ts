@@ -102,18 +102,28 @@ export const sidebarStyles = stylex.create({
     textAlign: "start",
     cursor: "pointer",
   },
-  workSpaceMore: {
+  /** 空间标题行右侧的图标按钮：更多（…）与本地新建（+）共用同一几何与配色。 */
+  workSpaceRowAction: {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
     width: "var(--sidebar-icon-size)",
-    height: "var(--sidebar-row-height)",
+    height: "var(--sidebar-icon-size)",
     borderWidth: 0,
+    borderRadius: "4px",
     padding: 0,
     backgroundColor: "transparent",
-    color: "var(--textSecondary)",
+    color: "var(--textTertiary)",
     cursor: "pointer",
+    ":hover": {
+      backgroundColor: "var(--backgroundTertiary)",
+      color: "var(--text)",
+    },
+    ":focus-visible": {
+      backgroundColor: "var(--backgroundTertiary)",
+      color: "var(--text)",
+    },
   },
   workSpaceBadge: {
     flexShrink: 0,
@@ -1054,5 +1064,32 @@ export const sidebarStyles = stylex.create({
   },
   sidebarUserSectionDropdownMenu: {
     minWidth: "250px",
+  },
+  workDialogShowMoreButton: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: "100%",
+    minHeight: "28px",
+    marginTop: "var(--space-1)",
+    padding: "4px var(--sidebar-row-pad)",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: "var(--borderSubtle)",
+    borderRadius: "var(--radius-sm)",
+    backgroundColor: "transparent",
+    color: "var(--textSecondary)",
+    fontSize: "var(--fontSize-xs)",
+    fontWeight: 500,
+    cursor: "pointer",
+    transition: "background-color 0.15s ease, color 0.15s ease",
+    ":hover": {
+      backgroundColor: "var(--backgroundHover)",
+      color: "var(--text)",
+    },
+    ":focus-visible": {
+      outline: "none",
+      boxShadow: "0 0 0 2px var(--focusRing, var(--primary))",
+    },
   },
 });

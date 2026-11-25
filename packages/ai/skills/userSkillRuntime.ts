@@ -17,7 +17,7 @@ import {
   buildAgentSkillPreferenceDiagnostic,
   reportAgentSkillPreferenceDiagnostic,
 } from "./agentSkillPreferenceDiagnostics";
-import type { PromptSkillConfigSource } from "./userPromptSkills";
+import type { PromptSkillConfigSource } from "./userPromptSkillSlugs";
 import { isAccountOnDemandWorkflowSkill, resolveUserEnabledSkills } from "./userSkills";
 
 /** Account contributions only; callers merge these before tool admission. */

@@ -14,8 +14,12 @@ import { config, timestamp, publicPath, webEdition, outdir } from "./esbuild.con
 import { shouldPrecompressWebAssets } from "./webBuildPolicy";
 import { publishDevWebBuildSignal } from "./devAssetManifest.js";
 import { copyRouteStyles } from "./routeStyles.js";
-import { collectStaticImportClosure, toPublicUrl } from "./staticImportClosure.js";
-import { resources as i18nResources } from "../../packages/app/i18n/i18n.config";
+import {
+  collectStaticImportClosure,
+  resolvePreloadBudget,
+  toPublicUrl,
+} from "./staticImportClosure.js";
+import { writeClientLocaleFiles } from "./clientLocaleFiles.js";
 
 const require = createRequire(import.meta.url);
 const esbuild = require("esbuild");
@@ -42,7 +46,6 @@ function resolveBrotliQuality() {
 }
 const ASSET_BUILD_MANIFEST_DIR = "public/.asset-builds";
 const ASSET_OUTPUT_DIR = outdir;
-const CLIENT_LOCALE_OUTPUT_DIR = "public/locales";
 const PDF_WORKER_SOURCE = (() => {
   try {
     return require.resolve("pdfjs-dist/build/pdf.worker.mjs");
@@ -53,6 +56,10 @@ const PDF_WORKER_SOURCE = (() => {
 const PDF_WORKER_OUTPUT = "public/assets/pdf.worker.mjs";
 const COMPRESS_MIN_BYTES = 1024;
 const COMPRESSIBLE_OUTPUT_RE = /\.(?:js|css|json|svg)$/i;
+
+// SSR modulepreload 预算（2026-11-19 线上实测）：无限制展开 entry 静态闭包会把 88–91 个
+// chunk 全部写进 <head> 的 modulepreload，首屏 800ms 内发起 95 个请求 / 605KB，FCP 2.7s
+// 而 TTFB 只有 0.7s。解析逻辑与默认值在 staticImportClosure.js（单一真值，可单测）。
 // StyleX 启用后 dev/prod 都会生成 metafile（供插件定位 CSS asset），
 // 但 meta.json 落盘不应随之下放：dev 无消费方且文件多 MB，还会覆盖生产 meta.json，
 // 因此 dev 恒跳过写盘（保持 StyleX 引入前的行为）。
@@ -79,6 +86,33 @@ const measureTime = async (label, action) => {
  * - public/assets/entry-xxx.js
  * - public/assets/entry-xxx.css
  */
+
+const defaultRouteEntryPoint = "packages/app/web/routes.tsx";
+
+// Keep the BFS prefix, dropping empty stubs before trimming any real chunks.
+export const reserveRoutePreload = (
+  outputs, entryPreloads, routePath, { maxFiles, maxBytes }, preserveEntryBytes = false
+) => {
+  const [entry, ...staticPreloads] = entryPreloads;
+  if (!entry) return null;
+  const route = toPublicUrl(routePath);
+  const size = (href) => outputs[href.slice(1)]?.bytes ?? 0;
+  const routeBytes = size(route);
+  const entryBytes = size(entry);
+  if (maxFiles < 2 || routeBytes <= 0 || entryBytes + routeBytes > maxBytes) return null;
+
+  const candidates = staticPreloads.filter((href) => href !== route && size(href) > 0);
+  let bytes = candidates.reduce((sum, href) => sum + size(href), entryBytes + routeBytes);
+  // The public homepage must not grow its preload payload to fit its larger route.
+  const budget = preserveEntryBytes
+    ? Math.min(maxBytes, Math.max(entryBytes + routeBytes,
+        entryPreloads.reduce((sum, href) => sum + size(href), 0)))
+    : maxBytes;
+  while (bytes > budget || candidates.length + 2 > maxFiles) {
+    bytes -= size(candidates.pop());
+  }
+  return [entry, route, ...candidates];
+};
 
 const getEntryFiles = (metafile) => {
   const entryFiles = {
@@ -116,7 +150,16 @@ const getEntryFiles = (metafile) => {
     if (path.endsWith(".js")) {
       // 示例：public/assets/entry-xxx.js → /public/assets/entry-xxx.js
       entryFiles.js = "/" + path;
-      entryFiles.entryPreloads = collectStaticImportClosure(metafile.outputs, path);
+      const preloadBudget = resolvePreloadBudget();
+      entryFiles.entryPreloads = collectStaticImportClosure(metafile.outputs, path, preloadBudget);
+      const routePath = (output.imports || []).find(
+        ({ kind, path: importedPath }) => kind === "dynamic-import" &&
+          metafile.outputs[importedPath]?.entryPoint === defaultRouteEntryPoint
+      )?.path;
+      const preloads = routePath && reserveRoutePreload(
+        metafile.outputs, entryFiles.entryPreloads, routePath, preloadBudget, true
+      );
+      entryFiles.entryPreloadsBySite = preloads ? { default: preloads } : {};
     } else if (path.endsWith(".css")) {
       entryFiles.css = "/" + path;
     }
@@ -349,18 +392,6 @@ const copyPdfWorker = async () => {
   await copyFile(PDF_WORKER_SOURCE, PDF_WORKER_OUTPUT);
 };
 
-const writeClientLocaleFiles = async () => {
-  await mkdir(CLIENT_LOCALE_OUTPUT_DIR, { recursive: true });
-  await Promise.all(
-    Object.entries(i18nResources).map(([language, namespaces]) =>
-      writeFile(
-        `${CLIENT_LOCALE_OUTPUT_DIR}/${encodeURIComponent(language)}.json`,
-        JSON.stringify(namespaces)
-      )
-    )
-  );
-};
-
 // -----------------------------
 // 主构建流程
 // -----------------------------
@@ -419,6 +450,7 @@ export const runMetaBuild = async () => {
     artifactRuntimePreloads: assets.artifactRuntimePreloads,
     // 可选字段：缺失时 SSR 退回只预加载 entry 本身
     entryPreloads: assets.entryPreloads || [],
+    entryPreloadsBySite: assets.entryPreloadsBySite,
 
     // 版本 / 构建信息
     timestamp,

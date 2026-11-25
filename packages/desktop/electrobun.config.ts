@@ -4,14 +4,20 @@ import { DESKTOP_APP_VERSION } from "./desktopVersion";
 import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
 
 /**
- * Minimum supported electrobun: 2.0.6.
+ * Minimum supported electrobun: 2.0.7.
  *
  * 2.0.2 first carried the upstream fix that makes the native websocket server
  * fall through to the next free port instead of crashing on Windows "port
- * already in use" (TCP 50000). We now require 2.0.6 because that is the
+ * already in use" (TCP 50000). We now require 2.0.7 because that is the
  * release we pin, build and test against: its bootstrap pairs with hutch
- * 0.29.0 / cottontail 0.7.3, and its devkit is the one projected into
- * `.hutch/devkit`.
+ * 0.30.0 / cottontail 0.7.3 (build) and cottontail 0.7.8 (app runtime), and
+ * its devkit is the one projected into `.hutch/devkit`.
+ *
+ * 2.0.7 moved update checking, download, preparation and apply handoff into
+ * the native core, and made checksum validation strict: `<channel>-<os>-<arch>
+ * -checksum.json` must agree with the release manifest hash, and inline
+ * `artifact.tarSha256` / `artifact.tarSize` still count when present. Legacy
+ * hosts that publish neither keep the pre-2.0.7 behavior.
  *
  * Release archives must stay extractor-compatible — the installer/updater
  * extractor cannot read GNU longname records — so every upstream bump has to
@@ -23,12 +29,15 @@ import { resolveMacSigningPlan } from "./scripts/macSigningPlan";
  * `desktop:build:alpha` completes and the payload extractor-compat gate
  * passes for both final artifacts (tar.zst and Setup.tar.gz); the installed
  * canary build boots to the main window (~2.2s) and the app was accepted for
- * interactive use.
+ * interactive use. The 2.0.7 bump was verified with `build:local`
+ * (`NOLO_DESKTOP_SKIP_PATCH=1 NOLO_DESKTOP_SKIP_DMG=1 electrobun build
+ * --env=canary`) on Linux x64: build and payload gate passed, while
+ * install/boot and update E2E were not re-measured.
  *
  * The npm dependency AND the `electrobun.version` pin in `hutch.config.ts`
  * must move together: the npm package version decides which Hutch release
  * the bootstrap downloads, the pin decides which devkit Hutch projects.
- * Do not lower either below 2.0.6.
+ * Do not lower either below 2.0.7.
  */
 
 /**

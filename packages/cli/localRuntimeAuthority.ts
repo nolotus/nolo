@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
+import type { SecureContextOptions } from "node:tls";
 
 import { toErrorMessage } from "core/errorMessage";
 import {
@@ -10,9 +11,8 @@ import {
   isCliAuthorityBrokerUnavailableError,
 } from "../database-engine/cliAuthorityBrokerClient";
 import type { CliAuthorityBrokerClientOptions } from "../database-engine/cliAuthorityBrokerClient";
-import {
-  getOrCreateCliAuthorityBrokerServer,
-} from "../database-engine/cliAuthorityBrokerServer";
+import { startCliAuthorityBrokerProcess } from "./cliAuthorityBrokerProcess";
+import { loadCliAuthorityBrokerTls } from "./cliAuthorityBrokerTls";
 import type { CliAuthorityBrokerServerOptions } from "../database-engine/cliAuthorityBrokerServer";
 import {
   resolveCliAuthorityBrokerEndpoint,
@@ -26,7 +26,6 @@ import type {
   AuthorityIteratorOptions,
   AuthorityStore,
 } from "../database-engine/authorityStoreTypes";
-import { createLevelAuthorityStore } from "../database-engine/levelAuthorityStore";
 import { createLegacyServerDb } from "../database-engine/legacyServerDb";
 
 type EnvLike = Record<string, string | undefined>;
@@ -113,8 +112,9 @@ function isTransientBrokerOpenError(error: unknown): boolean {
 
 type CliAuthorityBrokerConnectDeps = {
   createClient: (options: CliAuthorityBrokerClientOptions) => AuthorityStore;
-  startBroker: (options: CliAuthorityBrokerServerOptions) => Promise<unknown>;
+  startBroker: (options: Omit<CliAuthorityBrokerServerOptions, "createStore">) => Promise<unknown>;
   sleep: (ms: number) => Promise<void>;
+  verifyBroker?: (args: { endpoint: string; metadataPath: string; dbPath: string }, liveLocation?: string) => void;
   /**
    * PERF: 快速路径开关——先尝试直接 open 连到已有 broker，跳过 startBroker
    * 的 LevelDB open + lock 检测。生产默认 true；测试 mock 的 open 不做真实
@@ -129,16 +129,40 @@ type CliAuthorityBrokerConnectDeps = {
 
 const defaultCliAuthorityBrokerConnectDeps: CliAuthorityBrokerConnectDeps = {
   createClient: (options) => createCliAuthorityBrokerClient(options),
-  startBroker: (options) => getOrCreateCliAuthorityBrokerServer(options),
+  startBroker: startCliAuthorityBrokerProcess,
   sleep,
   useFastPath: true,
 };
+
+function verifyBrokerDatabase(args: { endpoint: string; metadataPath: string; dbPath: string }, liveLocation?: string) {
+  const expected = fs.existsSync(args.dbPath)
+    ? fs.realpathSync(args.dbPath)
+    : path.join(fs.realpathSync(path.dirname(args.dbPath)), path.basename(args.dbPath));
+  if (typeof liveLocation !== "string" || fs.realpathSync(liveLocation) !== expected) {
+    throw new Error(`Authority broker at ${args.endpoint} does not match the requested database ${args.dbPath}`);
+  }
+}
+
+function findLegacyBrokerOwner(args: { endpoint: string; metadataPath: string; dbPath: string }): number | undefined {
+  try {
+    const metadata = JSON.parse(fs.readFileSync(args.metadataPath, "utf8"));
+    const owner = JSON.parse(fs.readFileSync(`${args.dbPath}.owner`, "utf8"));
+    if (metadata.transportSecurity !== undefined || metadata.supervisorPid !== undefined || metadata.endpoint !== args.endpoint ||
+        !Number.isInteger(metadata.pid) || metadata.pid <= 0 || owner.pid !== metadata.pid ||
+        fs.realpathSync(metadata.location) !== fs.realpathSync(args.dbPath)) return undefined;
+    process.kill(metadata.pid, 0);
+    return metadata.pid;
+  } catch {
+    return undefined;
+  }
+}
 
 export async function connectCliAuthorityBroker(args: {
   endpoint: string;
   metadataPath: string;
   healthPath: string;
   dbPath: string;
+  tls?: SecureContextOptions;
   deps?: Partial<CliAuthorityBrokerConnectDeps>;
 }) {
   const deps: CliAuthorityBrokerConnectDeps = {
@@ -147,9 +171,15 @@ export async function connectCliAuthorityBroker(args: {
   };
 
   async function connectClient() {
+    const invoke = createCliAuthorityBrokerSocketInvoker({ endpoint: args.endpoint, tls: args.tls });
     const client = deps.createClient({
       endpoint: args.endpoint,
-      invoke: createCliAuthorityBrokerSocketInvoker({ endpoint: args.endpoint }),
+      invoke: async (request) => {
+        if (request.type !== "status" || !deps.verifyBroker) return invoke(request);
+        const response = await invoke({ type: "status", includeLocation: true });
+        if (response.ok && response.result.type === "status") deps.verifyBroker(args, response.result.location);
+        return response;
+      },
     });
 
     const backoffSchedule = deps.attachBackoffMs?.length
@@ -208,7 +238,6 @@ export async function connectCliAuthorityBroker(args: {
         metadataPath: args.metadataPath,
         healthPath: args.healthPath,
         dbPath: args.dbPath,
-        createStore: () => createLevelAuthorityStore(args.dbPath),
       });
       await client.open();
       return client;
@@ -227,7 +256,6 @@ export async function connectCliAuthorityBroker(args: {
             metadataPath: args.metadataPath,
             healthPath: args.healthPath,
             dbPath: args.dbPath,
-            createStore: () => createLevelAuthorityStore(args.dbPath),
           });
           await client.open();
           return client;
@@ -247,12 +275,21 @@ export async function connectCliAuthorityBroker(args: {
         }
       }
       const lastMessage = toErrorMessage(lastError);
-      const attachMessage = lastAttachError ? toErrorMessage(lastAttachError) : "";
+      const attachCause = lastAttachError instanceof Error ? lastAttachError.cause : undefined;
+      const attachMessage = lastAttachError
+        ? [toErrorMessage(lastAttachError), ...(attachCause ? [toErrorMessage(attachCause)] : [])].join(" / ")
+        : "";
       const portInUse = (
         lastError !== null && typeof lastError === "object" &&
         "code" in lastError && lastError.code === "EADDRINUSE"
       ) || /EADDRINUSE/i.test(lastMessage);
       const ownerPid = findOwnerPid(lastError);
+      const legacyOwner = args.tls ? findLegacyBrokerOwner(args) : undefined;
+      if (legacyOwner !== undefined) {
+        throw new Error(`CLI authority broker upgrade requires exit of the previous Nolo process (PID ${legacyOwner}). Close its Nolo window or let it finish, then retry. The new broker will reopen the same database.`, {
+          cause: lastError,
+        });
+      }
       let detail = "";
       if (portInUse) {
         detail = `: EADDRINUSE (${lastMessage}). The broker endpoint is already in use; check the process using it or set NOLO_CLI_AUTHORITY_BROKER_PORT to a free port for all local CLI processes`;
@@ -395,8 +432,10 @@ export async function getDefaultCliLocalRuntimeAuthority(
   // broker to a different home than the rest of the CLI uses. An explicit
   // NOLO_HOME in the caller's env still wins.
   const ambientNoloHome = process.env.NOLO_HOME?.trim();
+  const ambientBrokerPort = process.env.NOLO_CLI_AUTHORITY_BROKER_PORT?.trim();
   const env = {
     ...(ambientNoloHome ? { NOLO_HOME: ambientNoloHome } : {}),
+    ...(ambientBrokerPort ? { NOLO_CLI_AUTHORITY_BROKER_PORT: ambientBrokerPort } : {}),
     ...(options.env ?? process.env),
   };
   const dbPath = resolveCliLocalRuntimeDbPath({
@@ -424,6 +463,8 @@ export async function getDefaultCliLocalRuntimeAuthority(
     metadataPath,
     healthPath,
     dbPath,
+    tls: await loadCliAuthorityBrokerTls(metadataPath),
+    deps: { verifyBroker: verifyBrokerDatabase },
   });
 }
 

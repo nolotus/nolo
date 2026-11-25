@@ -120,6 +120,22 @@ export const toolStrings = {
     en: "[nolo] Tool execution location: unknown",
     zh: "[nolo] 工具执行位置：未知",
   },
+  runGroupHeader: {
+    en: "{0} commands (✓ {0}{1})",
+    zh: "连续执行 {0} 条命令（✓ {0}{1}）",
+  },
+  runGroupCollapsed: {
+    en: "{0} earlier collapsed (/tools for details)",
+    zh: "已折叠前 {0} 条（/tools 查看完整命令）",
+  },
+  runGroupFinal: {
+    en: "{0} commands (✓ {0}{1} · /tools for details)",
+    zh: "本轮执行 {0} 条命令（✓ {0}{1} · /tools 查看详情）",
+  },
+  runGroupTiming: {
+    en: ", {0}",
+    zh: "，耗时 {0}",
+  },
   exploreSummary: {
     en: "Explored {0} · {1}",
     zh: "已探查 {0} 项 · {1}",

@@ -94,6 +94,8 @@ export const HIGH_RISK_MUTATION_TOOL_NAMES = [
   // 硬边界：它永不进 DEFAULT_PRIVATE_NOLO_WORKSPACE_TOOLS（见该清单注释），
   // 必须由 agent 显式启用才出现；这里进名单保证只读 run 即使被显式要求也拿不到。
   "cloud_exec",
+  // Sandbox 产物持久化提交：会写入 Space / 用户持久存储，只读 run 不允许调用。
+  "commitSandboxArtifact",
 ] as const;
 
 /**

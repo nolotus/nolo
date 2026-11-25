@@ -39,7 +39,10 @@ import {
   buildPluginConfigurationSkillContent,
 } from "./pluginConfigurationSkill";
 import { CAPABILITY_PACKS } from "ai/tools/toolPacks";
-import type { SkillRuntimePageLike } from "./referenceRuntime";
+import {
+  BUILTIN_SKILL_PAGE_MARKER,
+  type SkillRuntimePageLike,
+} from "./referenceRuntime";
 import {
   CODING_SKILL_SLUGS,
   buildCodingSkillConfig,
@@ -482,6 +485,8 @@ export const resolveBuiltinSkillPage = (
     content: entry.content,
     meta: { kind: "skill", skillConfig: entry.config },
     ...(entry.config.toolNames?.length ? { tools: [...entry.config.toolNames] } : {}),
+    // 可信来源标记：只有这条合成路径（内置注册表命中）能打上，DB 页面无法携带。
+    [BUILTIN_SKILL_PAGE_MARKER]: true as const,
   };
 };
 

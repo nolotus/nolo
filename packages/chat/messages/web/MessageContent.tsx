@@ -1,3 +1,4 @@
+import { useCurrentSpaceId } from "create/space/spaceCurrentStore";
 import React, { memo, useState, useMemo, useCallback, Suspense, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { ImageGenerationState } from "../types";
@@ -86,6 +87,7 @@ export const MessageContent = memo(
   }: MessageContentProps) => {
     const { t } = useTranslation("chat");
     const [filePreview, setFilePreview] = useState<any | null>(null);
+    const spaceId = useCurrentSpaceId();
     const [imgPreview, setImgPreview] = useState<string | null>(null);
 
     const onFile = useCallback((fd: any) => setFilePreview(fd), []);
@@ -327,7 +329,7 @@ export const MessageContent = memo(
               />
             )
           )}
-          <ImagePreviewModal imageUrl={imgPreview} onClose={closeImg} alt="预览图片" />
+          <ImagePreviewModal spaceId={spaceId} imageUrl={imgPreview} onClose={closeImg} alt="预览图片" />
         </Suspense>
       </>
     );

@@ -23,6 +23,7 @@ import {
 } from "./processTask";
 import type { ProcessTaskResultCapsule } from "./processTaskResult";
 import type { ProcessOwner } from "./processOwnership";
+import type { ProcessLiveOutput } from "./processOutput";
 
 export type RegisteredProcess = {
   /** Stable handle across grace-GC / timeout-detach promotion. */
@@ -180,6 +181,7 @@ export type ProcessTerminalListener = (notice: ProcessTerminalNotice) => void;
 export class ProcessRegistry {
   private processes = new Map<number, RegisteredProcess>();
   private byTaskId = new Map<string, number>();
+  private liveOutputs = new Map<string, ProcessLiveOutput>();
   private eventLog: ProcessTaskEventLog;
   private terminalListeners = new Set<ProcessTerminalListener>();
   private backgroundListeners = new Set<() => void>();
@@ -249,6 +251,17 @@ export class ProcessRegistry {
       transient: proc.transient ?? false,
       owner: proc.owner ?? null,
     };
+    // PID reuse: the OS may hand a fresh child the pid of an envelope we still
+    // track (typically a terminal record that has not been dropped yet).
+    // Overwriting the pid slot alone would leave the OLD taskId resolving to the
+    // NEW process and the NEW live output — a read on the old handle would then
+    // pair old logs with a different task's status. Retire the old handle first.
+    const existing = this.processes.get(proc.pid);
+    if (existing && existing.taskId !== record.taskId) {
+      this.byTaskId.delete(existing.taskId);
+      this.liveOutputs.get(existing.taskId)?.markClosed();
+      this.liveOutputs.delete(existing.taskId);
+    }
     this.processes.set(proc.pid, record);
     this.byTaskId.set(record.taskId, proc.pid);
     this.eventLog.append({ taskId: record.taskId, pid: proc.pid, type: "started" });
@@ -285,7 +298,25 @@ export class ProcessRegistry {
 
   getByTaskId(taskId: string): RegisteredProcess | undefined {
     const pid = this.byTaskId.get(taskId);
-    return pid === undefined ? undefined : this.get(pid);
+    if (pid === undefined) return undefined;
+    const item = this.processes.get(pid);
+    // The pid slot may have been reused by a newer task: never resolve a stale
+    // taskId to a different envelope.
+    if (!item || item.taskId !== taskId) return undefined;
+    return { ...item };
+  }
+
+  /**
+   * Attach a live stdout/stderr output handle to a tracked task (kept outside
+   * RegisteredProcess so list()/get() clones and JSON views stay payload-free).
+   */
+  attachLiveOutput(taskId: string, liveOutput: ProcessLiveOutput): void {
+    if (!this.byTaskId.has(taskId)) return;
+    this.liveOutputs.set(taskId, liveOutput);
+  }
+
+  getLiveOutput(taskId: string): ProcessLiveOutput | undefined {
+    return this.liveOutputs.get(taskId);
   }
 
   /** Append-only lifecycle events of a task with `seq > cursor` (ascending). */
@@ -356,6 +387,7 @@ export class ProcessRegistry {
       }
       item.status = "stopped";
       item.endedAt = Date.now();
+      this.liveOutputs.get(item.taskId)?.markClosed();
       if (!item.transient) this.emitBackgroundChange();
       this.eventLog.append({ taskId: item.taskId, pid, type: "killed" });
       // User-initiated terminal transition — notify on the same instant (once:
@@ -400,6 +432,7 @@ export class ProcessRegistry {
         }
         item.status = "stopped";
         item.endedAt = Date.now();
+        this.liveOutputs.get(item.taskId)?.markClosed();
         if (!item.transient) this.emitBackgroundChange();
         this.eventLog.append({ taskId: item.taskId, pid: item.pid, type: "killed" });
         this.emitTerminal({
@@ -414,8 +447,20 @@ export class ProcessRegistry {
     }
   }
 
-  markExited(pid: number, exitCode: number, resultCapsule?: ProcessTaskResultCapsule): void {
+  markExited(
+    pid: number,
+    exitCode: number,
+    resultCapsule?: ProcessTaskResultCapsule,
+    expectedTaskId?: string,
+  ): void {
     const item = this.processes.get(pid);
+    // PID reuse guard: a late `close` callback belongs to the *old* process.
+    // The registry may already have registered a brand-new task on the same
+    // pid; marking it failed here would close the new task's live output and
+    // emit a terminal wake for work that is still running.
+    if (expectedTaskId !== undefined && item !== undefined && item.taskId !== expectedTaskId) {
+      return;
+    }
     if (item && item.status === "running") {
       // Only record natural exit while still running. If the user already
       // killed the process (status "stopped"), a late close event must not
@@ -425,6 +470,7 @@ export class ProcessRegistry {
       if (resultCapsule) item.resultCapsule = resultCapsule;
       item.status = exitCode === 0 ? "exited" : "failed";
       item.endedAt = Date.now();
+      this.liveOutputs.get(item.taskId)?.markClosed();
       if (!item.transient) this.emitBackgroundChange();
       this.eventLog.append({
         taskId: item.taskId,
@@ -460,6 +506,8 @@ export class ProcessRegistry {
     const item = this.processes.get(pid);
     if (!item || item.promoted) return;
     this.eventLog.append({ taskId: item.taskId, pid, type: "exited", exitCode });
+    this.liveOutputs.get(item.taskId)?.markClosed();
+    this.liveOutputs.delete(item.taskId);
     this.processes.delete(pid);
     this.byTaskId.delete(item.taskId);
   }
@@ -468,6 +516,8 @@ export class ProcessRegistry {
   remove(pid: number): boolean {
     const item = this.processes.get(pid);
     if (!item) return false;
+    this.liveOutputs.get(item.taskId)?.markClosed();
+    this.liveOutputs.delete(item.taskId);
     this.processes.delete(pid);
     this.byTaskId.delete(item.taskId);
     if (!item.transient) this.emitBackgroundChange();
@@ -475,6 +525,10 @@ export class ProcessRegistry {
   }
 
   clear(): void {
+    for (const liveOutput of this.liveOutputs.values()) {
+      liveOutput.markClosed();
+    }
+    this.liveOutputs.clear();
     this.processes.clear();
     this.byTaskId.clear();
     this.eventLog.clear();

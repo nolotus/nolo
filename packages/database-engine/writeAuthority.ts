@@ -161,6 +161,21 @@ export const resolveWriteAuthority = ({
     (typeof existingRecord?.ownerId === "string" && existingRecord.ownerId) ||
     (typeof existingRecord?.userId === "string" && existingRecord.userId) ||
     null;
+  // sp: 是 Space 的权威命名空间（冒号分隔）。resolveKeyOwnerId 按 '-' 切分并匹配前缀，
+  // 解析不出它的所有者，会返回 null 并被上层当成「无 owner 语义的记录」兜底放行。
+  // 生产里 sp: 只由服务端 Space 业务流程直写（如沙箱产物发布），没有任何合法的通用
+  // HTTP 写调用方，所以这里一律拒绝，不给成员写资格开口子。
+  if (dbKey.startsWith("sp:")) {
+    return {
+      keyOwnerId: null,
+      recordOwnerId,
+      isAllowed: false,
+      isKeyOwner: false,
+      isRecordOwner: false,
+      isMember: false,
+      isSystemAdminWriter: false,
+    };
+  }
   const keyOwnerId = resolveKeyOwnerId(dbKey, {
     candidateOwnerUserIds: [actionUserId, recordOwnerId],
   });
@@ -211,6 +226,12 @@ export const canWriteRecord = ({
       actionUserId,
       existingRecord: record,
     });
+
+  // 同 resolveWriteAuthority：sp: 只能由服务端 Space 业务流程直写。
+  // 这里必须单独挡一次——本函数末尾还有「有登录用户且 key/record 都无 owner 即放行」的兜底。
+  if (dbKey.startsWith("sp:")) {
+    return { keyOwnerId: null, recordOwnerId, isAllowed: false };
+  }
 
   if (isMalformedAgentAutomationKey(dbKey)) {
     return {

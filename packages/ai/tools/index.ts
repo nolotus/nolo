@@ -203,16 +203,6 @@ export {
   applyDefaultWebToolPacks,
 } from "./toolPacks";
 import { TOOL_PACKS } from "./toolPacks";
-import { surfWeatherFunctionSchema, surfWeatherFunc } from "./surfWeatherTool";
-import {
-  wereadGatewayFunctionSchema,
-  wereadGatewayFunc,
-} from "./wereadGatewayTool";
-import {
-  watchCompletionFunctionSchema,
-  watchCompletionFunc,
-} from "./watchCompletionTool";
-
 import {
   browser_closeSession_Schema,
   browser_closeSession_Func,
@@ -262,12 +252,6 @@ import {
   writeTranslationsFunc,
 } from "./writeTranslationsTool";
 
-// ✅ Google Search Scraper (Apify)
-import {
-  googleSearchScraperFunctionSchema,
-  googleSearchScraperFunc,
-} from "./googleSearchScraperTool";
-
 // ✅ Cloudflare Browser Rendering 爬取工具
 import {
   cloudflareCrawlFunctionSchema,
@@ -275,28 +259,6 @@ import {
   cloudflareCrawlStatusFunctionSchema,
   cloudflareCrawlStatusFunc,
 } from "./cloudflareCrawlTool";
-
-// ✅ Apify / 抓取相关工具
-import {
-  youtubeScraperFunctionSchema,
-  youtubeScraperFunc,
-} from "./youtubeScraperTool";
-import {
-  ecommerceScraperFunctionSchema,
-  ecommerceScraperFunc,
-} from "./ecommerceScraperTool";
-import {
-  amazonProductScraperFunctionSchema,
-  amazonProductScraperFunc,
-} from "./amazonProductScraperTool";
-import {
-  taobaoTmallProductScraperFunctionSchema,
-  taobaoTmallProductScraperFunc,
-} from "./taobaoTmallProductScraperTool";
-import {
-  jdProductScraperFunctionSchema,
-  jdProductScraperFunc,
-} from "./jdProductScraperTool";
 
 // ✅ 多模态：Gemini 图片（2.5 Flash 文生图 / 3 Pro 编辑）
 import {
@@ -335,6 +297,14 @@ import {
 } from "./deleteMemoryTool";
 import { queryMemoryFunc, queryMemoryFunctionSchema } from "./queryMemoryTool";
 import { execShellFunctionSchema, execShellFunc } from "./execShellTool";
+import {
+  materializeWorkspaceFileFunctionSchema,
+  materializeWorkspaceFileClientStub,
+  materializeSkillAssetsFunctionSchema,
+  materializeSkillAssetsClientStub,
+  commitSandboxArtifactFunctionSchema,
+  commitSandboxArtifactClientStub,
+} from "./sandboxWorkspaceTools";
 import { checkEnvFunctionSchema, checkEnvFunc } from "./checkEnvTool";
 
 import { agentToolDefinitions } from "./agent/agentTools";
@@ -398,7 +368,6 @@ import {
   updateUserPreferenceProfileFunctionSchema,
   updateUserPreferenceProfileFunc,
 } from "./updateUserPreferenceProfileTool";
-import { ziweiChartFunctionSchema, ziweiChartFunc } from "./ziweiChartTool";
 
 // ---------- 2. 定义工具规范接口 ----------
 
@@ -502,9 +471,8 @@ export type ToolExecutorContext = {
   /** 运行时注入、模型不可见，用于 slash 单轮预加载 */
   skipSkillReferencePersist?: boolean;
   /**
-   * 当前来源对话 id（watchCompletion 这类「终态订阅」工具用它定位唤醒目标）。
-   * 由运行时注入，模型不可见、不可传 —— 没有对话上下文的宿主留空，工具会把
-   * 缺失如实上报给端点（端点拒绝无父对话的订阅）。
+   * 当前来源对话 id（需要定位来源对话的工具用它做归属/归因）。
+   * 由运行时注入，模型不可见、不可传 —— 没有对话上下文的宿主留空。
    */
   dialogId?: string;
   /** Persisted user message bound by the host to this specific turn. */
@@ -749,23 +717,6 @@ const baseToolDefinitions: ToolDefinition[] = [
     },
     behavior: "action",
   },
-  {
-    id: "ziweiChart",
-    schema: ziweiChartFunctionSchema,
-    executor: ziweiChartFunc,
-    description: {
-      name: "ziweiChart",
-      description: "生成紫微斗数本命盘，并输出可读的十二宫文字盘。",
-      category: "命理 / 排盘",
-    },
-    behavior: "answer",
-    capability: "general",
-    uiGroup: "general",
-    riskLevel: "low",
-    costLevel: "low",
-    defaultConsent: "auto",
-  },
-
   // --- 计划与编排（不含 Agent 专用） ---
   {
     id: "toolquery",
@@ -1018,22 +969,6 @@ const baseToolDefinitions: ToolDefinition[] = [
     behavior: "data",
     uiGroup: "content",
     capability: "space_context",
-    riskLevel: "low",
-    costLevel: "low",
-  },
-  {
-    id: "wereadGateway",
-    schema: wereadGatewayFunctionSchema,
-    executor: wereadGatewayFunc,
-    description: {
-      name: "wereadGateway",
-      description:
-        "调用微信读书接口，支持书架、搜索、阅读统计、笔记划线、书评和推荐。",
-      category: "网络",
-    },
-    behavior: "data",
-    uiGroup: "external",
-    capability: "web_search",
     riskLevel: "low",
     costLevel: "low",
   },
@@ -1782,18 +1717,6 @@ const baseToolDefinitions: ToolDefinition[] = [
     cancelable: true,
   },
 
-  {
-    id: "surfWeather",
-    schema: surfWeatherFunctionSchema,
-    executor: surfWeatherFunc,
-    description: {
-      name: "surfWeather",
-      description:
-        "获取指定海岸位置的冲浪天气预报（浪高、涌浪、周期、浪向），判断是否适合冲浪。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-  },
 
   // === Cloudflare Browser Rendering 爬取工具 ===
   {
@@ -1822,88 +1745,6 @@ const baseToolDefinitions: ToolDefinition[] = [
   },
 
   // === Apify 抓取工具 ===
-  {
-    id: "googleSearchScraper",
-    schema: googleSearchScraperFunctionSchema,
-    executor: googleSearchScraperFunc,
-    description: {
-      name: "googleSearchScraper",
-      description:
-        "抓取 Google 搜索结果（SERP），返回自然结果、广告、People Also Ask 等结构化数据。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-  },
-  {
-    id: "youtubeScraper",
-    schema: youtubeScraperFunctionSchema,
-    executor: youtubeScraperFunc,
-    description: {
-      name: "youtubeScraper",
-      description:
-        "使用 Apify YouTube Scraper 抓取指定视频、频道或搜索结果的详细数据（支持字幕）。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-  },
-  {
-    id: "ecommerceScraper",
-    schema: ecommerceScraperFunctionSchema,
-    executor: ecommerceScraperFunc,
-    description: {
-      name: "ecommerceScraper",
-      description:
-        "使用 Apify E-commerce Scraping Tool 抓取电商产品、评论和卖家信息。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-  },
-  {
-    id: "taobaoTmallProductScraper",
-    schema: taobaoTmallProductScraperFunctionSchema,
-    executor: taobaoTmallProductScraperFunc,
-    description: {
-      name: "taobaoTmallProductScraper",
-      description:
-        "使用 Apify Taobao/Tmall Product Scraper 抓取淘宝/天猫商品真实详情、SKU、价格、库存和规格参数。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-    capability: "web_access",
-    riskLevel: "low",
-    costLevel: "high",
-    defaultConsent: "auto",
-    cancelable: true,
-  },
-  {
-    id: "jdProductScraper",
-    schema: jdProductScraperFunctionSchema,
-    executor: jdProductScraperFunc,
-    description: {
-      name: "jdProductScraper",
-      description:
-        "抓取京东商品页内嵌真实商品参数，返回标题、品牌、型号、店铺、尺寸重量、价格、图片、变体和库存状态。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-    capability: "web_access",
-    riskLevel: "low",
-    costLevel: "low",
-    defaultConsent: "auto",
-    cancelable: true,
-  },
-  {
-    id: "amazonProductScraper",
-    schema: amazonProductScraperFunctionSchema,
-    executor: amazonProductScraperFunc,
-    description: {
-      name: "amazonProductScraper",
-      description:
-        "使用 Apify Amazon Product Scraper 抓取亚马逊商品和类目数据。",
-      category: "网络与智能",
-    },
-    behavior: "data",
-  },
 
   // 浏览器会话工具
   {
@@ -2199,19 +2040,6 @@ const baseToolDefinitions: ToolDefinition[] = [
     uiGroup: "general",
   },
   {
-    id: "watchCompletion",
-    schema: watchCompletionFunctionSchema,
-    executor: watchCompletionFunc,
-    description: {
-      name: "watchCompletion",
-      description:
-        "登记一次业务终态订阅（nolo-ci 部署任务等），任务结束时自动唤醒本对话交付结果，等待期间零轮询。",
-      category: "应用部署",
-    },
-    behavior: "data",
-    uiGroup: "general",
-  },
-  {
     id: "appList",
     schema: appListFunctionSchema,
     executor: appListFunc,
@@ -2358,6 +2186,42 @@ const baseToolDefinitions: ToolDefinition[] = [
       category: "网络与智能",
     },
     behavior: "action",
+  },
+  {
+    id: "materializeWorkspaceFile",
+    schema: materializeWorkspaceFileFunctionSchema,
+    executor: materializeWorkspaceFileClientStub,
+    description: {
+      name: "materializeWorkspaceFile",
+      description: "将已授权的 Space/用户文件物化到隔离 Sandbox 的只读 input/ 目录。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "data",
+    uiGroup: "data",
+  },
+  {
+    id: "materializeSkillAssets",
+    schema: materializeSkillAssetsFunctionSchema,
+    executor: materializeSkillAssetsClientStub,
+    description: {
+      name: "materializeSkillAssets",
+      description: "把平台内置的可执行技能脚本复制到 Sandbox 的 work/skills/<skill>/。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "action",
+    uiGroup: "data",
+  },
+  {
+    id: "commitSandboxArtifact",
+    schema: commitSandboxArtifactFunctionSchema,
+    executor: commitSandboxArtifactClientStub,
+    description: {
+      name: "commitSandboxArtifact",
+      description: "校验 Sandbox output/ 产物并提交到持久化 Space/用户 Artifact 存储。",
+      category: "代码 / 文件操作",
+    },
+    behavior: "action",
+    uiGroup: "data",
   },
   {
     id: "checkEnv",

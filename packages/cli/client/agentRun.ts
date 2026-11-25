@@ -1,4 +1,6 @@
 import { resolveAgentImageInputSupport } from "../../ai/llm/agentCapabilities";
+import type { ReasoningEffort } from "../../ai/agent/createAgentSchema";
+import { withReasoningEffortOverride, resolveEffectiveReasoningEffortOverride } from "../../ai/agent/defaultReasoningEffort";
 import { isContextOverflowText } from "../../ai/chat/parseApiError";
 import { contextRefusalDiagnostics, describeContextRefusal } from "./contextRefusal";
 import { isHistoryIntegrityFailure } from "../../ai/tools/agent/runFailureClass";
@@ -42,6 +44,7 @@ import {
   formatUsage,
   platformCreditsFromUsage,
   resolveAgentContextWindow,
+  resolveAgentModelIdentity,
   shouldShowUsage,
   sumPlatformCredits,
   withTurnCredits,
@@ -57,6 +60,11 @@ import {
   isCliAuthorityBrokerUnavailableError,
 } from "../../database-engine/cliAuthorityBrokerClient";
 import { readStreamingAgentRun } from "./agentRunStream";
+import {
+  pickCallerPoolIdentityFromAgentConfig,
+  resolveLatchedCliCallerIsPoolTop,
+} from "./callerPoolTop";
+import { readCachedAgentCatalogEntries } from "../tui/agentCatalog";
 import {
   describeClientVersionTooOldFailure,
   isClientVersionTooOldFailure,
@@ -375,6 +383,37 @@ function wrapLoadAgentConfigWithModelOverride(
         agentRef,
         applyModelLayerOverride(baseRecord, override),
       );
+    },
+  };
+}
+
+/**
+ * 本次 run 的推理档覆盖（`--reasoning-effort`）：与 modelOverride 同源同形——
+ * 读配置时**在内存里**替换有效 `reasoning_effort`，不写回磁盘/DB 的 agent 记录。
+ *
+ * 双保险：真正覆盖前再核对一次记录的真实 provider/model 与已显式档位（见
+ * `resolveEffectiveReasoningEffortOverride`）。派发与子进程启动之间配置可能已变，
+ * 此时宁可沿用记录里的值，也不盲目硬覆盖用户固定档位或给不支持该档的模型塞参数。
+ */
+function wrapLoadAgentConfigWithReasoningEffortOverride(
+  adapter: AgentRuntimeHostAdapter,
+  targetAgentKey: string,
+  override: ReasoningEffort,
+): AgentRuntimeHostAdapter {
+  return {
+    ...adapter,
+    loadAgentConfig: async (agentRef: string) => {
+      const config = await adapter.loadAgentConfig(agentRef);
+      if (!config || agentRef !== targetAgentKey) return config;
+      const effective = resolveEffectiveReasoningEffortOverride({
+        override,
+        provider: config.provider,
+        model: config.model,
+        recordReasoningEffort: config.reasoning_effort,
+      });
+      // 覆盖逻辑（含 rawRecord 一并覆盖）的真值在 ai/agent/defaultReasoningEffort：
+      // 这里只负责「读配置时套用、不写回记录」。
+      return withReasoningEffortOverride(config, effective);
     },
   };
 }
@@ -1839,6 +1878,9 @@ export function describeLocalRunFailure(
   // Local authority broker failures: unresponsive broker timeout, attach/ownership
   // contention, unreachability, or protocol errors must render actionable local
   // broker guidance without blaming local credentials/config or upstream LLM.
+  if (/CLI authority broker upgrade requires exit/i.test(message)) {
+    return `${RUN_UNAVAILABLE_PREFIX} (${stripDebugNoise(message)})\n`;
+  }
   if (
     isCliAuthorityBrokerTimeoutError(rawError) ||
     /CLI authority broker .* timed out/i.test(message)
@@ -2443,6 +2485,15 @@ async function executeLocalAgentTurnForCliWithAdapter(
             options.modelOverride,
           )
         : resolvedBaseAdapter;
+    // 推理档覆盖在模型层覆盖之后应用：本次 run 显式声明的档位优先于记录里的值，
+    // 但两者都只在内存生效（见 wrapLoadAgentConfigWithReasoningEffortOverride）。
+    if (adapter && options.reasoningEffortOverride) {
+      adapter = wrapLoadAgentConfigWithReasoningEffortOverride(
+        adapter,
+        options.agentKey,
+        options.reasoningEffortOverride,
+      );
+    }
     if (adapter) adapter = applyEphemeralIfRequested(options, adapter);
     if (adapter && options.imageUrls?.length) {
       const imageAdapter = adapter;
@@ -2677,6 +2728,52 @@ async function executeLocalAgentTurnForCliWithAdapter(
       : [];
     const hasDurableAttachments = durableAttachmentParts.length > 0;
     const runLocalAgentTurn = await loadRunLocalAgentTurn();
+    // 会话级池姿态：目录缓存（启动预热，零网络 I/O）+ 一套纯函数三态判定。
+    // 缓存未加载 → undefined（prompt 逐字不变），绝不在轮内触发目录拉取。
+    //
+    // 身份来源：私有/自建 Agent 的真实模型只在已加载的 agentConfig 里（与本地
+    // prompt 装配同源），内置目录查不到它——用 resolveAgentModelIdentity 单干会
+    // 让 `agent-user1-self`（glm-5.3-flash）恒拿 model: null → 姿态永远 undefined。
+    // 只有目录非空（池可能已知）时才多读一次 config，其余路径零额外 I/O。
+    const poolEntries = readCachedAgentCatalogEntries();
+    const poolAgentConfig =
+      poolEntries && poolEntries.length > 0 && userId
+        ? await (async () => {
+            try {
+              return await adapter.loadAgentConfig(options.agentKey);
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+    const poolIdentity = pickCallerPoolIdentityFromAgentConfig({
+      agentConfig: poolAgentConfig,
+      agentKey: options.agentKey,
+      // --model 覆盖已在 adapter 层应用到 agentConfig，这里只是 config 未加载时的兜底。
+      modelOverride: options.modelOverride?.model ?? null,
+    });
+    // 单调锁存（同一 dialogId 只算一次，含 undefined）：后台目录刷新绝不翻转
+    // 已进 session 前缀的协作段文本，因此不会击穿前缀缓存。
+    //
+    // 锁存键只用**入口每轮恒定不变**的身份：`options.agentKey` + `--model` 覆盖。
+    // 绝不拼 `poolIdentity`（含 config.model）：config 只在目录预热后才读得到，
+    // 冷启动首轮会算出 `-` 末段锁住 undefined，次轮目录预热后变成 `glm-…`
+    // 未命中原锁存 → 返回 true → 前缀从轻姿态翻成池顶姿态。
+    const callerIsPoolTop = resolveLatchedCliCallerIsPoolTop({
+      dialogId: currentDialogId,
+      entries: poolEntries,
+      agentKey: poolIdentity.agentKey,
+      latchAgentKey: options.agentKey,
+      latchModel: options.modelOverride?.model ?? null,
+      model:
+        poolIdentity.model ??
+        resolveAgentModelIdentity({
+          agentKey: options.agentKey,
+          agentName: options.agentName,
+        }).model ??
+        null,
+      userId,
+    });
     const result = await runLocalAgentTurn({
       adapter,
       agentRef: options.agentKey,
@@ -2735,6 +2832,7 @@ async function executeLocalAgentTurnForCliWithAdapter(
         store: await getTurnStore(), userId, dialogId: currentDialogId, userMessages: messages,
       }) } : {}),
       runKind: options.env.NOLO_AGENT_RUN_CHILD === "1" ? "subtask" : "interactive",
+      ...(callerIsPoolTop === undefined ? {} : { callerIsPoolTop }),
       // 展示能力由宿主声明（TUI=narrow），非交互 CLI/后台留空 → unknown；
       // 排版段只在能力已知时由 localLoop 注入，server 线不读该字段。
       ...(options.responseViewport

@@ -394,6 +394,34 @@ export function invalidateAgentCatalogCache() {
   agentCatalogRawLoadInFlight.clear();
 }
 
+/**
+ * 同步读当前目录缓存（零 I/O，触发不了网络拉取）：供会话级池姿态投影
+ * （`cli/client/callerPoolTop.ts` 的 resolveCallerPoolTopFromCatalog）使用。
+ * 未加载 / 已失效 → null，调用方按「池未知」退化为 undefined 姿态。
+ */
+export function readCachedAgentCatalogEntries(): AgentCatalogEntry[] | null {
+  return agentCatalogCache?.entries ?? null;
+}
+
+/**
+ * 直接注入目录缓存（测试用，也供需要预热的显式场景）。
+ *
+ * 为什么需要：会话级池姿态的「目录刷新不翻转前缀」回归要求在两轮之间替换
+ * 缓存内容；真实刷新走网络（fetchRawCatalogData），单测里既不需要也不该打网络。
+ * 这里只写内存缓存，不碰 `lastRefresh`、不发额度探测。
+ */
+export function primeAgentCatalogCacheForTests(
+  entries: AgentCatalogEntry[],
+  args: { cacheKey?: string; at?: number; unavailableFavoriteCount?: number } = {},
+): void {
+  agentCatalogCache = {
+    cacheKey: args.cacheKey ?? "test",
+    at: args.at ?? Date.now(),
+    entries,
+    unavailableFavoriteCount: args.unavailableFavoriteCount ?? 0,
+  };
+}
+
 /** 检查当前环境是否已有热目录缓存。 */
 export function hasWarmAgentCatalogCache(args: { env?: EnvLike } = {}): boolean {
   const env = args.env ?? process.env;

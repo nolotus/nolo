@@ -634,11 +634,17 @@ export async function executeToolCall(args: {
 
       if (!toolResult) {
         let runtimeContext = input.runtimeContext;
-        if (args.getDirectWorkSource && !runtimeContext?.userMessageId && toolName === "rememberMemory" &&
-            parseNoloWorkspaceToolArguments(unwrappedArguments).mode === "work") {
-          const id = await args.getDirectWorkSource();
-          throwIfAborted(input);
-          if (id) runtimeContext = { ...runtimeContext, userMessageId: id };
+        if (args.getDirectWorkSource && !runtimeContext?.userMessageId &&
+            (toolName === "rememberMemory" || toolName === "queryMemory")) {
+          const memoryArgs = parseNoloWorkspaceToolArguments(unwrappedArguments);
+          // Local reads also verify the dialog header, which a fresh direct turn
+          // has not saved yet. A server read cannot use a locally saved header.
+          if (memoryArgs.mode === "work" && (toolName === "rememberMemory" ||
+              memoryArgs.storage === undefined || memoryArgs.storage === "local")) {
+            const id = await args.getDirectWorkSource();
+            throwIfAborted(input);
+            if (id) runtimeContext = { ...runtimeContext, userMessageId: id };
+          }
         }
         const executePromise = input.adapter.executeTool({
           id: toolCall.id,

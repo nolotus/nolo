@@ -23,7 +23,7 @@ import { useTranslation } from "react-i18next";
 
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
 
-import { useAppDispatch } from "app/store";
+import { useAppDispatch, useAppSelector } from "app/store";
 import { useIsLoggedIn } from "identity";
 import type { ReferenceItem } from "app/types";
 import {
@@ -37,16 +37,21 @@ import {
     createDialog,
     initDialog,
     clearDialogState,
-    switchDialogAgent,
 } from "chat/dialog/dialogSlice";
 import { useCurrentDialogConfig } from "chat/dialog/useCurrentDialogConfig";
-import { getActiveDialogAgentId } from "chat/dialog/dialogAgents";
 import {
     initMsgs,
     resetMsgs,
+    selectAllMsgs,
     useIsLoadingInitial,
     useMessageSessionError,
 } from "chat/messages/messageSlice";
+import { sendFirstMessage } from "chat/messages/sendFirstMessage";
+import { publishChatInputSeed } from "chat/hooks/useChatInputSeed";
+import {
+    consumeEpubPromptDraft,
+    useEpubPromptDraft,
+} from "create/space/epub/epubAssistantStore";
 import { ChatArea } from "chat/web/ChatArea";
 import { extractCustomId } from "core/prefix";
 import { useCurrentTable } from "render/table/tableStore";
@@ -118,26 +123,31 @@ const useFavoriteAgentsLogic = (
 
         return merged;
     }, [favoriteAgentKeys, preferredAgentKeys]);
-    const isEmpty =
-        isLoggedIn && initialized && !loading && agentKeys.length === 0;
-
     return {
         agentKeys,
-        favoriteAgentKeys,
         isLoading,
-        isEmpty,
     };
 };
+
+export interface AssistantQuickPrompt {
+    label: string;
+    prompt: string;
+}
 
 export interface ArtifactAssistantPanelProps {
     panelTitle?: string;
     activePanelTitle?: string;
+    skillBadge?: string;
     loginMessage?: string;
     emptyMessage?: string;
     runtimeOptions?: AgentRuntimeOptions;
     preferredAgentKeys?: string[];
     /** 建对话时写入的对话级引用（如内置对象技能），切换 agent 后仍然生效。 */
     extraReferences?: ReferenceItem[];
+    /** 仅 kind === "file" 时透传：用于订阅并定向消费对应 EPUB 的引用草稿。 */
+    epubContentKey?: string;
+    /** 空对话态展示的克制快捷提问芯片（如 EPUB 阅读器 3 个章节快捷提问）。 */
+    quickPrompts?: ReadonlyArray<AssistantQuickPrompt>;
 }
 
 // --- 主组件：对象助手侧栏 + 对话（agent 切换在 composer 内完成） ---
@@ -146,54 +156,96 @@ export const ArtifactAssistantPanel = memo(
     ({
         panelTitle,
         activePanelTitle,
+        skillBadge,
         loginMessage,
         emptyMessage,
         runtimeOptions,
         preferredAgentKeys = [],
         extraReferences,
+        epubContentKey,
+        quickPrompts,
     }: ArtifactAssistantPanelProps) => {
     const { t } = useTranslation(["ai", "chat"]);
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
 
     const isLoggedIn = useIsLoggedIn();
-    const [selectedAgentKey, setSelectedAgentKey] = useState<string | null>(null);
     const [sideDialogKey, setSideDialogKey] = useState<string | null>(null);
     const [isCreatingDialog, setIsCreatingDialog] = useState(false);
+    const [createError, setCreateError] = useState(false);
+    const [isSendingQuickPrompt, setIsSendingQuickPrompt] = useState(false);
     const hasAutoStartedRef = useRef(false);
 
     const dialogId = sideDialogKey ? extractCustomId(sideDialogKey) : null;
     const isLoadingInitial = useIsLoadingInitial(dialogId);
     const messageError = useMessageSessionError(dialogId);
     const currentDialogConfig = useCurrentDialogConfig();
-    const { agentKeys, favoriteAgentKeys, isLoading, isEmpty } = useFavoriteAgentsLogic(
+    const messageCount = useAppSelector((state) =>
+        dialogId && (state as any)?.message ? selectAllMsgs(state, dialogId).length : 0
+    );
+    const pendingEpubPromptDraft = useEpubPromptDraft(epubContentKey);
+    const { agentKeys, isLoading } = useFavoriteAgentsLogic(
         isLoggedIn,
         preferredAgentKeys
     );
 
+    // 兼容 nolo 默认档（auto 模式，无 primaryAgentKey）与指定 Agent（fixed 模式）
     const isChatActive =
         !!dialogId &&
-        !!selectedAgentKey &&
         !!currentDialogConfig &&
         currentDialogConfig.dbKey === sideDialogKey;
 
-    // 首次打开：用默认 agent 创建 dialog + 初始化消息
-    const handleSelectAgent = useCallback(
+    useEffect(() => {
+        if (
+            !epubContentKey ||
+            !pendingEpubPromptDraft ||
+            !isChatActive ||
+            !dialogId ||
+            isCreatingDialog ||
+            isLoadingInitial
+        ) {
+            return;
+        }
+        const draft = consumeEpubPromptDraft(epubContentKey);
+        if (!draft) return;
+        publishChatInputSeed({
+            text: draft,
+            mode: "append",
+            focus: true,
+            dialogId,
+        });
+    }, [
+        dialogId,
+        epubContentKey,
+        isChatActive,
+        isCreatingDialog,
+        isLoadingInitial,
+        pendingEpubPromptDraft,
+    ]);
+
+    // 首次打开：优先用收藏/偏好首个 agent，无收藏时直接以 nolo 默认档（auto）建对话
+    const handleStartDialog = useCallback(
         async (agentKey: string) => {
             if (!isLoggedIn) {
-                toast.error(t("chat:loginToUseAssistants", "登录后才能使用页面助手"));
+                toast.error(
+                    loginMessage ??
+                        t("chat:loginToUseAssistants", "登录后可在侧边栏使用 AI 助手")
+                );
                 return;
             }
 
-            // 切换助手前，清理旧对话状态
+            // 建新对话前，清理旧对话状态
             dispatch(clearDialogState());
             dispatch(resetMsgs(dialogId ? { dialogId } : undefined));
 
             setIsCreatingDialog(true);
+            setCreateError(false);
             try {
                 const result = await dispatch(
                     createDialog({
-                        cybots: [agentKey],
+                        ...(agentKey
+                            ? { cybots: [agentKey] }
+                            : { cybots: [], agentMode: "auto" as const }),
                         ...(extraReferences?.length ? { extraReferences } : {}),
                     })
                 ).unwrap();
@@ -203,7 +255,6 @@ export const ArtifactAssistantPanel = memo(
                     throw new Error("Missing dialog key from createDialog result");
                 }
 
-                setSelectedAgentKey(agentKey);
                 setSideDialogKey(newDialogKey);
                 isNewlyCreatedRef.current = true;
             } catch (error) {
@@ -211,29 +262,13 @@ export const ArtifactAssistantPanel = memo(
                 toast.error(
                     t("chat:createSideDialogFailed", "创建对话失败，请稍后重试")
                 );
-                setSelectedAgentKey(null);
                 setSideDialogKey(null);
+                setCreateError(true);
             } finally {
                 setIsCreatingDialog(false);
             }
         },
-        [dialogId, dispatch, extraReferences, isLoggedIn, t]
-    );
-
-    // composer 内切换 agent：就地换当前 dialog 的 active agent，
-    // 对话记录与 dialog 级 extraReferences（对象技能）保留。
-    const handleSwitchAgent = useCallback(
-        async (agentKey: string) => {
-            try {
-                await dispatch(switchDialogAgent({ agentKey })).unwrap();
-            } catch (error) {
-                console.error("Failed to switch side dialog agent:", error);
-                toast.error(
-                    t("chat:switchAssistantFailed", "切换助手失败，请重试")
-                );
-            }
-        },
-        [dispatch, t]
+        [dialogId, dispatch, extraReferences, isLoggedIn, loginMessage, t]
     );
 
     const isNewlyCreatedRef = useRef(false);
@@ -244,22 +279,19 @@ export const ArtifactAssistantPanel = memo(
             !isLoggedIn ||
             isLoading ||
             isCreatingDialog ||
-            selectedAgentKey ||
-            sideDialogKey ||
-            agentKeys.length === 0
+            sideDialogKey
         ) {
             return;
         }
 
         hasAutoStartedRef.current = true;
-        void handleSelectAgent(agentKeys[0]);
+        void handleStartDialog(agentKeys[0] ?? "");
     }, [
         agentKeys,
-        handleSelectAgent,
+        handleStartDialog,
         isCreatingDialog,
         isLoading,
         isLoggedIn,
-        selectedAgentKey,
         sideDialogKey,
     ]);
 
@@ -294,13 +326,42 @@ export const ArtifactAssistantPanel = memo(
         [dialogId, dispatch]
     );
 
-    const goExplore = () => navigate("/explore");
     const goLogin = () => navigate("/login");
 
-    const isShowingChat = !!selectedAgentKey && !!sideDialogKey;
-    // picker 的当前 agent 以 dialog 配置为准（composer 切换会更新它）
-    const activeAgentKey =
-        getActiveDialogAgentId(currentDialogConfig) ?? selectedAgentKey;
+    const showQuickPrompts = Boolean(
+        quickPrompts?.length &&
+        sideDialogKey &&
+        dialogId &&
+        isChatActive &&
+        !isCreatingDialog &&
+        !isLoadingInitial &&
+        !messageError &&
+        messageCount === 0
+    );
+
+    const handleQuickPromptClick = useCallback(
+        async (prompt: string) => {
+            if (!sideDialogKey || isSendingQuickPrompt) return;
+            setIsSendingQuickPrompt(true);
+            try {
+                await dispatch(
+                    sendFirstMessage({
+                        text: prompt,
+                        dialogKey: sideDialogKey,
+                        runtimeOptions,
+                    }) as any
+                );
+            } catch (error) {
+                console.error("Failed to send quick prompt:", error);
+                toast.error(t("chat:sendFailMessage", "发送失败，请稍后重试"));
+            } finally {
+                setIsSendingQuickPrompt(false);
+            }
+        },
+        [dispatch, isSendingQuickPrompt, runtimeOptions, sideDialogKey, t]
+    );
+
+    const isShowingChat = !!sideDialogKey;
 
     let body: ReactNode;
 
@@ -308,25 +369,24 @@ export const ArtifactAssistantPanel = memo(
         // 未登录：提示登录
         body = (
                 <EmptyState
-                    message={t(
-                        "chat:loginToUseAssistants",
-                        loginMessage ?? "登录后可在侧边栏使用你的常用 AI 助手"
-                    )}
+                    message={
+                        loginMessage ??
+                        t("chat:loginToUseAssistants", "登录后可在侧边栏使用 AI 助手")
+                    }
                     actionText={t("chat:goLogin", "去登录")}
                     onAction={goLogin}
             />
         );
     } else if (!isShowingChat) {
-        // 对话尚未建立：收藏加载完且无可用 agent 才显示空态，其余时间等自动开始
-        if (isEmpty) {
+        if (createError) {
             body = (
                 <EmptyState
-                    message={t(
-                        "chat:noFavoriteAgents",
-                        emptyMessage ?? "还没有收藏任何 AI 助手，先去逛逛吧"
-                    )}
-                    actionText={t("chat:goExplore", "去 AI 广场逛逛")}
-                    onAction={goExplore}
+                    message={
+                        emptyMessage ??
+                        t("chat:createSideDialogFailed", "AI 助手暂时不可用，请稍后重试")
+                    }
+                    actionText={t("chat:retry", "重试")}
+                    onAction={() => void handleStartDialog(agentKeys[0] ?? "")}
                 />
             );
         } else {
@@ -337,7 +397,7 @@ export const ArtifactAssistantPanel = memo(
             );
         }
     } else {
-        // 对话界面：header 标题 + ChatArea（agent 切换在 composer 里）
+        // 对话界面：header 标题 + ChatArea（agent 选择与切换统一复用 MessageInputContainer 默认三层选择器）
         if (isCreatingDialog || isLoadingInitial || !isChatActive) {
             body = (
                 <div {...stylex.props(dialogPageStyles.papLoading)}>
@@ -358,24 +418,32 @@ export const ArtifactAssistantPanel = memo(
         } else {
             body = (
                 <div data-hook="dialog-esc-pap-chat" {...stylex.props(dialogPageStyles.papChat)}>
+                    {showQuickPrompts && quickPrompts && (
+                        <div
+                            {...stylex.props(dialogPageStyles.papQuickPrompts)}
+                            role="group"
+                            aria-label={t("chat:quickPrompts", "快捷提问")}
+                            data-testid="epub-quick-prompts"
+                        >
+                            {quickPrompts.map((item) => (
+                                <button
+                                    key={item.label}
+                                    type="button"
+                                    disabled={isSendingQuickPrompt}
+                                    {...stylex.props(dialogPageStyles.papQuickPromptChip)}
+                                    onClick={() => void handleQuickPromptClick(item.prompt)}
+                                >
+                                    {item.label}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <ChatDisplayContext.Provider value={{ compactDeployCards: true }}>
                     <ChatArea
                         dialogId={dialogId}
                         scrollContainerSelector=".page-assistant-panel__chat-messages"
                         runtimeOptions={runtimeOptions}
                         messagesClassName={PAP_CHAT_MESSAGES_CLASS}
-                        agentPicker={{
-                            candidates: agentKeys.map((key) => ({
-                                key,
-                                isFavorite: favoriteAgentKeys.includes(key),
-                                // preferredAgentKeys 是侧栏传入的偏好/技能 agent，
-                                // 不等于"用户自己创建"，不标 isOwned 以免 👤 badge 语义错。
-                                isOwned: false,
-                                isPublic: !preferredAgentKeys.includes(key),
-                            })),
-                            activeAgentKey,
-                            onSelect: handleSwitchAgent,
-                        }}
                     />
                     </ChatDisplayContext.Provider>
                 </div>
@@ -392,9 +460,14 @@ export const ArtifactAssistantPanel = memo(
                     </span>
                     <span>
                         {isShowingChat
-                            ? activePanelTitle ?? t("chat:pageAssistant", "页面助手")
-                            : panelTitle ?? t("chat:favoriteAssistants", "常用助手")}
+                            ? activePanelTitle ?? t("chat:aiAssistant", "AI 助手")
+                            : panelTitle ?? t("chat:aiAssistant", "AI 助手")}
                     </span>
+                    {skillBadge && (
+                        <span {...stylex.props(dialogPageStyles.papSkillBadge)}>
+                            {skillBadge}
+                        </span>
+                    )}
                 </div>
             </header>
 

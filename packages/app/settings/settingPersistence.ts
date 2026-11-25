@@ -32,7 +32,7 @@ import {
 import { SYSTEM_DEFAULT_AGENT_ID, type SettingState } from "./settingTypes";
 import { DEFAULT_SYSTEM_AGENT_CAPABILITIES as DEFAULT_SYSTEM_BUILTIN_SKILLS } from "ai/tools/agentCapabilities";
 import { normalizeUiPlugins } from "app/plugins/uiPlugins";
-import { normalizeEnabledPromptSkills } from "ai/skills/userPromptSkills";
+import { normalizeEnabledPromptSkills } from "ai/skills/userPromptSkillSlugs";
 import { normalizeEnabledSkills } from "ai/skills/userSkills";
 
 /**

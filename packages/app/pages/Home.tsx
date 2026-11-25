@@ -1,15 +1,21 @@
 // 文件路径: packages/app/pages/Home.tsx
 
-import { useCallback, useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 
 import { useHasMounted } from "app/hooks/useHasMounted";
 import { usePageMeta, useStaticPageMeta } from "app/hooks/usePageMeta";
 import { useCurrentUser, useIsLoggedIn, useToken } from "identity";
-import { useMyContentItems } from "app/hooks/useMyContentItems";
+
+import { ClientLocalePending, useHomeLocaleGate } from "app/i18n/clientLocaleGate";
 
 import HomeLanding from "./HomeLanding";
-import DesktopAgentOnboarding from "./DesktopAgentOnboarding";
-import QuickChat from "./QuickChat";
+import HomePaneSkeleton from "./HomePaneSkeleton";
+
+// 登录态聊天面板（含 `useMyContentItems` 的 IndexedDB 依赖链）与桌面引导只在
+// 登录态 / 桌面 UI 分支渲染，访客首页用不到它们；静态 import 会把它们一并塞进
+// 访客首屏，改成按需加载。
+const AuthedHomeChat = lazy(() => import("./AuthedHomeChat"));
+const DesktopAgentOnboarding = lazy(() => import("./DesktopAgentOnboarding"));
 import { getIsDesktopApp } from "app/utils/env";
 import { getIsDesktopPreview } from "app/utils/env";
 import { getIsDesktopUiPreview } from "app/utils/env";
@@ -18,7 +24,6 @@ import {
   writeLocalFirstOnboardingDismissed,
 } from "app/localFirst/onboardingDismissed";
 
-import * as stylex from "@stylexjs/stylex";
 import { homeStyles } from "./HomeStyles";
 import { withLiteralClass } from "./share/withLiteralClass";
 import "./home-motion.css";
@@ -39,9 +44,6 @@ const Home = () => {
   // 只决定「渲染哪套布局」；项目绑定、cwd、工具挂载等能力面仍看 isDesktopApp。
   const isDesktopUi = getIsDesktopUiPreview();
   const showAuthedHome = hasMounted && (!!currentUser || isDesktopUi);
-  const pageMeta = useStaticPageMeta(showAuthedHome ? "default" : "home");
-  const { items: myContentItems, loading: myContentLoading } = useMyContentItems();
-  const isEmptyState = showAuthedHome && !myContentLoading && myContentItems.length === 0;
 
   // Desktop Agent-first onboarding. Device-local durable dismiss (shared local-first key),
   // matching RN: login/signup/local paths/skip all complete onboarding. Not account-scoped
@@ -63,7 +65,10 @@ const Home = () => {
     }
   }, []);
 
+  const locale = useHomeLocaleGate(showAuthedHome || showDesktopOnboarding || isLoggedIn);
+  const pageMeta = useStaticPageMeta(locale.ready && showAuthedHome ? "default" : "home");
   usePageMeta(pageMeta);
+  if (!locale.ready) return <ClientLocalePending {...locale} />;
 
 
   return (
@@ -83,19 +88,13 @@ const Home = () => {
           )}
         >
           {showDesktopOnboarding ? (
-            <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
+            <Suspense fallback={<HomePaneSkeleton />}>
+              <DesktopAgentOnboarding onDismiss={handleDismissOnboarding} />
+            </Suspense>
           ) : showAuthedHome ? (
-            <section {...stylex.props(homeStyles.homeBottomChatShell)}>
-              <div
-                {...withLiteralClass(
-                  "home-primary-chat",
-                  homeStyles.homePrimaryChat,
-                  homeStyles.homePrimaryChatInShell
-                )}
-              >
-                <QuickChat surface="home-primary" isEmptyState={isEmptyState} />
-              </div>
-            </section>
+            <Suspense fallback={<HomePaneSkeleton />}>
+              <AuthedHomeChat />
+            </Suspense>
           ) : (
             <>
               {!isDesktopUi && <HomeLanding />}

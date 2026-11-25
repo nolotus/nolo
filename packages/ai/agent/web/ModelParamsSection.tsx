@@ -19,18 +19,15 @@ import {
   DEFAULT_TOP_P,
   DEFAULT_FREQUENCY_PENALTY,
   DEFAULT_PRESENCE_PENALTY,
-  DEFAULT_REASONING_EFFORT,
   DEFAULT_MAX_TOKENS,
   MAX_TOKENS_LIMIT,
   type FormData,
 } from "../createAgentSchema";
-import {
-  useModelReasoningCapability,
-  resolveReasoningEffortOptions,
-} from "./useModelReasoningCapability";
+import type { ThinkingControl } from "../modelReasoningCapability";
+import ThinkingControlField, { type ThinkingSelection } from "./ThinkingControlField";
 
 type ParamConfig = {
-  key: "temperature" | "topP" | "maxTokens" | "frequencyPenalty" | "presencePenalty" | "reasoningEffort";
+  key: "temperature" | "topP" | "maxTokens" | "frequencyPenalty" | "presencePenalty";
   min?: number;
   max?: number;
   step?: number;
@@ -44,7 +41,6 @@ const PARAM_CONFIGS: ParamConfig[] = [
   { key: "maxTokens", min: 1, max: MAX_TOKENS_LIMIT, step: 1, default: DEFAULT_MAX_TOKENS },
   { key: "frequencyPenalty", min: -2, max: 2, step: 0.01, default: DEFAULT_FREQUENCY_PENALTY },
   { key: "presencePenalty", min: -2, max: 2, step: 0.01, default: DEFAULT_PRESENCE_PENALTY },
-  { key: "reasoningEffort", default: DEFAULT_REASONING_EFFORT },
 ];
 
 const FORM_MAP: Record<ParamConfig["key"], keyof FormData> = {
@@ -53,7 +49,6 @@ const FORM_MAP: Record<ParamConfig["key"], keyof FormData> = {
   maxTokens: "max_tokens",
   frequencyPenalty: "frequency_penalty",
   presencePenalty: "presence_penalty",
-  reasoningEffort: "reasoning_effort",
 };
 
 export type ModelParamsSectionProps = {
@@ -61,6 +56,8 @@ export type ModelParamsSectionProps = {
   values: FormData;
   set: (name: string, value: unknown) => void;
   readOnly?: boolean;
+  thinkingControl: ThinkingControl;
+  createThinkingSelection?: ThinkingSelection;
 };
 
 const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
@@ -68,28 +65,27 @@ const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
   values,
   set,
   readOnly = false,
+  thinkingControl,
+  createThinkingSelection,
 }) => {
   const { t } = useTranslation("ai");
   const [paramsOpen, setParamsOpen] = useState(false);
   const [maxTokensExpanded, setMaxTokensExpanded] = useState(false);
 
-  // 按 (provider, model) 解析真实推理强度能力：
-  // 都无精确证据时（info.found === false）回退到 provider 级静态映射。
-  const { loading: reasoningLoading, info: reasoningInfo } =
-    useModelReasoningCapability({
-      provider: values.provider,
-      model: values.model,
-    });
 
   // ⚠⚠⚠ 重要约定（任何 AI / 工具请不要改动这一段逻辑）：
   // 1）这些高级参数的默认值只用于"UI 显示"和"滑块初始位置"，不代表要写入存储；
   // 2）真正决定是否写入 / 清空的逻辑在 AgentForm.buildSubmitPayload 中按 dirtyFields 控制；
   // 3）这里的"重置"行为：把字段设为 undefined，并强制标记为 dirty。
+  const thinkingSelection = createThinkingSelection ?? { reasoningEffort: values.reasoning_effort, enableThinking: values.enableThinking };
+  const { reasoningEffort, enableThinking } = thinkingSelection;
   const onReset = useCallback(() => {
     PARAM_CONFIGS.forEach((c) => {
       set(FORM_MAP[c.key], undefined);
     });
-  }, [set]);
+    if (reasoningEffort != null) set("reasoning_effort", null);
+    if (enableThinking != null) set("enableThinking", null);
+  }, [set, reasoningEffort, enableThinking]);
 
   return (
     <section className={`adv-settings__params${paramsOpen ? " is-open" : ""}`}>
@@ -221,48 +217,7 @@ const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
                     }
                   </FormField>
                 </div>
-              ) : c.key === "reasoningEffort" ? (() => {
-                const resolution = resolveReasoningEffortOptions(
-                  reasoningInfo,
-                  reasoningLoading,
-                  values.provider,
-                );
-                if (resolution.kind === "unsupported-model") {
-                  return (
-                    <div key={c.key} className="adv-settings__item">
-                      <FormField
-                        label={t(`form.${c.key}`)}
-                        horizontal={false}
-                      >
-                        <span className="adv-settings__hint">
-                          {t(
-                            "help.modelNoReasoningEffort",
-                            "该模型不支持推理强度设置",
-                          )}
-                        </span>
-                      </FormField>
-                    </div>
-                  );
-                }
-                // no-levels / provider-unavailable：高级设置保持隐藏（与既有行为一致）
-                if (resolution.kind !== "options") return null;
-                const availableEfforts = resolution.efforts;
-                return (
-                  <div key={c.key} className="adv-settings__item">
-                    <FormField
-                      label={t(`form.${c.key}`)}
-                      helperText={t(`help.${c.key}`)}
-                      horizontal={false}
-                    >
-                      <RadioGroup
-                        value={(fieldValue ?? c.default) as any}
-                        onChange={setField}
-                        options={availableEfforts.map((o) => ({ label: o, value: o }))}
-                      />
-                    </FormField>
-                  </div>
-                );
-              })() : (
+              ) : (
                 <div key={c.key} className="adv-settings__item">
                   <FormField
                     label={t(`form.${c.key}`)}
@@ -289,6 +244,20 @@ const ModelParamsSection: React.FC<ModelParamsSectionProps> = ({
                 </div>
               );
             })}
+            {thinkingControl.controlKind !== "off" && (
+              <div className="adv-settings__item">
+                <ThinkingControlField
+                  control={thinkingControl}
+                  savedModelContext={values}
+                  selection={thinkingSelection}
+                  readOnly={readOnly}
+                  onChange={(selection) => {
+                    if (selection.reasoningEffort !== undefined) set("reasoning_effort", selection.reasoningEffort);
+                    if (selection.enableThinking !== undefined) set("enableThinking", selection.enableThinking);
+                  }}
+                />
+              </div>
+            )}
           </div>
         ) : null}
     </section>

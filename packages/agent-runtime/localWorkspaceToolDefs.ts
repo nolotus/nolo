@@ -27,7 +27,7 @@ export type { OpenAiCompatibleTool };
 
 const WORKSPACE_TOOL_NAMES = [
   "readFile", "read_image", "captureHostWindow", "writeFile", "editFile", "globFiles", "searchFiles", "captureVisualState",
-  "execShell", "launchProcess", "listProcesses",
+  "execShell", "launchProcess", "listProcesses", "readProcessOutput",
   "taskWait", "taskStop",
   "openDesktopPreview",
 ] as const;
@@ -37,7 +37,7 @@ const WORKSPACE_TOOL_NAMES = [
 // shell access would hand out dangling handles. openDesktopPreview is a pure
 // UI action (no process handle) and stays with the workspace-level tools.
 const SHELL_TOOL_NAMES = [
-  "execShell", "launchProcess", "listProcesses",
+  "execShell", "launchProcess", "listProcesses", "readProcessOutput",
   "taskWait", "taskStop",
 ] as const;
 
@@ -67,7 +67,7 @@ function buildWorkspacePathProperty() {
 }
 
 function buildReadWorkspaceDescription() {
-  return "Read a UTF-8 text file inside the workspace. For multiple files, call readFile concurrently in the same turn. Absolute paths and ~/ are also accepted (runtime spill files can be read directly). Use lines for focused range reads after search to save tokens. A range already delivered earlier for an unchanged file answers with a short notice instead of resending (force:true refetches).";
+  return "Read UTF-8 text (including runtime spills). Read known targets concurrently in one turn; search/glob first if paths or ranges are unknown, then use lines.";
 }
 
 function buildReadWorkspaceParameters() {
@@ -75,12 +75,12 @@ function buildReadWorkspaceParameters() {
   const lines = {
     type: "string",
     description:
-      'Line slice: "40-120" (range, 1-based, inclusive), "120-" (from line to end), "-50" (tail N lines), "50" (head N lines). Omit to read from the start; large results return a bounded window. Continue from metadata endLine + 1.',
+      "1-based inclusive slice: \"40-120\", \"120-\" (to EOF), \"-50\" (tail), \"50\" (head). Omit to start at top; large reads are bounded. Continue at metadata endLine+1.",
   };
   const force = {
     type: "boolean",
     description:
-      "Refetch even when the requested range was already delivered earlier and the file is unchanged (e.g. after context compaction).",
+      "An unchanged, already delivered range returns only a notice; true refetches (e.g. after compaction).",
   };
   return {
     type: "object",
@@ -90,7 +90,7 @@ function buildReadWorkspaceParameters() {
       force,
       raw: {
         type: "boolean",
-        description: "Read original bytes including full runtime acceptance observations in *.result.md. Default compacts only machine observations; report text and physical line numbers are unchanged.",
+        description: "Original *.result.md bytes incl. acceptance observations. Default compacts only machine observations, preserving report text and physical line numbers.",
       },
     },
     required: ["path"],
@@ -114,7 +114,7 @@ function buildWriteWorkspaceFileTool(): OpenAiCompatibleTool {
     function: {
       name: "writeFile",
       description:
-        "Write full UTF-8 file content inside the workspace (new files or whole-file rewrites). Prefer editFile for targeted edits.",
+        "Write full UTF-8 file content in the workspace (new files or whole-file rewrites). Prefer editFile for targeted edits.",
       parameters: {
         type: "object",
         properties: {
@@ -135,24 +135,23 @@ function buildReplaceWorkspaceTextTool(): OpenAiCompatibleTool {
     type: "function",
     function: {
       name: "editFile",
-      description:
-        "Replace exact text occurrences in a workspace file. If expected replacement count fails, report the error instead of falling back to a whole-file rewrite.",
+      description: "Replace exact text. Count mismatch errors; never fall back to whole-file rewrite.",
       parameters: {
         type: "object",
         properties: {
           path: buildWorkspacePathProperty(),
           oldText: {
             type: "string",
-            description: "Exact text currently present in the file.",
+            description: "Exact existing text.",
           },
           newText: {
             type: "string",
-            description: "Replacement text to write in place of oldText.",
+            description: "Replacement for oldText.",
           },
           expectedReplacements: {
             type: "integer",
             minimum: 1,
-            description: "Expected replacement count. Defaults to 1.",
+            description: "Expected count; default 1.",
           },
           // 刻意保持单一声明（integer），不引入 anyOf/oneOf 组合 schema：
           // provider 对组合 schema 的处理不一致——Gemini 会把无顶层 type 的联合
@@ -166,28 +165,28 @@ function buildReplaceWorkspaceTextTool(): OpenAiCompatibleTool {
 }
 
 function buildGlobWorkspaceDescription() {
-  return "Find file paths by glob pattern without reading file contents. Use brace groups (e.g. '**/*.{ts,tsx}') to match multiple patterns in one call.";
+  return "Glob paths without reading contents; brace groups combine patterns.";
 }
 
 function buildGlobWorkspaceParameters() {
   const pattern = {
     type: "string",
-    description: "Glob pattern for files (supports brace groups like '**/*.{ts,tsx}', '**/{package.json,tsconfig*.json}').",
+    description: "File glob, e.g. **/*.{ts,tsx}.",
   };
   const path = buildWorkspacePathProperty();
   const includeIgnored = {
     type: "boolean",
     description:
-      "When true, include gitignored files (.git and node_modules remain excluded).",
+      "Include gitignored files, never .git or node_modules.",
   };
   const maxResults = {
     type: "integer",
-    description: "Max file paths to return.",
+    description: "Maximum paths.",
   };
   const exclude = {
     type: "array",
     items: { type: "string" },
-    description: "Glob patterns to exclude from results.",
+    description: "Exclude globs.",
   };
   return {
     type: "object",
@@ -270,27 +269,35 @@ function buildLaunchProcessTool(): OpenAiCompatibleTool {
     type: "function",
     function: {
       name: "launchProcess",
-      description:
-        "Start a long-running ambient background process (dev server, watcher, REPL) and return immediately with {pid, label, taskId, status}. " +
-        "Real boundaries: this registers a tracked background task, but completion does NOT automatically start a new turn — the process is intentionally notice-only " +
-        "(an exited dev server must not silently burn a model turn). When it reaches a terminal state the bounded result (exitCode, duration, stdout/stderr tail) is recorded and " +
-        "surfaced as a notice injected only on your next real turn in the same conversation. Use listProcesses to inspect, taskWait to block for its terminal state, or taskStop to stop it. " +
-        "For a finite job (tests, builds, batch) whose result must resume the conversation automatically, use execShell with background: true instead.",
+      description: "Track a dev server, watcher or REPL; returns pid/label/taskId/status immediately unless readyPattern waits (ready/readyOutcome/matchedLine/waitedMs/tails). Exit is notice-only on the next real turn, never wakes one. Inspect/read/wait/stop via listProcesses/readProcessOutput/taskWait/taskStop. Finite jobs needing wakeup: execShell background:true.",
       parameters: {
         type: "object",
         properties: {
           command: {
             type: "string",
-            description: "Shell command to run in background.",
+            description: "Background shell command.",
           },
           label: {
             type: "string",
-            description: "Optional friendly label for the process.",
+            description: "Display label.",
           },
           persist: {
             type: "boolean",
             description:
-              "Keep process alive after session/conversation closes. Defaults to false.",
+              "Survive session/conversation close; default false.",
+          },
+          readyPattern: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Wait for stdout/stderr regex; omit for immediate return. Linear-time, per line, ANSI stripped; while running, newline-terminated only. Backreferences and lookarounds fail with `invalid-arguments`.",
+          },
+          readyTimeoutMs: {
+            type: "integer",
+            minimum: 100,
+            maximum: 120000,
+            description:
+              "Ready wait in ms; default 30000, clamp 100..120000. Timeout returns tails without stopping task.",
           },
         },
         required: ["command"],
@@ -338,6 +345,56 @@ function buildListProcessesTool(): OpenAiCompatibleTool {
   };
 }
 
+function buildReadProcessOutputTool(): OpenAiCompatibleTool {
+  return {
+    type: "function",
+    function: {
+      name: "readProcessOutput",
+      description: "Read live/final stdout/stderr for tracked launchProcess or promoted execShell tasks. Returns {outcome, taskId, status, exitCode?, cursor, stdout, stderr, truncated, cursorEvicted, matchedStream?, matchedLine?, waitedMs?, outputRef?}. cursorEvicted means earlier bytes dropped from 64KB ring. Do not poll finite execShell jobs; completion wakes the conversation.",
+      parameters: {
+        type: "object",
+        properties: {
+          taskId: {
+            type: "string",
+            minLength: 1,
+            description: "Task ID from launchProcess or listProcesses.",
+          },
+          cursor: {
+            type: "string",
+            description:
+              "Reuse returned <stdoutLines>:<stderrLines> cursor for new output; omit for current tail.",
+          },
+          stream: {
+            type: "string",
+            enum: ["both", "stdout", "stderr"],
+            description: "Read/match streams; default both.",
+          },
+          maxChars: {
+            type: "integer",
+            minimum: 256,
+            maximum: 32000,
+            description: "Chars per stream; default 8000, clamp 256..32000.",
+          },
+          waitForPattern: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Wait for regex match, exit or timeoutMs. Linear-time, per line, ANSI stripped; while running, newline-terminated only. Backreferences and lookarounds fail with `invalid-arguments`.",
+          },
+          timeoutMs: {
+            type: "integer",
+            minimum: 0,
+            maximum: 120000,
+            description:
+              "waitForPattern budget (ms); default 30000, clamp 0..120000.",
+          },
+        },
+        required: ["taskId"],
+      },
+    },
+  };
+}
+
 // --- ProcessTask follow-up tools (Phase 1) -----------------------------------
 // These four only observe/stop tasks that already exist: a launchProcess task,
 // or an execShell command that exceeded its detach window and returned
@@ -354,9 +411,8 @@ function buildTaskWaitTool(): OpenAiCompatibleTool {
         + "Returns {outcome, status, exitCode?, cursor, events}: outcome \"terminal\" with status exited|failed|stopped when it finished, "
         + "outcome \"timeout\" with status \"running\" when it outlived the whole budget, "
         + "outcome \"not-found\" for an unknown taskId, or outcome \"evicted\" when the event trail aged out (never wait again in that case). "
-        + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer than that — go do other work and come back, rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
-        + "Pass a small timeoutMs for a cheap liveness peek instead of the full result. "
-        + "`cursor` is the highest event seq covered by this response.",
+        + "One call already waits the maximum budget and returns the moment the task ends, so a \"timeout\" means the task is genuinely longer — go do other work and come back rather than re-waiting in a loop (each re-wait costs a full model round-trip). "
+        + "Pass a small timeoutMs for a cheap liveness peek. `cursor` is the highest event seq covered by this response.",
       parameters: {
         type: "object",
         properties: {
@@ -382,18 +438,14 @@ function buildTaskStopTool(): OpenAiCompatibleTool {
     type: "function",
     function: {
       name: "taskStop",
-      description:
-        "Stop a background task: SIGTERM to its process group, then SIGKILL if it is still alive after a short grace window. "
-        + "Returns {outcome, status, signal, escalated}: outcome \"stopped\" with status \"stopped\" on success, "
-        + "or outcome \"not-stoppable\" (already finished, or a foreground command that is not a background task) or \"not-found\". Never reports success without signalling. "
-        + "Note: taskId is the handle returned by launchProcess or a detached execShell result (e.g. \"ptask-...\"). To stop an agent run, use controlAgentRun(action: \"stop\", runId: \"...\") instead; do not pass runId or empty strings to taskStop.",
+      description: "Signal background process group: SIGTERM, then SIGKILL after a short grace period if alive. Returns {outcome,status,signal,escalated}: stopped only if signalled; else not-stoppable (finished/foreground) or not-found. Never pass runId/empty IDs; stop agent runs with controlAgentRun(action: \"stop\").",
       parameters: {
         type: "object",
         properties: {
           taskId: {
             type: "string",
             minLength: 1,
-            description: "Task id returned by launchProcess or by a detached execShell result.",
+            description: "Task ID from launchProcess or detached execShell.",
           },
         },
         required: ["taskId"],
@@ -418,7 +470,7 @@ export function buildWorkspaceToolDefinition(toolName: string) {
       type: "function" as const,
       function: {
         name: "read_image",
-        description: "Read 1 to 4 local PNG/JPEG/WebP/GIF images in one call. Supply either path (one image) or paths (1–4 images), never both. Any failure rejects the entire batch. Long edges above 1568px are resized to JPEG q80. Maximum encoded base64 size is 2MiB per image; request budget remains 4 images / 8MiB. Note: Chat attachments labeled [附件] are already delivered directly into visual context; do not call read_image for chat attachments.",
+        description: "Local PNG/JPEG/WebP/GIF: path or paths (1–4), not both; any failure rejects batch. Long edge >1568px → resize to JPEG q80; base64 limits: 2MiB/image, 8MiB/request. Never reread chat [附件] (already visible).",
         parameters: {
           type: "object",
           properties: {
@@ -446,19 +498,19 @@ export function buildWorkspaceToolDefinition(toolName: string) {
       type: "function",
       function: {
         name: "searchFiles",
-        description: "Search UTF-8 text files in the workspace by literal string or regex (works across code, docs, notes, and data files on Windows/macOS/Linux; respects .gitignore by default and stops early at maxResults). Prefer searchFiles over shell grep/rg/Select-String.",
+        description: "Search workspace UTF-8 text, literal or regex, on Windows/macOS/Linux. Prefer over shell grep/rg/Select-String.",
         parameters: {
           type: "object",
           properties: {
-            query: { type: "string", minLength: 1, description: "Search text. Also accepts pattern when query is omitted (grep/rg alias compatibility)." },
+            query: { type: "string", minLength: 1, description: "Search text; pattern is a grep/rg alias if query is omitted." },
             path: buildWorkspacePathProperty(),
-            regex: { type: "boolean", description: "Default false: search for a literal string. Set true for regex." },
+            regex: { type: "boolean", description: "Regex if true; literal by default." },
             caseSensitive: { type: "boolean", description: "Default true." },
-            include: { type: "string", description: "File glob filter, e.g. *.{ts,md}." },
+            include: { type: "string", description: "Include glob, e.g. *.{ts,md}." },
             exclude: { type: "array", items: { type: "string" } },
             contextLines: { type: "integer", minimum: 0, maximum: 5 },
-            maxResults: { type: "integer", minimum: 1, maximum: 1000, description: "Default 100; stop early after this many matches." },
-            includeIgnored: { type: "boolean", description: "Default false: respect .gitignore." },
+            maxResults: { type: "integer", minimum: 1, maximum: 1000, description: "Stop at this many matches; default 100." },
+            includeIgnored: { type: "boolean", description: "Include gitignored files; default false." },
           },
           required: ["query"],
           additionalProperties: false,
@@ -474,6 +526,7 @@ export function buildWorkspaceToolDefinition(toolName: string) {
   if (toolName === "launchProcess") return buildLaunchProcessTool();
   if (toolName === "openDesktopPreview") return buildOpenDesktopPreviewTool();
   if (toolName === "listProcesses") return buildListProcessesTool();
+  if (toolName === "readProcessOutput") return buildReadProcessOutputTool();
   if (toolName === "taskWait") return buildTaskWaitTool();
   if (toolName === "taskStop") return buildTaskStopTool();
   return null;

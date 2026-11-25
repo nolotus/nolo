@@ -121,6 +121,9 @@ export function createInitialTuiState(env: EnvLike = process.env): TuiState {
       agentKey,
       userLanguage: asOptionalTrimmedString(env.NOLO_LANG),
       responseViewport: TUI_RESPONSE_VIEWPORT,
+      // 估算必须看运行时那同一份 env：`NOLO_EXPOSE_MCP_TOOLS=1` 会让 local 装配
+      // 多出 3 个 MCP 工具 schema，估算器若只看写死的 wake 开关就会低报。
+      env,
       ...resolveAgentModelIdentity({ agentKey, agentName }),
     }),
   };
@@ -147,6 +150,12 @@ function applyAgentSwitch(
   state: TuiState,
   target: { name: string; key: string; model?: string },
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
+  /**
+   * 估算用的宿主 env（只给 estimateDefaultCliContextTokens）。必须等于真实
+   * 运行时那一份（`options.env ?? process.env`），不是任务查询用的合并 env：
+   * 显式 `{}` 不能被 `process.env` 补回来，否则 MCP/Instabox 开关会多算 token。
+   */
+  estimateEnv?: EnvLike,
 ) {
   const contextWindow = resolveAgentContextWindow({
     agentKey: target.key,
@@ -167,6 +176,7 @@ function applyAgentSwitch(
         userLanguage: state.userLanguage,
         responseViewport: TUI_RESPONSE_VIEWPORT,
         messages: historyTurns,
+        env: estimateEnv ?? process.env,
       }),
     },
     output: `Switched to ${target.name}. ${
@@ -295,6 +305,32 @@ export function isShellPassthroughInput(input: string): boolean {
   return input.trimStart().startsWith("!");
 }
 
+interface TuiInputDeps {
+  /** 任务查询/持久化用的环境（readlineWorkspace 的 `{ ...process.env, ...options.env }` 合并快照）。 */
+  env?: EnvLike;
+  /**
+   * 上下文估算专用 env：必须与真实运行同一份（`options.env ?? process.env`）。
+   * 调用方若显式传 `{}`，估算就被钉在空 env 上；`??` 不会回落到 `deps.env`
+   * 或 `process.env`——否则「宿主显式空 env、进程 env 开了 MCP/Instabox」
+   * 会多算这些工具 schema 的 token，而运行时不带它们。
+   * 缺省时回落 `deps.env`（老调用方语义不变）。
+   */
+  estimateEnv?: EnvLike;
+  /**
+   * Where the caller will display command output. `/links` needs it because
+   * the copy hint it prints must match the channel: only a transcript turn
+   * (interactive history) supports Ctrl+left-click and the built-in
+   * selection copy; pipe/script output is plain stdout.
+   * Defaults to "pipe" — the answer that is never wrong.
+   */
+  linksTarget?: ConversationLinksTarget;
+}
+
+/** 估算 env 的唯一解析口径：显式 estimateEnv（含 `{}`）→ deps.env（→ process.env 由调用点兜底）。 */
+function resolveEstimateEnv(deps?: TuiInputDeps): EnvLike | undefined {
+  return deps?.estimateEnv ?? deps?.env;
+}
+
 /**
  * `historyTurns` is optional and only /links reads it. It exists because the
  * transcript lives in the workspace-scoped TurnHistory rather than in TuiState,
@@ -305,17 +341,7 @@ export function handleTuiInput(
   input: string,
   state: TuiState,
   historyTurns?: ReadonlyArray<{ role?: string; content?: string }>,
-  deps?: {
-    env?: EnvLike;
-    /**
-     * Where the caller will display command output. `/links` needs it because
-     * the copy hint it prints must match the channel: only a transcript turn
-     * (interactive history) supports Ctrl+left-click and the built-in
-     * selection copy; pipe/script output is plain stdout.
-     * Defaults to "pipe" — the answer that is never wrong.
-     */
-    linksTarget?: ConversationLinksTarget;
-  },
+  deps?: TuiInputDeps,
 ): TuiInputResult {
   const trimmed = input.trim();
   if (!trimmed) {
@@ -743,7 +769,7 @@ export function handleTuiInput(
           output: t("agentUnknown", argText),
         };
       }
-      return applyAgentSwitch(state, resolvedTarget, historyTurns);
+      return applyAgentSwitch(state, resolvedTarget, historyTurns, resolveEstimateEnv(deps) ?? process.env);
     }
     case "/lang": {
       const locale = parseCliLocale(argText);
@@ -764,6 +790,7 @@ export function handleTuiInput(
             userLanguage: locale,
             responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: historyTurns,
+            env: resolveEstimateEnv(deps) ?? process.env,
             ...resolveAgentModelIdentity({
               agentKey: state.agentKey,
               agentName: state.agentName,

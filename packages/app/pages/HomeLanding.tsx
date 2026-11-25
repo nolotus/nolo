@@ -1,11 +1,12 @@
-import { type RefObject, useEffect, useRef } from "react";
-import { NavLink, useLocation } from "app/routing";
+import { useEffect } from "react";
+import { NavLink } from "app/routing";
 import { resolveCtaPosition, sendFunnelBeacon } from "app/analytics/funnelBeacon";
 import { useTranslation } from "react-i18next";
 import { LuArrowUpRight, LuCheck, LuDownload, LuMinus, LuRotateCcw } from "react-icons/lu";
 
 import WelcomeFaqAccordion from "./WelcomeFaqAccordion";
 import OrchestrationShowcase from "./OrchestrationShowcase";
+import DeferredMount from "./DeferredMount";
 import { guestHomeBandVars } from "render/layout/guestHomeTone";
 import "render/layout/naturePalette.css";
 import "render/layout/noloSerifFont.css";
@@ -31,43 +32,6 @@ type Pillar = { title: string; body: string; example?: string };
 type FaqItem = { question: string; answer: string };
 type WhyNowItem = { title: string; body: string };
 
-const isPresentSearch = (search: string) => new URLSearchParams(search).get("present") === "1";
-
-/**
- * `?present=1` (owner pitching in person): every section is one screen and
- * arrow keys / PageUp / PageDown step section by section. Enhancement only —
- * before hydration the CSS layout already works and the browser's own
- * PageDown keeps scrolling normally (there is no scroll-snap).
- */
-const usePresentKeys = (enabled: boolean, rootRef: RefObject<HTMLDivElement | null>) => {
-  useEffect(() => {
-    if (!enabled) return;
-    const NEXT = new Set(["ArrowDown", "ArrowRight", "PageDown"]);
-    const PREV = new Set(["ArrowUp", "ArrowLeft", "PageUp"]);
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
-      const dir = NEXT.has(event.key) ? 1 : PREV.has(event.key) ? -1 : 0;
-      if (!dir) return;
-      const target = event.target as HTMLElement | null;
-      // Tabs, form fields and the FAQ keep their own arrow-key behavior.
-      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="tablist"], [role="tab"]')) return;
-      const root = rootRef.current;
-      const main = root?.closest<HTMLElement>(".MainLayout__main");
-      if (!root || !main) return;
-      const tops = Array.from(root.querySelectorAll<HTMLElement>(":scope > section")).map(
-        (section) => section.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop,
-      );
-      const y = main.scrollTop;
-      const next = dir > 0 ? tops.find((top) => top > y + 4) : [...tops].reverse().find((top) => top < y - 4);
-      if (next === undefined) return;
-      event.preventDefault();
-      main.scrollTo({ top: next, behavior: "smooth" });
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [enabled, rootRef]);
-};
-
 const HomeLanding = () => {
   const { t } = useTranslation();
   useEffect(() => sendFunnelBeacon({ event: "landing_view" }), []);
@@ -79,10 +43,6 @@ const HomeLanding = () => {
   const handItems = t(`${NS}.compare.handItems`, { returnObjects: true }) as string[];
   const noloItems = t(`${NS}.compare.noloItems`, { returnObjects: true }) as string[];
   const whyNow = t(`${NS}.whyNow.items`, { returnObjects: true }) as WhyNowItem[];
-  // Read from the router location so SSR renders the same class (no flash).
-  const present = isPresentSearch(useLocation().search);
-  const rootRef = useRef<HTMLDivElement>(null);
-  usePresentKeys(present, rootRef);
 
   const actions = (
     <div className="hl-actions">
@@ -110,8 +70,7 @@ const HomeLanding = () => {
 
   return (
     <div
-      ref={rootRef}
-      className={present ? "home-landing home-landing--present" : "home-landing"}
+      className="home-landing"
       // Bands come from guestHomeTone.ts so the topbar can follow them exactly.
       style={guestHomeBandVars()}
     >
@@ -216,7 +175,12 @@ const HomeLanding = () => {
             {t(`${NS}.orchestration.title`)}
           </h2>
           <p className="hl-section-lead">{t(`${NS}.orchestration.lead`)}</p>
-          <OrchestrationShowcase className="hl-orch" />
+          {/* 编排演示挂载即拉 3 套 SVG + 7 个图标并起动画；它在首屏之下，
+              进视口前不挂载。标题与 lead 仍参与 SSR；占位高度由
+              .hl-orch-deferred 按断点给出，避免挂载瞬间的布局偏移。 */}
+          <DeferredMount className="hl-orch-deferred">
+            <OrchestrationShowcase className="hl-orch" />
+          </DeferredMount>
         </div>
       </section>
 

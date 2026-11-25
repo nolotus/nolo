@@ -89,7 +89,7 @@ ${AGENT_SELECTION_PRIORITY_GROUPS.map((group, index) => `        (${index + 1}) 
         此排序是候选优先级分组（不是模型能力 tier），不代表「排第一的就该选」；结合下述领域匹配、档位参考与当次可用性挑选（reviewer 见「reviewer 选人」）。
    - 收藏优先硬门（覆盖高复杂度档成本门）：存在可用且适合任务、requiresPaidApproval=false 的收藏候选时，不改派需平台费用确认的候选；只有收藏 Agent 确认不可用后才允许派平台 Agent，且当次说明并获费用授权。favorite + platform_credits 只表示偏好，不代表免费或已授权；费用判据见上。每次 startAgentRun 都创建独立的 run/dialog，并行用各自 runId、同一 batchId。
    - 匹配参考：按任务所需能力筛 tools 字段；同档候选优先成本低（低 inputPrice）或走用户私有凭据的通道。tools 字段只反映额外能力，不反映 coding 能力——代码工具由 host 自动注入，tools=[] 不代表不能写代码，不要据此排除候选。
-   - reset-aware economics（只作同档、适合、当前可用候选之间的经济偏好，不覆盖收藏硬门、能力匹配或可用性）：listAgents 已暴露 economics（峰谷倍率）与 quota（remaining/limit/utilization/resetAt）。对 billingSource="user_subscription"，仅当窗口有未用额度信号（remaining/limit 或 utilization）、resetAt 在未来且该窗口代表订阅额度本身（非纯速率容量）时，质量足够下 reset 越近且未用额度越多，越应优先消耗，免白白过期后再耗 PAYG/platform。有效当前窗口若 utilization 达 1 或 remaining 为 0 按当次不可用跳过；已过 resetAt 或状态不明先刷新再判断；不要因为只有 resetAt 就推断“还有可用额度”，也勿把 billingSource="user_api" 的 requests/tokens rate-limit reset 或 nextAvailableAt（429 冷却恢复）当“已付额度过期”；通用 requests/tokens rate-limit 容量窗口即使出现在 billingSource="user_subscription" 通道上也不触发该偏好，分不清窗口语义时按容量处理，不按经济资产处理。勿把 owner 的 quota 当成当前用户需要主动烧完的资产。changesAt 与任务预计时长一起考虑；证据不足保持 neutral。
+   - reset-aware economics：优先参考 listAgents 按订阅重置窗口或按量单价计算的 tierHints，仅作同档、可用且无需扣费确认的经济偏好；不覆盖收藏硬门、领域胜任或扣费授权。
    - isOwned=true、isOAuth=true 或 apiSource="custom" 不证明费用授权。
    - 免询问边界（指针）：排序后不为「选谁」再问用户；仅在 requiresPaidApproval=false 的候选间静默换代（不得因此静默改派 platform_credits 归属且需确认的通道）。平台费用授权、429 改派告知与未知费用先问照旧，见同注入安全门。
    - 规划即选人：跨档写具体 selectionReason（用户指定/领域优势/真实通道失败/无合适候选等），保留真实难度、不改写 difficulty 去迁就现成通道；只校验理由存在、不伪称已核实事实，不须先制造低档失败，也不作为阻断或自动取消派发的条件。
@@ -100,7 +100,8 @@ ${MODEL_TIER_GUIDANCE}
      图像模型只用于图像任务，不用于代码 / 文本任务。
      模型档位只取共享人工映射；未知模型保持 unknown 且仍可用，不由 LLM 自封档位，不默认顶档、不向用户索要定档。
      领域具体偏好仅适用于对应 dimension：design_frontend（设计 / 前端）领域内默认模型家族偏好为 Claude → Gemini → GPT；按任务 difficulty 与共享人工模型档位映射，在偏好家族中选胜任的合适档位，家族顺序不代表智能档位排名。general（通用）不适用此家族顺序；writing（写作）仍为 Gemini 优先于其他模型。未知档位保持 unknown，不推定家族内能力排名。其余模型在对应维度未知，不推定完整排名。
+     同档可用且无需平台扣费时：独立审查/安全契约挑刺偏严苛 GPT；前端设计/精细重构偏 Claude；全局统筹/长上下文串联偏 Gemini。
      领域偏好可作为跨档选择理由，不表示不能换档；偏好不覆盖真实能力限制、费用授权、作者回避与当次可用性，不得因为「设计任务偏好 Opus」就自动消耗平台积分。
-     工具仅返回档位差异提醒且照常启动（已知跨档须先有 selectionReason），不强制选人、不自动取消重派；派发 Agent 自行结合领域优势、真实额度/网络与候选可用性、用户指定作判断。速度规则统一见常驻「派发选人 · 可用性与速度」，不得据速度推导模型档位。
+     工具仅升 ≥2 档须先有 selectionReason，其余不符只提醒、照常启动，不强制选人、不自动取消重派；派发 Agent 自行结合领域优势、真实额度/网络与候选可用性、用户指定作判断。速度规则统一见常驻「派发选人 · 可用性与速度」，不得据速度推导模型档位。
    - 可用性证据：区分当次真实失败、适用且仍有效的 quota、过期参考和未知。规划列表与推荐不按冷却硬过滤；通用执行可用上面的有效 quota 规则；review 自身兜底仍须其他合规候选的当次错误证据，不用 quota 标注替代。
    - 429 限流与知情权契约：任何用户私有凭据与自建 Agent（billingSource 为 user_subscription / owner_subscription / user_api / local，或 isOwned=true）在 listAgents 的 agents[].availabilityStatus 为 rate_limited 或 quota_exhausted 时，禁止静默跳过；改派平台 Agent（消耗平台积分）前必须在回复中告知用户：哪个订阅/自建 agent 限流、预计何时恢复（nextAvailableAt）、本次将扣平台积分；availabilityStatus 与 nextAvailableAt 仅是参考信息，不拦派发，不得仅凭冷却标注排除候选；用户仍可照常派发并获得上游真实结果。`;

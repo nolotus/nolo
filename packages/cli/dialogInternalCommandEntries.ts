@@ -31,5 +31,9 @@ export function getDialogInternalCommandEntries(): CommandEntry[] {
       const { runDialogStatusCommand } = await import("./dialogCommands");
       return runDialogStatusCommand(args, deps);
     }),
+    createEnvCommand(["dialog", "trace"], "Trace one dialog: messages, token usage and subagent runs (--json)", async (args, deps) => {
+      const { runDialogTraceCommand } = await import("./dialogTraceCommand");
+      return runDialogTraceCommand(args, deps);
+    }),
   ];
 }

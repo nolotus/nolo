@@ -55,8 +55,8 @@ const GuidedAgentCreatePage: React.FC = () => {
           </h1>
           <p {...stylex.props(styles.headerSubtitle)}>
             {t(
-              "guidedCreate.manualSubtitle",
-              "先选运行方式。平台路径填提示词即可创建；API 用量计费填 URL 与 Key；订阅请用桌面端。知识、工具、发布用「高级编辑」。想边聊边建，可在新对话页使用对话创建 AI。"
+              "guidedCreate.sourceOverview",
+              "平台内置无需配置。我的订阅：OAuth 品牌需在桌面端绑定，Token Plan 可用专用 Key 在网页创建。自带 API：填 Key，只有自定义兼容接口才需填 URL。本机 CLI 请从三张卡片下方进入。"
             )}
           </p>
         </div>

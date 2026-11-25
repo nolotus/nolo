@@ -501,6 +501,8 @@ export function polishBreathInsertsBlankBetween(cur: string, next: string): bool
   if (isPolishHeadingLine(cur) || isPolishHeadingLine(next)) return false;
   // 代码/mermaid 围栏进出各 1 行（空围栏的两个标记之间不插）。
   if (isCodeFenceLine(cur) !== isCodeFenceLine(next)) return true;
+  // A window's indented collapse hint is a continuation, not prose after a ▸ bullet.
+  if (plainToolLine(cur).startsWith("▸ ") && plainToolLine(next).startsWith("  …")) return false;
   // 工具分组边界优先于通用列表/散文规则：同一组的工具行紧贴，不同组之间
   // 留一行呼吸（flat 行换 label、树叶之后接新的工具行）。
   const toolBoundary = toolRowBoundary(cur, next);

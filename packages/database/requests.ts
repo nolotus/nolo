@@ -242,21 +242,39 @@ export const noloWriteRequest = async (
 };
 
 /**
+ * 上传归属声明（claim）。客户端只能「声明」归属，服务端
+ * (`database/server/routes/uploadOwnership.ts`) 才是归属权威：
+ * - `user`（缺省）：ownerId 只能是 token 用户本人；
+ * - `space`：服务端校验 Space 存在 / 未删除 / 调用者角色（owner|admin|member 可写，
+ *   guest 与非成员 403），通过后落库 `ownerType: "space"` + `ownerId` = Space id。
+ *
+ * 只影响**归属**：把个人文件收录进 Space 走的是另一条链路（引用既有 file 记录），
+ * 不带这份声明，也不会因此变成 Space 资产。
+ */
+export type UploadOwnershipClaim = {
+  ownerType?: "user" | "space";
+  /** `ownerType: "space"` 时必填（服务端还会归一化 `space-` 前缀）。 */
+  spaceId?: string;
+};
+
+export type UploadRequestConfig = {
+  file: File;
+  metadata: any;
+  customKey: string;
+  userId?: string;
+} & UploadOwnershipClaim;
+
+/**
  * 向单个服务器发送 POST 请求 (用于文件上传)
  * @param server 服务器地址
- * @param uploadConfig 上传配置 { file, metadata, customKey, userId }
+ * @param uploadConfig 上传配置 { file, metadata, customKey, userId, ownerType?, spaceId? }
  * @param state Redux state
  * @param signal AbortSignal
  * @returns Promise<boolean> 请求是否成功 (response.ok)
  */
 export type RNOverrideUploadHandler = (
   server: string,
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  },
+  uploadConfig: UploadRequestConfig,
   state: any,
   signal?: AbortSignal
 ) => Promise<boolean>;
@@ -316,17 +334,12 @@ const xhrUploadRequest = (
 
 export const noloUploadRequest = async (
   server: string,
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  },
+  uploadConfig: UploadRequestConfig,
   state: any,
   signal?: AbortSignal,
   onProgress?: UploadProgressHandler
 ): Promise<boolean> => {
-  const { file, metadata, customKey, userId } = uploadConfig;
+  const { file, metadata, customKey, userId, ownerType, spaceId } = uploadConfig;
   const googleSession = isGoogleAuthoritySession(selectIdentityToken(state));
   try {
     googleSessionRequestToken(selectIdentityToken(state) ?? undefined, server);
@@ -363,6 +376,13 @@ export const noloUploadRequest = async (
     if (userId) {
       formData.append("userId", userId); // 添加用户ID（如果有）
     }
+    // 归属声明：服务端会按自身校验结果落库，声明本身不构成授权。
+    if (ownerType) {
+      formData.append("ownerType", ownerType);
+    }
+    if (spaceId) {
+      formData.append("spaceId", spaceId);
+    }
 
     if (onProgress && !googleSession && typeof XMLHttpRequest !== "undefined") {
       const result = await xhrUploadRequest(
@@ -374,7 +394,10 @@ export const noloUploadRequest = async (
       );
       if (!result.ok) {
         console.error(
-          `Upload request failed for ${customKey} on ${server}: HTTP ${result.status}`
+          `Upload request failed for ${customKey} on ${server}: HTTP ${result.status}` +
+            (ownerType === "space"
+              ? " (space ownership claim rejected: the Space may not be synced to this server, or you are not a member there)"
+              : "")
         );
       }
       return result.ok;
@@ -393,7 +416,10 @@ export const noloUploadRequest = async (
     );
     if (!response.ok) {
       console.error(
-        `Upload request failed for ${customKey} on ${server}: HTTP ${response.status}`
+        `Upload request failed for ${customKey} on ${server}: HTTP ${response.status}` +
+          (ownerType === "space"
+            ? " (space ownership claim rejected: the Space may not be synced to this server, or you are not a member there)"
+            : "")
       );
     }
     if (response.ok && googleSession && onProgress) onProgress(file.size, file.size);

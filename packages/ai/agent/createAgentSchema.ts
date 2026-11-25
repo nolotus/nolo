@@ -386,10 +386,7 @@ export const getCreateAgentSchema = (t: TFunction) => {
       ),
     ),
 
-    reasoning_effort: pipe(
-      nullish(picklist(REASONING_EFFORT_OPTIONS)),
-      transform((v) => v ?? DEFAULT_REASONING_EFFORT),
-    ),
+    reasoning_effort: nullish(picklist(REASONING_EFFORT_OPTIONS)),
 
     /**
      * enableThinking：是否开启模型思考模式
@@ -397,7 +394,7 @@ export const getCreateAgentSchema = (t: TFunction) => {
      * - Anthropic Claude: 注入 thinking: { type:"enabled", budget_tokens }
      * - DeepSeek: delta.reasoning_content
      */
-    enableThinking: optional(boolean(), false),
+    enableThinking: nullish(boolean()),
 
     /**
      * thinkingBudget：思考 token 预算（仅对支持 budget_tokens 的 provider 生效，如 Anthropic）

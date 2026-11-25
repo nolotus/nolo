@@ -71,7 +71,7 @@ import { createTrimRequester, resolveTranscribeTrim } from "./transcribePrefligh
 import { readClipboardImage } from "./clipboardImage";
 import type { ClipboardPasteSource } from "./pasteFlow";
 import { themeText, applyDetectedBackground } from "./theme";
-import { detectTerminalBackground } from "./detectBackground";
+import { detectTerminalBackground, resetPtyxisCanvasCache } from "./detectBackground";
 import { resolveCliColorEnabled } from "../client/terminalStyles";
 import {
   enterAltScreen,
@@ -258,6 +258,10 @@ export async function runSubmittedSlashLine(
   // env it already had.
   const result = handleTuiInput(line, host.state, collectConversationTurns(host.history), {
     env: host.taskEnv,
+    // Context estimate must see the runtime's env, not the merged task env:
+    // an explicit `{}` in options.env means the turn runs without the process
+    // env (no MCP/Instabox schemas), so the chip must not count them either.
+    estimateEnv: host.options.env ?? process.env,
     authEnv: resolveTuiIdentityEnv(host.taskEnv, host.options.env ?? process.env),
     // 交互模式下非 chat 输出会进 transcript（emitCommandOutput → appendLocalTurn），
     // /links 的 Ctrl+左键提示才成立；管道/脚本下同一份文本只是 stdout，不能用快捷键承诺。
@@ -386,6 +390,7 @@ export async function runSubmittedSlashLine(
         agentKey: host.state.agentKey,
         userLanguage: host.state.userLanguage,
         responseViewport: TUI_RESPONSE_VIEWPORT,
+        env: host.options.env ?? process.env,
         ...resolveAgentModelIdentity({
           agentKey: host.state.agentKey,
           agentName: host.state.agentName,
@@ -394,6 +399,7 @@ export async function runSubmittedSlashLine(
     };
     history.turns.length = 0;
     history.toolDetails = [];
+    history.lastTurnToolDetailStart = 0;
     history.currentRole = null;
     history.currentContent = "";
     history.scrollTop = 0;
@@ -499,6 +505,7 @@ export async function runSubmittedSlashLine(
           agentKey: host.state.agentKey,
           userLanguage: host.state.userLanguage,
           responseViewport: TUI_RESPONSE_VIEWPORT,
+          env: host.options.env ?? process.env,
           messages: [
             ...(compactResult.summary ? [{ role: "system", content: compactResult.summary }] : []),
             ...(compactResult.compactedMessageCount > 0
@@ -603,10 +610,13 @@ export async function runSubmittedSlashLine(
     // theme switch in Ghostty et al. is picked up by the internal palette.
     // emitCommandOutput renders the history and repaints the composer with
     // the updated brightness, so no extra repaint is needed here.
+    // A manual refresh must re-read the host canvas, not a cached answer.
+    resetPtyxisCanvasCache();
     const detected = await detectTerminalBackground({
       stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
       stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
       allowSystemFallback: true,
+      trustHostCanvas: true,
     });
     if (detected && applyDetectedBackground(detected)) {
       emitCommandOutput(t("themeRefreshed", detected.brightness));
@@ -652,7 +662,7 @@ export async function runSubmittedSlashLine(
       if (!target || !entries.some((entry) => entry.key === target.key)) {
         emitCommandOutput(t("agentUnknown", query));
       } else {
-        const nextState = applyAgentSwitchState(host.state, target, host.history.turns);
+        const nextState = applyAgentSwitchState(host.state, target, host.history.turns, options.env ?? process.env);
         // No mutation above this point: lookup failures leave all switch state
         // untouched. Commit the validated selection synchronously, without await.
         const oldKey = host.state.agentKey;
@@ -699,6 +709,7 @@ export async function runSubmittedSlashLine(
             userLanguage: host.state.userLanguage,
             responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: host.history.turns,
+            env: host.options.env ?? process.env,
           }),
           turnTokens: undefined,
           lastAuthorityTurnCount: undefined,
@@ -783,6 +794,7 @@ export async function runSubmittedSlashLine(
         const restored = loadedTurns.slice(-MAX_TUI_HISTORY_TURNS);
         history.turns.length = 0;
         history.toolDetails = [];
+        history.lastTurnToolDetailStart = 0;
         history.turns.push(...restored);
         history.currentRole = null;
         history.currentContent = "";
@@ -810,6 +822,7 @@ export async function runSubmittedSlashLine(
             userLanguage: host.state.userLanguage,
             responseViewport: TUI_RESPONSE_VIEWPORT,
             messages: history.turns,
+            env: host.options.env ?? process.env,
             ...resolveAgentModelIdentity({
               agentKey: host.state.agentKey,
               agentName: host.state.agentName,

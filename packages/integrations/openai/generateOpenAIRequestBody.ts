@@ -8,7 +8,7 @@ import {
   isFireworksKimiModel,
   resolveFireworksKimiModel,
 } from "ai/llm/kimi";
-import { isPlatformMimoProviderModel } from "ai/llm/platformHosted";
+import { usesMimoThinkingWire } from "ai/llm/platformHosted";
 import { Contexts } from "ai/types";
 import { generatePrompt, buildSystemPromptContext } from "ai/agent/generatePrompt";
 import { detectDispatchIntentFromMessages } from "ai/agent/dispatchIntent";
@@ -20,6 +20,7 @@ import {
   resolveReasoningReplayOptions,
   shouldStripReasoningContentForOutbound,
 } from "../../agent-runtime/openAiCompatibleMessages";
+import type { AgentRuntimeChatMessage } from "../../agent-runtime/types";
 import type { RequestShapingCounts } from "../../agent-runtime/outboundRequestDiagnostics";
 
 // model 理论上不应为空（schema 已强制必填），但防御性处理 undefined
@@ -47,14 +48,18 @@ const applyClaudeCache = (
   return parts.length > 0 ? parts : stableContent;
 };
 
+type PromptMessage = Message & Pick<AgentRuntimeChatMessage, "stable_prefix_chars" | "agent_prompt_in_messages">;
+
 const prependPromptMessage = (
-  messages: Message[],
+  messages: PromptMessage[],
   agentConfig: Agent,
   resolvedModel: string,
   language: string,
   contexts?: Contexts,
-  prependSystemPrompt = true
-): Message[] => {
+  prependSystemPrompt = true,
+  preservePromptBoundary = false,
+  preservePromptProvenance = preservePromptBoundary,
+): PromptMessage[] => {
   if (!prependSystemPrompt) return messages;
   if (!contexts && !agentConfig.prompt) return messages;
 
@@ -68,7 +73,13 @@ const prependPromptMessage = (
   // dynamic suffix (no cache_control).  Summary changes won't invalidate
   // the prefix cache.
   if (isClaudeModel(resolvedModel)) {
-    const compiled = buildSystemPromptContext({ agentConfig, language, contexts, dispatchIntent });
+    const compiled = buildSystemPromptContext({
+      agentConfig,
+      language,
+      contexts,
+      dispatchIntent,
+      callerModel: agentConfig?.model,
+    });
     if (!compiled.content.trim()) return messages;
     const content = applyClaudeCache(
       compiled.stablePrefixContent,
@@ -82,15 +93,36 @@ const prependPromptMessage = (
   // system message.  Their prefix cache is automatic and prefix-based —
   // as long as the stable prefix text is identical between turns, the
   // cache hits regardless of what follows.
-  const promptContent = generatePrompt({ agentConfig, language, contexts, dispatchIntent });
+  const promptProvenance = preservePromptProvenance && agentConfig.prompt?.trim()
+    ? { agent_prompt_in_messages: true as const }
+    : {};
+  // Codex needs the compiler's boundary across the Chat Completions proxy hop.
+  if (preservePromptBoundary) {
+    const compiled = buildSystemPromptContext({
+      agentConfig,
+      language,
+      contexts,
+      dispatchIntent,
+      callerModel: agentConfig?.model,
+    });
+    if (!compiled.content.trim()) return messages;
+    return [{
+      role: "system", content: compiled.content,
+      stable_prefix_chars: compiled.stablePrefixContent.length,
+      ...promptProvenance,
+    }, ...messages];
+  }
+  const promptContent = generatePrompt({ agentConfig, language, contexts, dispatchIntent, callerModel: agentConfig?.model });
   if (!promptContent.trim()) return messages;
-  const systemMessage: Message = { role: "system", content: promptContent };
+  const systemMessage: PromptMessage = { role: "system", content: promptContent, ...promptProvenance };
   return [systemMessage, ...messages];
 };
 
 interface BuildRequestBodyOptions {
   model: string;
-  messages: Message[];
+  messages: PromptMessage[];
+  preservePromptBoundary?: boolean;
+  preservePromptProvenance?: boolean;
   providerName: string;
   customProviderUrl?: string | null;
   temperature?: number;
@@ -103,28 +135,10 @@ interface BuildRequestBodyOptions {
   shapingCounts?: RequestShapingCounts;
 }
 
-const shouldInjectLlamaCppThinkingToggle = (agentConfig: Agent): boolean => {
-  if (typeof agentConfig.enableThinking !== "boolean") return false;
-  if (!isLoopbackUrl(agentConfig.customProviderUrl)) return false;
-  return /qwen/i.test(agentConfig.model ?? "");
-};
-
-const shouldDisableMiMoThinking = (
-  agentConfig: Agent,
-  resolvedModel: string,
-): boolean => {
-  if (agentConfig.enableThinking === true) return false;
-  if (
-    /xiaomimimo\.com/i.test(agentConfig.customProviderUrl ?? "") ||
-    (agentConfig.provider ?? "").toLowerCase() === "mimo"
-  ) {
-    return true;
-  }
-  // 平台托管 MiMo（provider=nolo + mimo-v2.6-*）：记录里 provider 不是 "mimo"、
-  // 也没有 customProviderUrl，只认上面两条会让上游默认开启的 thinking 漏掉整条
-  // 平台托管路径（上游 `thinking.type` 默认 enabled，见 mimo.mi.com
-  // /docs/api/chat/openai-api）。
-  return isPlatformMimoProviderModel(agentConfig.provider, resolvedModel);
+const resolveLlamaCppThinkingToggle = (agentConfig: Agent): boolean | undefined => {
+  if (!isLoopbackUrl(agentConfig.customProviderUrl) || !/qwen/i.test(agentConfig.model ?? "")) return undefined;
+  const effort = agentConfig.reasoning_effort?.toLowerCase();
+  return effort ? effort !== "none" && effort !== "off" : agentConfig.enableThinking ?? undefined;
 };
 
 const shouldDisableKimiThinking = (
@@ -132,7 +146,7 @@ const shouldDisableKimiThinking = (
   providerName: string,
   resolvedModel: string
 ): boolean => {
-  if (agentConfig.enableThinking !== false) return false;
+  if (agentConfig.reasoning_effort || agentConfig.enableThinking !== false) return false;
   if (providerName === "deepinfra") return isDeepInfraKimiModel(resolvedModel);
   if (providerName === "fireworks") return isFireworksKimiModel(resolvedModel);
   return false;
@@ -191,6 +205,8 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
   const {
     model,
     messages,
+    preservePromptBoundary,
+    preservePromptProvenance,
     providerName,
     customProviderUrl,
     temperature,
@@ -203,13 +219,22 @@ const buildRequestBody = (options: BuildRequestBodyOptions): any => {
   } = options;
 
   // 只保留上游协议允许的字段，避免 UI/runtime 元数据泄漏到 chat-completions 请求体。
-  const cleanedMessages = messages.map((message) =>
-    sanitizeChatCompletionsMessage(message as Message & Record<string, any>, {
+  const cleanedMessages = messages.map((message) => {
+    const sanitized = sanitizeChatCompletionsMessage(message, {
       provider: providerName,
       model,
       ...(shapingCounts ? { shapingCounts } : {}),
-    })
-  );
+    });
+    if (message.role === "system") {
+      if (preservePromptBoundary && message.stable_prefix_chars !== undefined) {
+        sanitized.stable_prefix_chars = message.stable_prefix_chars;
+      }
+      if (preservePromptProvenance && message.agent_prompt_in_messages === true) {
+        sanitized.agent_prompt_in_messages = true;
+      }
+    }
+    return sanitized;
+  });
 
   const bodyData: any = {
     model,
@@ -270,6 +295,8 @@ export const generateOpenAIRequestBody = (
    * 输出与不传时逐字节相同。
    */
   shapingCounts?: RequestShapingCounts,
+  preservePromptBoundary = false,
+  preservePromptProvenance = preservePromptBoundary,
 ) => {
   // 0. 解析最终 model 名：统一用 model 字段，不再有 customModelName
   //    model 在 platform 和 custom 模式下都是同一个字段
@@ -320,12 +347,16 @@ export const generateOpenAIRequestBody = (
     resolvedModel,
     typeof navigator !== "undefined" ? (navigator as any).language : "en",
     contexts,
-    prependSystemPrompt
+    prependSystemPrompt,
+    preservePromptBoundary,
+    preservePromptProvenance,
   );
 
   const requestBody = buildRequestBody({
     model: resolvedModel,
     messages: messagesWithPrompt,
+    preservePromptBoundary,
+    preservePromptProvenance,
     providerName,
     customProviderUrl: agentConfig.customProviderUrl,
     temperature: agentConfig.temperature,
@@ -337,20 +368,31 @@ export const generateOpenAIRequestBody = (
     ...(shapingCounts ? { shapingCounts } : {}),
   });
 
-  if (shouldInjectLlamaCppThinkingToggle(agentConfig)) {
+  const llamaCppThinking = resolveLlamaCppThinkingToggle(agentConfig);
+  if (llamaCppThinking !== undefined) {
+    delete requestBody.reasoning_effort;
     requestBody.chat_template_kwargs = {
       ...(requestBody.chat_template_kwargs ?? {}),
-      enable_thinking: agentConfig.enableThinking,
+      enable_thinking: llamaCppThinking,
     };
   }
 
-  if (shouldDisableMiMoThinking(agentConfig, resolvedModel)) {
-    requestBody.thinking = { type: "disabled" };
+  if (usesMimoThinkingWire(agentConfig.provider, resolvedModel, agentConfig.customProviderUrl)) {
+    const effort = agentConfig.reasoning_effort;
+    if (effort === "none" || effort === "off") {
+      requestBody.thinking = { type: "disabled" };
+    } else if (effort) {
+      const depth = clampReasoningEffort(effort, "mimo", resolvedModel);
+      if (depth) requestBody.reasoning_effort = depth;
+    } else if (agentConfig.enableThinking !== true) {
+      // Keep the historical default wire (MiMo would otherwise default to enabled).
+      requestBody.thinking = { type: "disabled" };
+    }
   }
 
   if (shouldDisableKimiThinking(agentConfig, providerName, resolvedModel)) {
     requestBody.thinking = { type: "disabled" };
-    requestBody.reasoning_effort = "none";
+    if (providerName !== "deepinfra") requestBody.reasoning_effort = "none";
     requestBody.reasoning = { enabled: false };
   }
 

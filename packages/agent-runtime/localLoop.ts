@@ -20,6 +20,9 @@ import { classifyContextRefusal, type ContextRefusalDiagnostics } from "./contex
 import { normalizeUsage } from "../ai/token/normalizeUsage";
 import { isContextOverflowText } from "../ai/chat/parseApiError";
 import { resolveToolExecutionContract } from "../ai/tools/toolExecutionSemantics";
+import { normalizeLocalToolName } from "./localToolPolicy";
+import { resolve as resolvePath } from "node:path";
+import { resolveModelTier } from "../ai/agent/dispatchSelectionPolicy";
 import { toErrorMessage } from "core/errorMessage";
 import { runAbortableWithTimeout } from "./abortableKernel";
 import { applyToolSurfaceConstraints } from "./runtimeToolSurface";
@@ -93,7 +96,7 @@ import { resolveAgentImageInputSupport } from "../ai/llm/agentCapabilities";
 import { hasImageInRuntimeMessages } from "../ai/agent/imagePreprocessing";
 import { buildRuntimeGuidanceBlocks } from "./runtimeGuidance";
 import { resolveToolGuidedSections, TOOL_GUIDED_SECTION_ORDER } from "../ai/agent/toolGuidedSections";
-import { detectDispatchIntent, detectDispatchIntentFromMessages } from "../ai/agent/dispatchIntent";
+import { detectDispatchIntent, detectDispatchIntentFromMessages, OFFLOAD_NUDGE_PREFIX, ROUND_BUDGET_WARNING_PREFIX } from "../ai/agent/dispatchIntent";
 import { canonicalizeToolNames } from "./toolNameAliases";
 import type {
   AgentExecutionContextMetrics,
@@ -212,6 +215,12 @@ export type LocalAgentTurnInput = {
    * 行为段恒注入，排版段只在能力已知时注入一份——无法确认时不要猜。
    */
   responseViewport?: ResponseViewport;
+  /**
+   * 可选：宿主当次扫描确认「当前模型已是免付费池顶」（池内无更高且免付费的候选）。
+   * 仅 true 时轻档姿态换成池顶姿态，不再让轻主模型空找高档；缺省 undefined 时
+   * 与既往输出逐字节相同（会话常量，宿主只算一次，不在轮内翻转）。
+   */
+  callerIsPoolTop?: boolean;
   timeoutMs?: number;
   background?: boolean;
   noStream?: boolean;
@@ -287,6 +296,12 @@ export type LocalAgentTurnInput = {
    * 设置为 <= 0 时禁用预警。
    */
   roundBudgetWarningThreshold?: number;
+  /**
+   * 关闭「高档主模型自包提醒」（Tier-Aware Offload Nudge）。
+   * 默认开启，但只在 extreme/complex 主模型、非子任务、且工具面含
+   * startAgentRun 时生效；显式设为 true 可完全关闭。
+   */
+  offloadNudgeDisabled?: boolean;
   /**
    * 回合内注入收件箱的 drain 回调（TUI「后台 run 终态唤醒」直投当前 loop）。
    *
@@ -446,12 +461,41 @@ export const DEFAULT_COMPACTION_TIMEOUT_MS = 60 * 1000;
 export const DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD = 25;
 
 export function buildRoundBudgetWarningPrompt(threshold: number): string {
-  return `[系统提示] 当前单次任务的连续工具调用已达 ${threshold} 轮，请进行进展与成本检查：若已授权目标未完成且持续有进展，应继续推进，不得仅因轮数交接；仅在目标已完成、遇到真实阻塞或用户明确停止时才收尾；若进展停滞，请及时更换策略。`;
+  // 前缀与 dispatchIntent 的内部提醒清单共用同一常量：正文里若出现派发关键词，
+  // 历史扫描必须能把这条提醒与真实用户输入区分开，否则会误锁 full 协议。
+  return `${ROUND_BUDGET_WARNING_PREFIX} ${threshold} 轮，请进行进展与成本检查：若已授权目标未完成且持续有进展，应继续推进，不得仅因轮数交接；仅在目标已完成、遇到真实阻塞或用户明确停止时才收尾；若进展停滞，请及时更换策略。`;
 }
 
 export const ROUND_BUDGET_WARNING_PROMPT = buildRoundBudgetWarningPrompt(
   DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD,
 );
+
+// ── 高档主模型自包提醒（Tier-Aware Offload Nudge）────────────────────────────
+// 强主模型（extreme / complex）的典型失败模式是把体力活全包在主循环里：连续多轮
+// 只读盲搜，或契约定了之后自己写满一屏文件。这两类工作交给低档子 Agent 更便宜、
+// 也不污染主上下文。仅在「有 startAgentRun、非子任务、未关闭」时启用，且最多提
+// 醒一次——提醒走 transcript.append 路径，严格 append-only，不击穿前缀缓存。
+export const DEFAULT_OFFLOAD_EXPLORE_ROUNDS = 4;
+export const DEFAULT_OFFLOAD_WRITE_FILES = 3;
+
+/** 计入「写/改文件」的工具名。 */
+const OFFLOAD_WRITE_TOOLS: ReadonlySet<string> = new Set([
+  "writeFile",
+  "editFile",
+  "applyEdit",
+  "applyLineEdits",
+]);
+
+export function buildOffloadNudgePrompt(reason: "explore" | "write"): string {
+  const lead = reason === "explore"
+    ? "主循环已连续多轮只读摸底。"
+    : "主循环已直接写入多个文件。";
+  // 正文含「派发」这类派发关键词是刻意的：这条提醒必须真的能被
+  // detectDispatchIntent 判成派发意图，回归测试才能证明「排除逻辑」本身有效
+  // （否则测试只是测了一条本来就判 false 的文本）。排除靠 OFFLOAD_NUDGE_PREFIX
+  // 这个精确前缀，不靠正文里没有关键词。
+  return `${OFFLOAD_NUDGE_PREFIX} ${lead}契约已定时，批量摸底/统计与实现、单测、跑修可派发给低档执行者（startAgentRun，brief 只传路径、行号区间与验收命令）；主循环聚焦需求、契约、高风险判断与最终验收。`;
+}
 
 /**
  * 缺少执行元数据的既有只读工具兼容集合。
@@ -480,6 +524,7 @@ export const CONCURRENT_READONLY_TOOLS: ReadonlySet<string> = new Set([
   "cliWhoami",
   "cliDoctor",
   "listProcesses",
+  "readProcessOutput",
   "fetchWebpage",
   "exa_search",
 ]);
@@ -1059,6 +1104,13 @@ export async function runLocalAgentTurn(
         typeof input.input === "string" ? input.input : undefined
       ),
     runKind: input.runKind,
+    // 主 Agent 强弱姿态：本地宿主能直读当前会话模型（agentConfig.model，会话内
+    // 恒定），显式透传后由 resolveToolGuidedSections 按档位追加一句短指引；
+    // 模型缺失/推不出档位时不追加文本，前缀缓存稳定性不受影响。
+    callerModel: agentConfig.model,
+    // 池顶姿态：宿主启动会话时按内存中已有的候选池算一次（零网络 I/O），
+    // 会话内恒定；不传时不改动任何既有字节。
+    callerIsPoolTop: input.callerIsPoolTop,
   });
   // 宿主自己注入过记忆使用指引吗？CLI/TUI/desktop 在本函数之前用
   // `buildMemoryUseGuidanceLayer({ promptBlock })` 按「有 overlay 就注入」放过一份
@@ -1497,6 +1549,104 @@ export async function runLocalAgentTurn(
     const newDialogTelemetryKey = `new:${crypto.randomUUID()}`;
     let roundBudgetWarningInjected = false;
     const roundWarningThreshold = input.roundBudgetWarningThreshold ?? DEFAULT_ROUND_BUDGET_WARNING_THRESHOLD;
+    // 高档主模型自包提醒（Tier-Aware Offload Nudge）：状态只在本轮 loop 内累积。
+    // 触发后写的是 transcript.append 路径的一次性 user 提示，与轮次预算预警同构，
+    // 严格 append-only，不击穿前缀缓存。
+    const callerTier = resolveModelTier(agentConfig.model ?? "");
+    const offloadNudgeEnabled = input.runKind !== "subtask"
+      && input.offloadNudgeDisabled !== true
+      && (callerTier === "extreme" || callerTier === "complex")
+      && agentTools.includes("startAgentRun");
+    let offloadNudgeInjected = false;
+    let hasDispatchedSubagent = false;
+    let consecutiveReadOnlyRounds = 0;
+    const writtenPaths = new Set<string>();
+
+    /**
+     * 把一次写/改调用归一成「实际落盘文件的规范绝对路径」，归一失败返回 null。
+     *
+     * 规范路径优先取执行结果元数据（writeFile/editFile 产出的 `metadata.path`
+     * 是 workspace 相对规范路径，外部写为绝对路径），其次回落到对调用参数路径做
+     * `resolve(workspaceRoot, p)`。`packages/a.ts`、`./packages/a.ts` 与绝对路径
+     * 因此折叠成同一个键；解析不出目标的调用**不计文件**（曾把解析失败也计数，
+     * 一次调用就能把「多文件」阈值顶满）。
+     */
+    const resolveWrittenPath = (
+      metadata: Record<string, unknown> | undefined,
+      rawArguments: string | undefined,
+    ): string | null => {
+      const workspaceRoot = input.adapter.workspaceRoot;
+      const candidates: string[] = [];
+      for (const key of ["resolvedPath", "path", "filePath", "file_path"]) {
+        const fromMetadata = metadata?.[key];
+        if (typeof fromMetadata === "string" && fromMetadata.trim()) candidates.push(fromMetadata.trim());
+      }
+      if (rawArguments) {
+        try {
+          const parsed = JSON.parse(rawArguments) as Record<string, unknown> | null;
+          if (parsed && typeof parsed === "object") {
+            for (const key of ["path", "filePath", "file_path"]) {
+              const value = (parsed as Record<string, unknown>)[key];
+              if (typeof value === "string" && value.trim()) candidates.push(value.trim());
+            }
+          }
+        } catch {
+          // 参数不是 JSON：交给元数据路径，解析不出就按「无目标」处理。
+        }
+      }
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        try {
+          // 无 workspaceRoot（宿主未声明）时用进程 cwd 作为归一基准：阈值只关心
+          // 「是否同一个文件」，基准只影响键的前缀，不影响去重。
+          const base = workspaceRoot && workspaceRoot.trim() ? workspaceRoot : process.cwd();
+          return resolvePath(base, candidate);
+        } catch {
+          continue;
+        }
+      }
+      return null;
+    };
+
+    const trackRoundOffloadSignals = (
+      roundToolCalls: readonly AgentRuntimeToolCall[],
+      roundResults: ReadonlyArray<AgentRuntimeToolResult | undefined>,
+    ): void => {
+      if (!offloadNudgeEnabled || roundToolCalls.length === 0) return;
+      let readOnlyRound = true;
+      roundToolCalls.forEach((call, index) => {
+        // 分类前先归一到派发器认识的规范工具名：模型可能写 `functions.writeFile`、
+        // `grep`、`search` 这类别名，按原始名字判断会把只读轮误判成写轮（或反之）。
+        const name = normalizeLocalToolName(call.function.name);
+        if (name === "startAgentRun") {
+          // 已派发子 run：这条提醒再没有意义（主动派发已发生）。
+          hasDispatchedSubagent = true;
+          readOnlyRound = false;
+          return;
+        }
+        if (!(CONCURRENT_READONLY_TOOLS.has(name) || name === "searchFiles")) {
+          readOnlyRound = false;
+        }
+        if (OFFLOAD_WRITE_TOOLS.has(name)) {
+          // 关键：按**原始调用下标**取本次调用的结果，不按 `call.id` 建表。
+          // 模型可以在同一轮里重复使用同一 id（同一批"重试同一个文件"就常见）；
+          // 按 id 索引会让前一槽的结果被后一槽覆盖，把「失败 ×2 + 成功 ×1」
+          // 误读成「同一个文件的成功结果」，或把成功结果错记到失败调用上。
+          const toolResult = roundResults[index];
+          // 只统计**执行成功**的写/改：失败、blocked、无结果的调用没有落盘，
+          // 计进去会把「一次成功的多轮改写」夸大成多文件。
+          const failed = !toolResult
+            || toolResult.metadata?.blocked === true
+            || Boolean(toolResult.metadata?.error)
+            || isToolExecutionFailure(toolResult);
+          if (!failed) {
+            const resolved = resolveWrittenPath(toolResult.metadata, call.function.arguments);
+            if (resolved) writtenPaths.add(resolved);
+          }
+        }
+      });
+      consecutiveReadOnlyRounds = readOnlyRound ? consecutiveReadOnlyRounds + 1 : 0;
+    };
     while (true) {
       partialContent = "";
       throwIfAborted(input);
@@ -1516,6 +1666,19 @@ export async function runLocalAgentTurn(
         const prompt = buildRoundBudgetWarningPrompt(roundWarningThreshold);
         transcript.push({ role: "user", content: prompt });
         roundBudgetWarningInjected = true;
+      }
+      if (offloadNudgeEnabled && !offloadNudgeInjected && !hasDispatchedSubagent) {
+        const reason = consecutiveReadOnlyRounds >= DEFAULT_OFFLOAD_EXPLORE_ROUNDS
+          ? "explore" as const
+          : writtenPaths.size >= DEFAULT_OFFLOAD_WRITE_FILES
+            ? "write" as const
+            : null;
+        if (reason) {
+          // 与轮次预算预警完全相同的 append-only 注入路径：只追加一次 user 消息，
+          // 已发出的历史逐字节不变，前缀缓存不分叉。
+          transcript.push({ role: "user", content: buildOffloadNudgePrompt(reason) });
+          offloadNudgeInjected = true;
+        }
       }
       // 空轮修复：把 repair user message 追加到本轮请求末尾重试一次（系统消息放在末尾会被大部分 Provider API 拒收或返回空消息）。
       const projectRequest = (source: AgentRuntimeChatMessage[]) => {
@@ -2157,6 +2320,11 @@ export async function runLocalAgentTurn(
         }
         if (batchError) throw batchError;
       }
+      // 本轮实际执行结果按**原始调用下标**排列：写/改计数只认执行成功的调用。
+      // 不按 `call.id` 建 Map——同轮重复 id 会让结果互相覆盖，把失败写成成功。
+      const collectRoundToolResults = (): Array<AgentRuntimeToolResult | undefined> =>
+        toolCalls.map((_call, index) => slotResults[index]?.toolResult);
+      trackRoundOffloadSignals(toolCalls, collectRoundToolResults());
       // Same tool-result handoff contract consumed by the server loop.
       const handoff = executedToolResults.map(({ content }) => {
         try { return typeof content === "string" ? JSON.parse(content) : null; }

@@ -53,8 +53,8 @@ export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiComp
     function: {
       name: toolName,
       description:
-        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to perform complete verification in one step instead of multiple small roundtrips. Do not cd into guessed paths; commands already run from the workspace root. Commands block until exit. Long-running commands (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) automatically detach to background returning {detached: true, pid, label}; for persistent services, prefer launchProcess.${WINDOWS_SHELL_NOTE} ` +
-        `LIFECYCLE CONTRACT: (1) A normal command waits synchronously for at most 120 seconds; if it ends inside that window the call IS finished — a result carrying exitCode means the command has already completed: parse it immediately, never read it as "still running" (no later event will remind you). (2) Only a result with metadata.detached === true AND a taskId can deliver an automatic completion turn; that taskId is an opaque handle, NOT a file path and NOT a result file — never search for, guess or readFile a path from it, and never rerun the command just to obtain its output. That terminal turn delivers the result inline as a bounded capsule; when the capsule was truncated it also carries a real full-output path in its overflow marker — read that actual path with readFile only when it is present. While waiting for that terminal notification, continue independent work on other parts of the task. A launchProcess taskId is a tracked task too, but it only yields a notice on your next real turn. (3) Text the command itself prints (LAUNCHED, STARTED, ...) is plain stdout with zero lifecycle meaning — never read it as a platform receipt. (4) Shell-level backgrounding (&, nohup, disown, setsid, self-daemonizing scripts, PowerShell Start-Process) is NOT tracked: those descendants produce no completion notification, and the outer shell finishing tells you nothing about them. Use background: true to turn a finite job into a tracked background task. Do not run standalone sleep commands purely to pause execution. When a synchronous result's core output was redirected to a file, read that file in the SAME turn ("read it later" means it is lost) — never end the turn promising a later automatic report without a taskId.`,
+        `Execute a shell command from the workspace root. Prefer one compound command (e.g. 'git status && git diff --stat') to finish verification in one step; do not cd into guessed paths. Commands block until exit; long-running ones (sleep over ${IMMEDIATE_DETACH_SLEEP_THRESHOLD_SECONDS}s, dev servers, watchers) auto-detach returning {detached: true, pid, label}; for persistent services prefer launchProcess.${WINDOWS_SHELL_NOTE} ` +
+        `LIFECYCLE: (1) A normal command waits synchronously up to 120s; a result carrying exitCode already finished — parse it now, never read it as "still running". (2) Only metadata.detached === true AND a taskId yields an automatic completion turn; that taskId is NOT a path or result file — never rerun the command just for its output; that turn delivers the result inline (if truncated it carries a full-output path in its overflow marker, read it with readFile only when present). (3) Text the command prints (STARTED, ...) has zero lifecycle meaning. (4) Shell-level backgrounding (&, nohup, disown, setsid, Start-Process) is NOT tracked: no completion notice. Use background: true to track a finite job; no standalone sleeps. When a sync result's core output went to a file, read it in the same turn.`,
       parameters: {
         type: "object",
         properties: {
@@ -69,12 +69,12 @@ export function buildExecShellToolDefinition(toolName = "execShell"): OpenAiComp
           background: {
             type: "boolean",
             description:
-              "Immediately detach this command into a tracked background task (no 120s synchronous wait): returns {detached: true, taskId}, and on completion the platform resumes this conversation with a bounded result capsule (exitCode, duration, stdout/stderr tail). Default false. Use for finite jobs (tests, builds, batch) whose result you need later; NOT for dev servers/watchers — use launchProcess for those.",
+              "Detach this command into a tracked background task (no 120s wait): returns {detached: true, taskId}; on completion the platform resumes this conversation with a bounded result capsule (exitCode, duration, tails). Default false. Use for finite jobs (tests, builds, batch) whose result you need later; NOT for dev servers/watchers — use launchProcess.",
           },
           label: {
             type: "string",
             description:
-              "Optional human-readable label for the resulting background task, shown in task lists and completion notices. Defaults to the last token.",
+              "Optional label for the background task, shown in task lists and completion notices. Defaults to the last token.",
           },
         },
       },
@@ -201,20 +201,25 @@ export const execShellCapability: ExecutableCapability<ExecShellInput, AgentRunt
     // entirely (detachMs 0 → immediate promotion through the existing
     // registry.add → promote() → terminal completion-turn path). Explicit
     // request wins over the smart-detach heuristic.
-    const background = normalized.background === true;
+    // Ephemeral web-hosted sandboxes opt out (`disableBackgroundDetach: true`)
+    // so long-running commands cannot escape timeout/abort into orphaned background jobs.
+    const background = ctx.disableBackgroundDetach === true ? false : normalized.background === true;
+    const effectiveTimeoutMs = resolveExecShellTimeoutMs(ctx.commandTimeoutMs);
 
     const executionArgs = {
       workspaceRoot,
       command: shellPlan.argv,
-      timeoutMs: resolveExecShellTimeoutMs(ctx.commandTimeoutMs),
+      timeoutMs: effectiveTimeoutMs,
       outputLimit: ctx.commandOutputLimit,
       commandPrefix: ctx.commandPrefix,
       abortSignal: ctx.abortSignal,
-      detachMs: background
-        ? 0
-        : isImmediateDetachShellCommand({ command })
+      detachMs: ctx.disableBackgroundDetach === true
+        ? Math.max((effectiveTimeoutMs ?? 30_000) + 60_000, 120_000)
+        : background
           ? 0
-          : ctx.detachMs,
+          : isImmediateDetachShellCommand({ command })
+            ? 0
+            : ctx.detachMs,
       stdin: typeof normalized.input === "string" ? normalized.input : undefined,
       label: typeof normalized.label === "string" ? normalized.label : undefined,
       // Ownership of the turn that invoked this command: an auto-detached

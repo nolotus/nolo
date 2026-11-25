@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { createServer } from "node:http";
 import { logUploadAudit, validateUploadFiles } from "../uploadSecurity.mjs";
+import { clampEvalTimeout } from "../extension/evalResult.js";
 
 // Which browser build launched this host. Chrome keeps the long-standing default port 38947;
 // Firefox gets an independent endpoint so both can run at the same time without fighting over
@@ -52,17 +53,26 @@ const pending = new Map();
 let shuttingDown = false;
 let server;
 
+function extensionDisconnected() {
+  return Object.assign(new Error("The browser extension disconnected. Check `nolo browser status` and verify the tab state before retrying."), {
+    code: "EXTENSION_DISCONNECTED",
+    status: 503,
+  });
+}
+
 function shutdown(exitCode = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
   for (const waiter of pending.values()) {
-    waiter.reject?.(new Error("Chrome native messaging connection closed."));
+    waiter.reject(extensionDisconnected());
   }
   pending.clear();
   if (server) {
     server.close(() => process.exit(exitCode));
+    server.closeIdleConnections();
   }
-  setTimeout(() => process.exit(exitCode), 250).unref();
+  // Allow JSON for in-flight requests to drain, without waiting forever on a broken peer.
+  setTimeout(() => process.exit(exitCode), 1_000).unref();
 }
 
 function writeNativeMessage(message) {
@@ -100,6 +110,10 @@ process.stdin.on("close", () => {
 });
 process.on("SIGTERM", () => shutdown(0));
 process.on("SIGINT", () => shutdown(0));
+process.stdout.on("error", (error) => {
+  process.stderr.write(`[nolo ${browser} connector] native messaging write failed: ${error.message}\n`);
+  shutdown(error.code === "EPIPE" ? 0 : 1);
+});
 
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
@@ -117,24 +131,27 @@ function readJsonBody(req) {
   });
 }
 
-function extensionRequest(action, payload) {
+const configuredTimeoutMs = Number(process.env.NOLO_CHROME_CONNECTOR_TIMEOUT_MS);
+const ordinaryTimeoutMs = Number.isSafeInteger(configuredTimeoutMs) && configuredTimeoutMs > 0 && configuredTimeoutMs <= 2_147_000_000
+  ? configuredTimeoutMs : 15_000;
+
+function extensionRequest(action, payload, timeoutMs, signal) {
+  if (shuttingDown) return Promise.reject(extensionDisconnected());
   const id = crypto.randomUUID();
-  const timeoutMs = Number(process.env.NOLO_CHROME_CONNECTOR_TIMEOUT_MS || 15000);
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
+    const cleanup = () => {
+      clearTimeout(timeout);
       pending.delete(id);
-      reject(new Error(`Chrome extension timed out while handling ${action}.`));
-    }, timeoutMs);
-    pending.set(id, {
-      resolve: (message) => {
-        clearTimeout(timeout);
-        resolve(message);
-      },
-      reject: (error) => {
-        clearTimeout(timeout);
-        reject(error);
-      },
-    });
+      signal.removeEventListener("abort", abort);
+    };
+    const fail = (error) => { cleanup(); reject(error); };
+    const abort = () => fail(signal.reason);
+    const timeout = setTimeout(() => fail(Object.assign(
+      new Error(`The browser extension did not reply to ${action} in ${timeoutMs} ms. Check the connector and verify the tab state before retrying.`),
+      { code: "EXTENSION_TIMEOUT", status: 504 },
+    )), timeoutMs);
+    pending.set(id, { resolve: (message) => { cleanup(); resolve(message); }, reject: fail });
+    signal.addEventListener("abort", abort, { once: true });
     writeNativeMessage({ id, action, payload });
   });
 }
@@ -213,15 +230,26 @@ server = createServer(async (req, res) => {
         return;
       }
     }
-    const response = await extensionRequest(body.action, body.payload || {});
+    const payload = body.payload || {};
+    // The human waits outside /rpc. Only an approved eval can spend its script run budget here.
+    const timeoutMs = requestedAction === "eval_script" && payload.approvalId
+      ? clampEvalTimeout(payload.timeoutMs) + ordinaryTimeoutMs : ordinaryTimeoutMs;
+    // Give the application deadline time to send JSON instead of closing an idle socket first.
+    res.setTimeout(timeoutMs + 5_000);
+    const disconnected = new AbortController();
+    res.once("close", () => disconnected.abort());
+    if (res.destroyed) return;
+    const response = await extensionRequest(requestedAction, payload, timeoutMs, disconnected.signal);
     res.statusCode = response.ok ? 200 : 502;
     res.end(JSON.stringify(response));
   } catch (error) {
-    res.statusCode = 500;
+    if (res.destroyed) return;
+    const isExtensionError = error?.code === "EXTENSION_TIMEOUT" || error?.code === "EXTENSION_DISCONNECTED";
+    res.statusCode = isExtensionError ? error.status : 500;
     res.end(JSON.stringify({
       ok: false,
       error: {
-        code: "NATIVE_HOST_ERROR",
+        code: isExtensionError ? error.code : "NATIVE_HOST_ERROR",
         message: error instanceof Error ? error.message : String(error),
       },
     }));

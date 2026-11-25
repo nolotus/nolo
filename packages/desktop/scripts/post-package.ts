@@ -6,6 +6,8 @@ import { createWindowsInstallerArtifact } from "./post-package-windows";
 import { createLinuxRpmArtifact, createLinuxDebArtifact } from "./post-package-linux";
 import { applyLinuxLauncherPreflight } from "./linuxLauncherPreflight";
 import { trimLinuxPayloadArtifacts } from "./trim-linux-payload";
+// 更新边车（`*-checksum.json`）按最终 tar 重算 + 发布前一致性闸门共用同一实现。
+import { regenerateChecksumSidecarsForArtifacts } from "./checksumSidecar";
 // 载荷兼容闸门必须与打包链同目录、static import：它随 packages/desktop 进公开投影，
 // 而 scripts/verify/** 不进投影（2026-09-16 公开仓构建 HookFailed 的根因）。
 import { verifyLinuxPayloadArtifacts } from "./verifyElectrobunPayloadCompat";
@@ -146,6 +148,17 @@ if (process.platform === "linux") {
       `[desktop] payload extractor-compat ok: ${report.artifactPath} (${report.entries} entries)`,
     );
   }
+}
+
+// Electrobun 2.0.7 的更新边车必须描述**最终发布字节**：hutch 在打包早期写出
+// `*-checksum.json`，而上面的 trim repack 与 launcher preflight 会重写 Linux
+// 更新包，摘要/大小随之失效。2.0.7 客户端按边车校验实际 tar 且不会回退，
+// 因此这里按最终 tar 重算；必须在所有归档改写之后执行。
+const checksumReports = await regenerateChecksumSidecarsForArtifacts({ artifactDir });
+for (const report of checksumReports) {
+  console.log(
+    `[desktop] checksum sidecar ${basename(report.sidecarPath)}: ${report.changed ? "regenerated" : "unchanged"} (tarSha256=${report.tarSha256.slice(0, 12)}… tarSize=${report.tarSize})`,
+  );
 }
 
 await Promise.all([

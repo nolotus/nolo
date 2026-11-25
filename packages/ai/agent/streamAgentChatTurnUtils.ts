@@ -711,6 +711,36 @@ export const withRequestContextBlocks = (
     };
 };
 
+/**
+ * 本轮能否走「显式异源 serverBase 的无状态裸代理」。
+ *
+ * 异源代理是**无状态**的：它只拿到 messages，看不到本对话已持久化的
+ * `dialog.extraReferences`（loadSkill 追加的引用、内置专职技能 feedback /
+ * app-builder / agent-creator 的挂载）。这类对话一旦被代理出去，客户端已展开的
+ * 工具面与技能提示词全部丢失，第 2 轮起表现为「有说明书没工具」。
+ *
+ * 与 RV5（turnToolContextVerification.test.ts）同一原则：只要本轮存在**未经
+ * 服务端核验**的能力来源（运行时 extraTools、编辑目标、图片覆盖、对话级
+ * extraReferences），就必须留在客户端 UI-managed chat/tool loop 执行。
+ */
+export const canProxyToExplicitServerBase = (args: {
+    userInput: unknown;
+    runtimeOptions?: AgentRuntimeOptions | null;
+    dialogExtraReferences?: unknown;
+}): boolean => {
+    const { runtimeOptions, dialogExtraReferences } = args;
+    if (Array.isArray(args.userInput)) return false;
+    if (runtimeOptions?.extraTools?.length) return false;
+    if (runtimeOptions?.editingTarget) return false;
+    if (runtimeOptions?.imageConfigOverride) return false;
+    if (
+        Array.isArray(dialogExtraReferences) &&
+        dialogExtraReferences.length > 0
+    )
+        return false;
+    return true;
+};
+
 /** 合并 Agent.tools + Context Page Tools + Mentioned Tools + runtimeOptions.extraTools */
 export const mergeAgentToolsWithRuntime = (
     agentConfig: Agent,

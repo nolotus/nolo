@@ -170,6 +170,21 @@ export const buildSystemPrompt = (options: {
   contexts?: Contexts;
   /** 本轮是否检测到派发意图（detectDispatchIntent）；缺省注入最小派发协议。 */
   dispatchIntent?: boolean;
+  /**
+   * 可选：主 Agent 当前模型。透传后按档位追加一句强弱姿态指引；
+   * 不传时输出与既往完全一致（100% 向后兼容，零缓存前缀扰动）。
+   */
+  callerModel?: string | null;
+  /**
+   * 可选：宿主当次扫描确认「当前模型已是免付费池顶」。仅 true 时把轻档姿态换成
+   * 池顶姿态（不再空指「请教高档」）；不传 / false 逐字保持既有行为。
+   */
+  callerIsPoolTop?: boolean;
+  /**
+   * 可选：宿主当次扫描到的外部可派 Agent 数量。
+   * 仅显式传 0 时切换「单模型多实例精简模式」；不传 / > 0 保持既有行为。
+   */
+  externalAgentCount?: number;
   viewport?: { width: number; height: number };
   mobileBreakpoint?: number;
   now?: Date;
@@ -182,6 +197,21 @@ export const buildSystemPromptContext = (options: {
   contexts?: Contexts;
   /** 本轮是否检测到派发意图（detectDispatchIntent）；缺省注入最小派发协议。 */
   dispatchIntent?: boolean;
+  /**
+   * 可选：主 Agent 当前模型。透传后按档位追加一句强弱姿态指引；
+   * 不传时输出与既往完全一致（100% 向后兼容，零缓存前缀扰动）。
+   */
+  callerModel?: string | null;
+  /**
+   * 可选：宿主当次扫描确认「当前模型已是免付费池顶」。仅 true 时把轻档姿态换成
+   * 池顶姿态（不再空指「请教高档」）；不传 / false 逐字保持既有行为。
+   */
+  callerIsPoolTop?: boolean;
+  /**
+   * 可选：宿主当次扫描到的外部可派 Agent 数量。
+   * 仅显式传 0 时切换「单模型多实例精简模式」；不传 / > 0 保持既有行为。
+   */
+  externalAgentCount?: number;
   viewport?: { width: number; height: number };
   mobileBreakpoint?: number;
   now?: Date;
@@ -221,6 +251,11 @@ export const buildSystemPromptContext = (options: {
   // 有派发意图才注入完整编排协议，否则只注入最小协议（安全硬门常在）。
   const toolSections = resolveToolGuidedSections(agentTools, {
     dispatchIntent: options.dispatchIntent === true,
+    // 安全透传：两者缺省均为 undefined，resolveToolGuidedSections 不追加任何文本，
+    // 因此未接线调用方拿到的 prompt 与既往逐字相同。
+    callerModel: options.callerModel,
+    callerIsPoolTop: options.callerIsPoolTop,
+    externalAgentCount: options.externalAgentCount,
   });
 
   const {
@@ -290,6 +325,7 @@ export const buildSystemPromptContext = (options: {
     { id: "agent-orchestration", owner: "platform", cacheScope: "session", content: toolSections.agentOrchestration },
     { id: "agent-collaboration", owner: "platform", cacheScope: "session", content: toolSections.agentCollaboration },
     { id: "web-access", owner: "platform", cacheScope: "session", content: toolSections.webAccess },
+    { id: "platform-risk-control", owner: "platform", cacheScope: "session", content: toolSections.platformRiskControl },
     { id: "menu-usage", owner: "platform", cacheScope: "session", content: toolSections.menuUsage },
     { id: "show-interaction", owner: "platform", cacheScope: "session", content: toolSections.showInteraction },
     { id: "clarification-mode", owner: "platform", cacheScope: "session", content: clarifyingSection },

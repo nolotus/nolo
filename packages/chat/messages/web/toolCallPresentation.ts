@@ -255,7 +255,6 @@ const ARTIFACT_MODE_TOOLS = new Set([
   "openAIGptImageEdit",
   "chatgptWebImageGenerate",
   "appDeploy",
-  "ziweiChart",
   "read_x_post",
   "createTable",
 ]);

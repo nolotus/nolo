@@ -1,9 +1,11 @@
 import { attachMcpApprovalHost, type McpApprovalHost } from "./mcp/mcpApprovalTransport";
 import { getHostRuntimeExecutable, HOST_RUNTIME_CONTENT_IDENTITY, resolveExactRuntimeEntrypoint, RuntimeVersionMismatchError, AGENT_RUN_PROTOCOL, type RunStartupPhase } from "./agentRunProtocol";
 import type { SelectionCheck } from "../ai/agent/dispatchSelectionPolicy";
+import { resolveModelTier } from "../ai/agent/dispatchSelectionPolicy";
 import type { DispatchSpeedProvenance } from "../ai/agent/dispatchSpeedProvenance";
 import type { LocalRunAcceptance } from "./agentRunLocalWorkspace";
 import { attachShellApprovalHost, type ShellApprovalHost } from "./client/originShellApprovalTransport";
+import { parseStructuredReview, structuredReviewVerdict } from "./client/reviewVerdict";
 // Local background agent run control plane.
 //
 // Provides a small registry under ~/.nolo/runs/ and the commands that
@@ -57,6 +59,153 @@ import type { DoDCommandResult } from "./agentRunDoD";
 
 export type RunStatus = "running" | "done" | "failed" | "timeout" | "killed" | "orphaned";
 
+/**
+ * 终态正文里可识别的 review 结论。与 `client/reviewVerdict.ts` 的严格闸门
+ * （`Verdict` = APPROVE|BLOCK，要求完整分级段）不同：这里是**只读观测**，
+ * 允许 WARNING，且只在正文有明确声明时才落盘。判定优先复用正式结构化审查
+ * 协议（`parseStructuredReview` + `structuredReviewVerdict`），非结构化正文
+ * 只回退到保守的独立结论行扫描。
+ */
+export type RunReviewVerdict = "APPROVE" | "WARNING" | "BLOCK";
+
+/** 独立结论行：整行只有一个 token（可被列表/引用/强调/反引号包裹），大小写不敏感。 */
+const STANDALONE_VERDICT_RE = /^(APPROVE|WARNING|BLOCK)$/i;
+/** 具名结论行：`结论：APPROVE` / `结论: **BLOCK**` / `VERDICT: WARNING`。 */
+const LABELED_VERDICT_RE = /^(?:结论|判定|VERDICT)\s*[:：]\s*(APPROVE|WARNING|BLOCK)$/i;
+/** 独立交接标记行：整行只有 `need_escalation`。 */
+const STANDALONE_ESCALATION_RE = /^need_escalation$/i;
+/** 带说明的交接标记：`need_escalation: 根因超出 brief`（独立行开头）。 */
+const ESCALATION_WITH_DETAIL_RE = /^need_escalation\s*[:：]\s*\S/i;
+/** 具名交接标记：`状态：need_escalation 因为…` / `status: need_escalation`。 */
+const LABELED_ESCALATION_RE = /^(?:状态|结论|判定|status|escalation|escalated)\s*[:：]\s*need_escalation\b/i;
+
+/** 去掉列表/引用标记与强调、反引号、引号包裹，用于识别「整行只有一个结论」。 */
+function stripVerdictDecoration(line: string): string {
+  return line
+    .replace(/^\s*(?:[-*+>]|\d+[.)])\s*/, "")
+    // 只剥 `*`/反引号/引号：不能全局删 `_`，否则 `need_escalation` 会被改成
+    // `needescalation`，snake_case 标记直接失效。
+    .replace(/[*`"']/g, "")
+    .replace(/^_+|_+$/g, "")
+    .trim();
+}
+
+/** 前导缩进列宽：空格 +1，Tab 按 4 列制表位向上取整（CommonMark 口径）。 */
+function leadingColumns(line: string): number {
+  let col = 0;
+  for (const ch of line) {
+    if (ch === " ") col += 1;
+    else if (ch === "\t") col += 4 - (col % 4);
+    else break;
+  }
+  return col;
+}
+
+/**
+ * 只保留「作者自己的断言行」：剥掉 Markdown 代码围栏（含其内容）与引用行
+ * （`^>`）。围栏里是被讨论/示例的文本，引用行是别人的话，都不构成本次
+ * run 的结论 —— 让 `> need_escalation`、``` 示例 ``` 不误触发观测字段。
+ *
+ * 缩进按列宽判定（空格 +1，Tab 按 4 列制表位）：CommonMark 只允许前导列宽
+ * ≤3 的行开启/闭合顶层面板围栏，列宽 ≥4 的行是缩进代码块 —— 围栏外不算断言，
+ * 围栏内也绝不提前闭合围栏。
+ *
+ * 围栏按 CommonMark 口径配平：开启围栏记住字符（` 或 ~）与长度 n≥3，
+ * 闭合围栏必须**同字符、长度 ≥ n、行尾无其他非空白字符**。所以四反引号
+ * 围栏里出现三反引号示例不会被提前闭合。
+ */
+function assertionLines(text: string): string[] {
+  const kept: string[] = [];
+  let fence: { char: string; length: number } | null = null;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const indent = leadingColumns(rawLine);
+    const content = rawLine.replace(/^[ \t]*/, "");
+    if (fence) {
+      // 围栏内：缩进 ≥4 列的行是围栏内容，不是闭合。
+      if (indent >= 4) continue;
+      if (new RegExp(`^\\${fence.char}{${fence.length},}\\s*$`).test(content)) fence = null;
+      continue;
+    }
+    // 缩进 ≥4 列：缩进代码块（不是断言，也不能当开栏）。
+    if (indent >= 4) continue;
+    const open = /^(`{3,}|~{3,})/.exec(content);
+    if (open) {
+      fence = { char: open[1][0], length: open[1].length };
+      continue;
+    }
+    if (/^>/.test(content)) continue;
+    kept.push(rawLine);
+  }
+  return kept;
+}
+
+/**
+ * 整段文本是合法 JSON（对象、数组、基本值均可）时返回 `{ value }`，否则 undefined。
+ * 只要整段解析为合法 JSON 就跳过逐行文本扫描，避免多行格式化 JSON 对象或数组内的嵌套字段误触发。
+ */
+function parseWholeTextJson(text: string): { value: unknown } | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  try {
+    return { value: JSON.parse(trimmed) };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 从终态正文派生只读观测字段（纯函数，无 IO）。
+ *
+ * - `escalated`：只认明确交接标记（独立行 `need_escalation`、
+ *   `need_escalation: <说明>`、`状态：need_escalation`，以及整段顶层 JSON 对象的
+ *   `status === "need_escalation"`）。正文里提到该词（如
+ *   「无需返回 need_escalation，已修复。」）、引用行、代码围栏示例、被讨论的
+ *   JSON 字段或 JSON 数组元素都不算。
+ * - `reviewVerdict`：优先按正式结构化审查协议（`reviewVerdict.ts`）计算；
+ *   协议解析失败（invalid）或非审查协议的整段合法 JSON 直接省略，仅 legacy 文本回退到独立结论行扫描。
+ *   识别不到或互相矛盾 → 省略（不猜）。
+ */
+export function deriveRunFinalObservation(text?: string): {
+  escalated: boolean;
+  reviewVerdict?: RunReviewVerdict;
+} {
+  if (typeof text !== "string" || !text.trim()) return { escalated: false };
+  const lines = assertionLines(text);
+  // 整段是合法 JSON 时绝不回退逐行扫描，仅当顶层是对象且 status === "need_escalation" 才判升级。
+  const wholeJson = parseWholeTextJson(text);
+  const escalated = wholeJson
+    ? (typeof wholeJson.value === "object" &&
+        wholeJson.value !== null &&
+        !Array.isArray(wholeJson.value) &&
+        (wholeJson.value as Record<string, unknown>).status === "need_escalation")
+    : lines.some((line) => {
+      const bare = stripVerdictDecoration(line);
+      return STANDALONE_ESCALATION_RE.test(bare) ||
+        ESCALATION_WITH_DETAIL_RE.test(bare) ||
+        LABELED_ESCALATION_RE.test(bare);
+    });
+
+  // 1) 有正式结构化审查结果时以它为准（程序计算，不采信正文自报）。
+  const structured = parseStructuredReview(text);
+  if (structured.kind === "structured") {
+    return { escalated, reviewVerdict: structuredReviewVerdict(structured.review) };
+  }
+  // 1b) 协议体存在但无效（invalid），或整段是合法 JSON 但非审查协议 → 省略，不回退文本模式。
+  if (structured.kind === "invalid" || wholeJson) return { escalated };
+
+  // 2) 回退：只扫描独立结论行，不扫正文里的子串。
+  const found = new Set<RunReviewVerdict>();
+  for (const line of lines) {
+    const bare = stripVerdictDecoration(line);
+    const hit = LABELED_VERDICT_RE.exec(bare) ?? STANDALONE_VERDICT_RE.exec(bare);
+    if (!hit) continue;
+    found.add(hit[1].toUpperCase() as RunReviewVerdict);
+  }
+  // 矛盾即无结论：不替作者选一个。
+  if (found.size !== 1) return { escalated };
+  return { escalated, reviewVerdict: [...found][0] };
+}
+
 export type RunFailureReason =
   | "runtime_version_mismatch"
   | "runtime_protocol_mismatch"
@@ -100,6 +249,13 @@ export type RunRecord = {
   pid?: number;
   agentKey: string;
   agentName?: string;
+  /**
+   * 派发者身份：宿主注入的「当前运行这条 run 的 agent」，只用于可观测/归因。
+   * 唯一来源是宿主上下文（CLI 侧 `deps.currentAgentKey`），**不是**模型可填的
+   * 工具参数，也不从 task 正文/标题猜。缺失 = 未知（绝不编造默认值）；self
+   * 派发时与 `agentKey` 相等。
+   */
+  callerAgentKey?: string;
   /** 派发时调用方给的短标题（展示用）；缺省 = 没有，绝不从任务正文猜。 */
   title?: string;
   cwd?: string;
@@ -145,6 +301,22 @@ export type RunRecord = {
    * 只留 2000 字摘要；长报告读这个文件，不要解析带 ANSI 的 .log。
    */
   resultFile?: string;
+  /**
+   * 终态写回：本 run 实际解析到的模型 ID（run 进程收尾自报，trim 后非空才写）。
+   * 缺失 = 未知，绝不编造默认值。
+   */
+  model?: string;
+  /**
+   * 终态写回：最终正文明确写了 `need_escalation`（`\bneed_escalation\b/i`）。
+   * 只记「正文出现了这个熔断升级标记」这一观测事实；缺省 = 未观察到。
+   */
+  escalated?: boolean;
+  /**
+   * 终态写回：最终正文里出现的高置信 review 结论声明
+   * （`结论：APPROVE`、独立行 `APPROVE`、JSON `"verdict": "APPROVE"` 等）。
+   * 识别不到或相互矛盾时缺省 —— 不猜、不从语义推断。
+   */
+  reviewVerdict?: RunReviewVerdict;
   /** Exact publisher-owned files; no directory scan or arbitrary-path GC. */
   resultArtifacts?: Array<{
     publisher: "run-result-v1";
@@ -189,6 +361,20 @@ export type RunRecord = {
   /** Dispatch evidence only; never inherited as continuation admission. */
   cacheHitRatio?: number | null;
   cacheCachedTokens?: number | null;
+  /**
+   * 本 run 的输入 token 总量（`cacheUsage.input_tokens`，各次调用相加，含命中
+   * 部分）。缺省 = 未知（该 run 没有 provider 调用，或旧记录未写该字段）。
+   * 只读观测字段，不参与计费。
+   */
+  inputTokens?: number;
+  /** 本 run 的输出 token 总量（`cacheUsage.output_tokens`）。缺省 = 未知。 */
+  outputTokens?: number;
+  /**
+   * 本次 run 生效的模型档位：`selectionCheck.modelTier` 优先，否则按已解析的
+   * `model` 推导（ai/agent/dispatchSelectionPolicy）。缺省 = 未知（旧记录 /
+   * 无法判档的模型），绝不写 `"unknown"` 冒充已判档。
+   */
+  modelTier?: string;
   selectionCheck?: SelectionCheck;
   /** Timestamp the record was reconciled to a terminal status (orphaned). */
   reconciledAt?: string;
@@ -2057,7 +2243,7 @@ function nativeOwner(pid: number, deps: AgentRunControlDeps): Extract<RunExecuti
 }
 
 /** Child validation is read-only and precedes all identity publication/activity writes. */
-export function validateLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): void {
+export function validateLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}) {
   const fail = (reason = "facts"): never => { throw new Error(`[local-writer-resource] child binding unknown or mismatched: ${reason}`); };
   if (!/^[A-Za-z0-9_-]+$/.test(runId)) fail();
   const validated = withRunRecordLock(runId, deps, () => {
@@ -2079,18 +2265,22 @@ export function validateLocalWriterChild(runId: string, cwd: string, policy: Loc
     if (e?.state !== "known") return fail();
     const set = (v?: string[]) => JSON.stringify(v === undefined ? null : [...new Set(v)].sort());
     if (set(e.permissions.allowedToolNames) !== set(policy.allowedToolNames) ||
-        set(e.permissions.blockedToolNames) !== set(policy.blockedToolNames) ||
+        (!policy.readOnly && set(e.permissions.blockedToolNames) !== set(policy.blockedToolNames)) ||
         JSON.stringify(e.worktree) !== JSON.stringify(trustedLocalWorktree(real, deps))) fail("scope/worktree");
     if (!policy.readOnly && (!policy.hostWritesAuthorized || r?.localWriterClaim?.state !== "held" ||
         r.localWriterClaim.cwd !== real ||
         (e.worktree && (r.localWriterClaim.worktree?.root !== e.worktree.root || r.localWriterClaim.worktree.gitDir !== e.worktree.gitDir)))) fail();
-    return true;
+    // A source update can change read-only defaults between parent and child launches.
+    const blockedToolNames = policy.readOnly
+      ? [...new Set([...(e.permissions.blockedToolNames ?? []), ...(policy.blockedToolNames ?? [])])]
+      : policy.blockedToolNames;
+    return { blockedToolNames };
   }, { strict: true, requireDeadOwner: true });
-  if (!validated) fail("registry lock busy");
+  return validated ?? fail("registry lock busy");
 }
 
 /** Only a native-live publishing parent justifies bounded synchronization. */
-export async function awaitLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}): Promise<void> {
+export async function awaitLocalWriterChild(runId: string, cwd: string, policy: LocalExecutionRequest, deps: AgentRunControlDeps = {}) {
   if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error("[local-writer-resource] child binding invalid id");
   const deadline = Date.now() + 2000;
   for (;;) {
@@ -2103,8 +2293,7 @@ export async function awaitLocalWriterChild(runId: string, cwd: string, policy: 
     const parentLive = publication && native.state === "verified" && publication.parent.startedAt === native.startedAt &&
       publication.parent.linux?.bootId === native.linux?.bootId && publication.parent.linux?.startTicks === native.linux?.startTicks;
     try {
-      validateLocalWriterChild(runId, cwd, policy, deps);
-      return;
+      return validateLocalWriterChild(runId, cwd, policy, deps);
     } catch (error) {
       const lockBusy = String(error).includes("registry lock busy");
       const pending = publication?.state === "pending" && r?.execution?.state === "known" && r.execution.owner.state === "unknown";
@@ -2253,6 +2442,8 @@ export async function spawnLocalBackgroundRun(
     cliEntrypointPath?: string;
     agentKey: string;
     agentName?: string;
+    /** Host adapter only: 派发者身份（当前运行 agent）；不来自模型工具参数。 */
+    callerAgentKey?: string;
     /** 短标题（展示用）；写进 run 记录前会归一化。 */
     title?: string;
     cwd?: string;
@@ -2386,6 +2577,9 @@ export async function spawnLocalBackgroundRun(
     startup: { protocol: AGENT_RUN_PROTOCOL, phase: "spawn" },
     agentKey: input.agentKey,
     agentName: input.agentName?.trim() || shortAgentKey(input.agentKey),
+    ...(typeof input.callerAgentKey === "string" && input.callerAgentKey.trim()
+      ? { callerAgentKey: input.callerAgentKey.trim() }
+      : {}),
     ...(title ? { title } : {}),
     cwd: canonicalCwd ?? input.cwd,
     execution,
@@ -2858,9 +3052,33 @@ export function transitionRunToTerminal(
     if (typeof update.lastAssistantText === "string" && update.lastAssistantText) {
       record.lastAssistantText = update.lastAssistantText.slice(0, 2000);
     }
+    // 只读观测字段：与实际终态同一次写入，避免事后重建/猜测。
+    // model 是 run 进程收尾自报的已解析模型 ID（同一来源也写 .result.md 头）；
+    // trim 后为空即不写，缺失就保持未知。
+    if (typeof update.model === "string" && update.model.trim()) {
+      record.model = update.model.trim();
+    }
+    // escalated / reviewVerdict 只从本次终态正文派生：读不到正文即不写。
+    // 不使用 msgFile（派发 brief 是输入不是结论），也不扫描 .log。
+    const finalObservation = deriveRunFinalObservation(update.lastAssistantText);
+    if (finalObservation.escalated) record.escalated = true;
+    if (finalObservation.reviewVerdict) record.reviewVerdict = finalObservation.reviewVerdict;
     if (update.cacheUsage) {
       record.cacheHitRatio = update.cacheUsage.cache_hit_ratio;
       record.cacheCachedTokens = update.cacheUsage.cached_tokens;
+      // 只读观测：token 总量与命中率同一次写入，缺失就保持未知（不填 0）。
+      if (typeof update.cacheUsage.input_tokens === "number") {
+        record.inputTokens = update.cacheUsage.input_tokens;
+      }
+      if (typeof update.cacheUsage.output_tokens === "number") {
+        record.outputTokens = update.cacheUsage.output_tokens;
+      }
+    }
+    // 生效档位：selectionCheck.modelTier（派发时的显式判定）优先；没有就按已
+    // 解析的 model 推导。推导结果是 "unknown" 且没有显式判定时省略字段。
+    const resolvedTier = record.selectionCheck?.modelTier ?? resolveModelTier(record.model);
+    if (resolvedTier !== "unknown" || record.selectionCheck?.modelTier) {
+      record.modelTier = resolvedTier;
     }
     record.endedAt = now().toISOString();
     let resultWriteFailed = false;
@@ -2909,6 +3127,9 @@ export function transitionRunToTerminal(
             cwd: record.cwd,
             continuedFrom: record.continuedFrom,
             ...(update.cacheUsage ? { cacheUsage: update.cacheUsage } : {}),
+            ...(typeof record.inputTokens === "number" ? { inputTokens: record.inputTokens } : {}),
+            ...(typeof record.outputTokens === "number" ? { outputTokens: record.outputTokens } : {}),
+            ...(record.modelTier ? { modelTier: record.modelTier } : {}),
           },
           update.lastAssistantText ?? "",
         );

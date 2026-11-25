@@ -27,6 +27,7 @@
  */
 
 import type { ChildRunCompletedTurnEvent } from "core/chat/internalTurnEvent";
+import { resolveRunsDir } from "../agentRunControl";
 import { filterUnclaimedChildRuns, buildWakeMessage, buildWakeDisplayText } from "./runCompletionWatcher";
 import { traceChildRunWake } from "./runWakeDiagnostics";
 
@@ -69,7 +70,10 @@ export function prepareChildRunConsumption(
   return {
     ...event,
     runs: remainingRuns,
-    text: buildWakeMessage(remainingRuns, now),
+    text: buildWakeMessage(remainingRuns, now, {
+      // 与 run 注册表同一个有效 runs 目录（自定义 NOLO_HOME 也要内联）。
+      trustedResultDirs: [resolveRunsDir(host.env)],
+    }),
     displayText: buildWakeDisplayText(remainingRuns, now),
   };
 }

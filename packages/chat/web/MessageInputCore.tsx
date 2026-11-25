@@ -54,6 +54,8 @@ import { useFavoriteAgentIds } from "app/favorite/favoriteStore";
 import { decideMessageInputKeyAction } from "./messageInputKeyBehavior";
 import { useChatInput } from "chat/hooks/useChatInput";
 import {
+  applyChatInputSeedText,
+  shouldConsumeChatInputSeed,
   useChatInputSeed,
   publishChatInputSeed,
 } from "chat/hooks/useChatInputSeed";
@@ -362,19 +364,12 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
   const isComposingRef = useRef(false);
   const lastCompositionEndAtRef = useRef(0);
 
-  // Consume guide seed from MessageActions when it arrives
+  // Consume guide seed from MessageActions or targeted assistant panels when it arrives
   useEffect(() => {
-    if (!chatInputSeed) return;
-    const { text: seedText, mode, focus } = chatInputSeed;
-    if (!seedText) return;
+    if (!shouldConsumeChatInputSeed(chatInputSeed, currentDialogId)) return;
+    const { focus } = chatInputSeed;
 
-    {
-      const prev = text;
-      const spacer = prev && !prev.endsWith(" ") ? " " : "";
-      setText(
-        mode === "append" && prev ? `${prev}${spacer}${seedText}` : seedText
-      );
-    }
+    setText(applyChatInputSeedText(text, chatInputSeed));
     setEditingSession(
       chatInputSeed.editMessageId
         ? {
@@ -393,7 +388,7 @@ export const MessageInput = forwardRef<MessageInputHandle, MessageInputProps>(({
         areaRef.current?.setSelectionRange(len, len);
       });
     }
-  }, [chatInputSeed, setText, text]);
+  }, [chatInputSeed, currentDialogId, setText, text]);
 
   const isMobile = useIsMobile(MOBILE_BREAKPOINT);
   const maxTextareaHeight = isMobile

@@ -54,11 +54,73 @@ const COLLAB_ACTION_PATTERN =
 const DISPATCH_TOOL_NAMES = new Set(["startAgentRun", "controlAgentRun"]);
 
 /**
- * 从当前用户输入文本判断是否表现出多 Agent 派发/编排意图。
+ * 宿主内部提醒（**不是用户输入**）的**精确前缀**清单。
+ *
+ * 这些提醒由 loop 自己以 `role: "user"` 追加进 transcript，只为走 append-only
+ * 注入路径（否则 stablePrefix 分叉会击穿 provider 前缀缓存），因此读取历史时
+ * 必须与真正的用户消息区分开。
+ *
+ * 为什么是**精确前缀**而不是宽泛的 `[系统提示`：真实的用户输入完全可能以
+ * `[系统提示词] 请并行派发两个子任务` 这类字样开头，宽泛前缀会把用户的真实
+ * 派发意图当成宿主提醒吞掉（漏报 → 该锁 full 协议却不锁）。这里只认宿主
+ * 实际产出的那几条固定文案，其余任何文本一律按用户输入处理。
+ */
+export const ROUND_BUDGET_WARNING_PREFIX =
+  "[系统提示] 当前单次任务的连续工具调用已达";
+
+/**
+ * 高档主模型自包提醒（agent-runtime/localLoop 的 Tier-Aware Offload Nudge）的
+ * **唯一前缀常量**。loop 追加时用它起始正文，这里据此在历史扫描中忽略该条消息。
+ *
+ * 为什么必须有：提醒正文会提到 `startAgentRun` 与派发相关词，一旦被当成用户
+ * 派发意图，下一轮 `detectDispatchIntentFromMessages` 会把 session 从 min 协议
+ * 锁成 full 协议，stablePrefix 逐字节变化 → 击穿所有 provider 的前缀缓存。
+ */
+export const OFFLOAD_NUDGE_PREFIX = "[系统提示·分工护栏]";
+
+/**
+ * 子任务软预算提醒（agent-runtime/subtaskBudget）的两条固定前缀。正文含
+ * 「子任务」这个派发关键词，不排除就会在子任务会话里误锁 full 协议；生产端
+ * 直接引用本清单，避免两处文案漂移。
+ */
+export const SUBTASK_SOFT_BUDGET_NOTICE_PREFIXES = [
+  "[系统提示 · 子任务软预算提醒]",
+  "[系统提示 · 子任务强收敛提醒]",
+] as const;
+
+/** 所有已知宿主内部提醒的精确前缀（顺序无关）。 */
+export const INTERNAL_NOTICE_PREFIXES: readonly string[] = [
+  ROUND_BUDGET_WARNING_PREFIX,
+  OFFLOAD_NUDGE_PREFIX,
+  ...SUBTASK_SOFT_BUDGET_NOTICE_PREFIXES,
+];
+
+/** 该文本是否是宿主内部提醒（而非用户输入）——只认精确前缀，不做宽泛匹配。 */
+export function isInternalNoticeText(text: string | null | undefined): boolean {
+  if (typeof text !== "string") return false;
+  const trimmed = text.trimStart();
+  return INTERNAL_NOTICE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
+/** 是否是自包提醒（前缀严格匹配 OFFLOAD_NUDGE_PREFIX）。 */
+export function isOffloadNudgeText(text: string | null | undefined): boolean {
+  if (typeof text !== "string") return false;
+  return text.trimStart().startsWith(OFFLOAD_NUDGE_PREFIX);
+}
+
+/**
+ * 从**当前用户输入文本**判断是否表现出多 Agent 派发/编排意图。
  * 空文本/非字符串一律 false（走最小协议）。
+ *
+ * 契约：本入口只看文本本身，**不做任何前缀过滤**——真实用户完全可能写出
+ * `[系统提示词] 请并行派发两个子任务` 这类输入，按前缀吞掉就是漏报。
+ * 「这条消息是不是宿主注入的提醒」属于消息来源信息，只有
+ * `detectDispatchIntentFromMessages`（能看到 role / internalNotice / 精确前缀）
+ * 才有权判定。
  */
 export function detectDispatchIntent(text: string | null | undefined): boolean {
   if (typeof text !== "string" || !text.trim()) return false;
+
   // 只屏蔽独立分句中的明确禁派指令，不解释任意否定句或删掉整个分句。
   // 起止边界避免把「不是不要派发」「不要派发是不对的」当成禁派；
   // 保留其它分句，让先否定后肯定及原多执行者组合仍可触发。
@@ -86,7 +148,22 @@ type DispatchIntentMessage = {
   /** tool 消息 / run 记录上可能带的扁平工具名字段。 */
   toolName?: unknown;
   name?: unknown;
+  /**
+   * 宿主内部提醒标记：loop 自己注入的提醒可带该标记，读取历史时按宿主提醒
+   * 处理（与用户消息区分）。与精确前缀判定等价，二者命中任一即视为内部提醒。
+   */
+  internalNotice?: unknown;
 };
+
+/**
+ * 该消息是否是宿主注入的内部提醒。判据只有两条，都带来源信息，不看「像不像」：
+ * ① 显式内部标记 `internalNotice === true`；
+ * ② 正文精确命中已知宿主提醒前缀（见 INTERNAL_NOTICE_PREFIXES）。
+ */
+function isInternalNoticeMessage(msg: DispatchIntentMessage): boolean {
+  if (msg.internalNotice === true) return true;
+  return isInternalNoticeText(messageText(msg.content));
+}
 
 function messageText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -137,8 +214,13 @@ export function detectDispatchIntentFromMessages(
   if (!Array.isArray(messages)) return false;
   for (const msg of messages) {
     if (!msg) continue;
-    if (msg.role === "user" && detectDispatchIntent(messageText(msg.content))) {
-      return true;
+    const text = messageText(msg.content);
+    // 内部提醒以 user role 落进 transcript 只为 append-only 注入（轮次预算预警、
+    // 自包提醒、子任务软预算提醒）；它们不是用户输入，绝不作为派发意图信号：
+    // 否则一次提醒会把 session 单调锁成 full 协议，stablePrefix 变化击穿前缀缓存。
+    // 判据带来源信息（显式标记 / 精确前缀），不用宽泛 "[系统提示" 吞掉真实输入。
+    if (!isInternalNoticeMessage(msg)) {
+      if (msg.role === "user" && detectDispatchIntent(text)) return true;
     }
     if (hasDispatchToolCall(msg)) return true;
   }

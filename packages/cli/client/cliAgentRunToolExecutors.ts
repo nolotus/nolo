@@ -3,6 +3,10 @@ import { type McpApprovalHost } from "../mcp/mcpApprovalTransport";
 import { validateChildImagePaths, validateChildImages } from "./childRunImages";
 import { assertDispatchSelectionAdmission } from "../../ai/agent/dispatchSelectionPolicy";
 import { parseAgentRunArgs } from "../agentRunArgs";
+import {
+  resolveDispatchReasoningEffort,
+} from "../../ai/agent/defaultReasoningEffort";
+import type { ReasoningEffort } from "../../ai/agent/createAgentSchema";
 import { parseUserIdFromAuthToken, resolveAuthToken, resolveServerUrl } from "../cliEnvHelpers";
 import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -103,6 +107,19 @@ import {
 type EnvLike = Record<string, string | undefined>;
 type OutputLike = { write(chunk: string): unknown };
 
+/** trim 过且非空才算给了值；其它（缺失/空白/非字符串）统一视为未知。 */
+const normalizeNonEmptyString = (value: unknown): string =>
+  typeof value === "string" && value.trim() ? value.trim() : "";
+
+/**
+ * 派发者身份（宿主上下文，绝非模型工具参数）：当前运行的 agent 优先，
+ * 缺失时回退宿主注入的 coordination source.agentKey。都拿不到 = 未知。
+ */
+const resolveHostCallerAgentKey = (deps: CliAgentRunToolExecutorDeps): string =>
+  normalizeNonEmptyString(deps.currentAgentKey) ||
+  normalizeNonEmptyString(deps.source?.agentKey);
+
+
 /**
  * CLI executor 接线所需的依赖。所有新增字段可选，不破坏现有调用方
  * （入参只增不改）。
@@ -150,6 +167,15 @@ export type CliAgentRunToolExecutorDeps = {
    */
   resolveAgentImageSupport?: (agentKey: string) => Promise<boolean>;
   resolveAgentModel?: (agentKey: string) => Promise<string | undefined>;
+  /**
+   * 推理档自动联动的输入：目标 agent 记录里的真实 `provider` 与**已显式设置**的
+   * `reasoning_effort`（两者从同一份生产 agent 记录读，避免分头解析出互相矛盾的
+   * 真值）。缺省/返回 undefined = 未能确认 → 派发侧 fail-closed：不追加
+   * `--reasoning-effort`，也不会覆盖用户固定档位。
+   */
+  resolveAgentReasoningProfile?: (
+    agentKey: string,
+  ) => Promise<{ provider?: string; reasoningEffort?: string } | undefined>;
   resolveAgentDisplayName?: (agentKey: string) => Promise<string | undefined>;
   /**
    * 本机 machineId（判定「绑定机就是本机」用）。未知 = 无法证明，binding 判定
@@ -320,6 +346,11 @@ function buildRunStatusPayload(
       ...(typeof reconciled.retryable === "boolean"
         ? { retryable: reconciled.retryable }
         : {}),
+      // 只读观测：本 run 实际跑的模型 / 熔断升级标记 / 正文里明确的 review 结论。
+      // 三者缺省即「未观察到」，不回填猜测值。
+      ...(reconciled.model ? { model: reconciled.model } : {}),
+      ...(reconciled.escalated === true ? { escalated: true } : {}),
+      ...(reconciled.reviewVerdict ? { reviewVerdict: reconciled.reviewVerdict } : {}),
       // 日志落盘路径始终暴露：stalled/failed 且 dialogId 缺失（如 ephemeral）
       // 时 logTail 只能靠它读，不能只留在进程内存。
       ...(reconciled.logPath ? { logPath: reconciled.logPath } : {}),
@@ -545,6 +576,10 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       (!rawAgentKey || rawAgentKey.toLowerCase() === "self")
         ? (deps.currentAgentKey ?? rawAgentKey)
         : rawAgentKey;
+    // 派发者身份（可观测）：只取宿主注入的当前运行 agent（cliLocalToolExecutors
+    // 传进来的 currentAgentKey），不是 startAgentRun 的工具参数——模型无法伪造。
+    // 宿主没给就是未知，留空不编造。
+    const callerAgentKey = resolveHostCallerAgentKey(deps);
     // runtimeKey / binding 的判定必须在任何副作用之前，且分三件事：
     //   1) 目标 agent 的 binding 参与判定（F3）：binding 指向非本机 → 拒绝，绝不
     //      静默在本机 spawn（读 binding 是只读，不是副作用）；
@@ -668,6 +703,16 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       if (args.instaboxAllowRemoteRelease === true) instaboxArgs.push("--instabox-allow-remote-release");
       if (args.instaboxAllowPaid === true) instaboxArgs.push("--instabox-allow-paid");
     }
+    // 推理档随任务难度自动联动：只有「目标 agent 没有显式固定档位 + 模型确实支持
+    // reasoning_effort」时才返回一个值（判定真值见 ai/agent/defaultReasoningEffort）。
+    // 没接线 / 读取失败 / 读不到 provider 或 model 都算「未能确认」→ 不追加参数，
+    // 但派发照常进行（fail-closed 只影响是否自动档位，不影响能否派发）。
+    const dispatchReasoningEffort = await resolveRunDispatchReasoningEffort({
+      deps,
+      agentKey,
+      difficulty: args.difficulty,
+      model: selectedModel,
+    });
     const rawArgs = [
       "--agent",
       agentKey,
@@ -687,6 +732,9 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
       ...buildCliLocalRuntimeForwardArgs(dispatch),
       ...instaboxArgs,
       ...imagePaths.flatMap(path => ["--image", path]),
+      ...(dispatchReasoningEffort
+        ? ["--reasoning-effort", dispatchReasoningEffort]
+        : []),
     ];
 
     // α：生产侧解析身份——显式 agentName 严格保留；省略时从 agent 配置回读；
@@ -762,6 +810,7 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
         cliEntrypointPath: deps.cliEntrypoint,
         agentKey,
         ...(agentName ? { agentName } : {}),
+        ...(callerAgentKey ? { callerAgentKey } : {}),
         ...(runTitle ? { title: runTitle } : {}),
         ...(batchId ? { batchId } : {}),
         ...(credentialGroup ? { credentialGroup } : {}),
@@ -871,6 +920,44 @@ export function createCliStartAgentRunExecutor(deps: CliAgentRunToolExecutorDeps
   };
 }
 
+/**
+ * 本次 run 的自动联动推理档（单一真值：startAgentRun 与终态续跑都走这里）。
+ *
+ * fail-closed 契约——以下任一条成立就返回 `undefined`（= 不追加
+ * `--reasoning-effort`，沿用 agent 记录里的生效值），但**派发本身照常进行**：
+ * 没接 `resolveAgentReasoningProfile`、resolver 抛错、读不到记录、记录缺 provider、
+ * 或缺 model。
+ */
+async function resolveRunDispatchReasoningEffort(args: {
+  deps: CliAgentRunToolExecutorDeps;
+  agentKey: string;
+  difficulty: unknown;
+  model?: string | undefined;
+}): Promise<ReasoningEffort | undefined> {
+  try {
+    const profile = await args.deps.resolveAgentReasoningProfile?.(args.agentKey);
+    // 没接线或读不到记录 = 未能确认（不是「确认未设置」），必须 fail-closed。
+    if (!profile) return undefined;
+    // 终态续跑的原记录不一定带 model，缺省回读与准入同一套可信 resolver。
+    let model = args.model;
+    if (!model) {
+      try {
+        model = await args.deps.resolveAgentModel?.(args.agentKey);
+      } catch {
+        model = undefined;
+      }
+    }
+    return resolveDispatchReasoningEffort({
+      difficulty: typeof args.difficulty === "string" ? args.difficulty : undefined,
+      provider: profile.provider,
+      model,
+      agentReasoningEffort: profile.reasoningEffort,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 function controlMessageLabels(queuedCount?: number) {
   const labels = agentRunCardLabels().controlMessage;
   return { ...labels, queued: queuedCount === undefined ? labels.queued : labels.enqueued(queuedCount) };
@@ -891,6 +978,19 @@ async function spawnContinuationRun(
   const continuation = resolveLocalContinuation(reconciled, deps);
   const agentKey = reconciled.agentKey;
   const agentName = reconciled.agentName;
+  // 续跑同样记宿主派发者：controlAgentRun 路径的 deps 可能只带 source.agentKey，
+  // 由 resolveHostCallerAgentKey 统一回退。
+  const callerAgentKey = resolveHostCallerAgentKey(deps);
+  // 终态续跑沿用原 run 的难度语义：按原记录的 selectionCheck.difficulty 重新经同一套
+  // fail-closed helper 计算，因此「同进程 drain 轮」与「终态续跑」对同一任务给出
+  // 同一个档位（而不是 drain 有档、续跑掉回记录默认值）。
+  // 只继承**难度**：provider / model / 显式 effort 一律取当前配置——原记录里的
+  // `model` 是历史快照，用户可能已经换过模型，拿它算档会把新模型算错。
+  const continuationReasoningEffort = await resolveRunDispatchReasoningEffort({
+    deps,
+    agentKey,
+    difficulty: reconciled.selectionCheck?.difficulty,
+  });
   const rawArgs = [
     "--agent",
     agentKey,
@@ -904,6 +1004,9 @@ async function spawnContinuationRun(
     "PLACEHOLDER",
     "--bg",
     ...(reconciled.ephemeral ? ["--ephemeral"] : []),
+    ...(continuationReasoningEffort
+      ? ["--reasoning-effort", continuationReasoningEffort]
+      : []),
     ...continuation.rawArgs,
   ];
   // 续跑产生的新 run 记录原 runId（写进 record 与 .result.md 头 continuedFrom）。
@@ -921,11 +1024,15 @@ async function spawnContinuationRun(
       cliEntrypointPath: deps.cliEntrypoint,
       agentKey,
       ...(agentName ? { agentName } : {}),
+      ...(callerAgentKey ? { callerAgentKey } : {}),
       ...(continuedTitle ? { title: continuedTitle } : {}),
       ...(reconciled.batchId ? { batchId: reconciled.batchId } : {}),
       // 续跑也要在 running 阶段就带上目标对话，否则"开着那条对话的 TUI"看不到它。
       ...(reconciled.dialogId ? { dialogId: reconciled.dialogId } : {}),
       ...(reconciled.parentDialogId ? { parentDialogId: reconciled.parentDialogId } : {}),
+      // 续跑继承原 run 的难度判定：不传的话第 2 次、第 N 次终态续跑都会丢掉
+      // 原任务的 difficulty，自动联动推理档随之掉回 normal 档。
+      ...(reconciled.selectionCheck ? { selectionCheck: reconciled.selectionCheck } : {}),
       // 续跑继承原 run 的凭证组（同一 agent），供并发扇出守卫判定。
       ...(reconciled.credentialGroup ? { credentialGroup: reconciled.credentialGroup } : {}),
       cwd: continuation.cwd,

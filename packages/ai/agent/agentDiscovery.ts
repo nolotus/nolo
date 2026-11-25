@@ -1,4 +1,4 @@
-import { resolveModelTier, type ModelTier } from "./dispatchSelectionPolicy";
+import { DISPATCH_TIER_RANK, resolveModelTier, type DispatchDifficulty, type ModelTier } from "./dispatchSelectionPolicy";
 import {
   resolveBillingSource,
   type AgentBillingCandidate,
@@ -18,12 +18,16 @@ import {
   toSafeAgentSummary,
   omitNullishAgentSummaryFields,
   summarizeCredentialGroups,
+  promoteSharedCredentialGroupQuota,
+  type CompactAgentQuota,
 } from "./safeAgentSummary";
 import {
   isAgentUnavailableNow,
+  isSubscriptionPeriodWindow,
   resolveAgentAvailability,
   DEFAULT_PROVIDER_RETRY_MS,
 } from "./agentAvailabilityShared";
+import { resolveAgentSelectionPriority } from "./agentSelectionPriority";
 
 export type DiscoveryScope = "preferred" | "public" | "all";
 export { resolveBillingSource };
@@ -146,6 +150,118 @@ export interface PlanningCaller {
   agentKey?: string;
   effectiveModel?: string;
   runKind?: "interactive" | "subtask";
+  /**
+   * 调用者自身所属凭据池（可选透传，主要供测试或已知凭据的宿主使用）。
+   * 未传时由 agentKey 在候选集内反查——不引入任何新增网络或存储读取。
+   */
+  credentialGroup?: string | null;
+}
+
+/**
+ * 调用者自身的 `credentialGroup`：显式传参优先，其次按 agentKey 在候选集内反查。
+ * 只认非空字符串；解析不出就是「未知」，不参与任何异池判定。
+ */
+function resolveCallerCredentialGroup<T extends SafeAgentSummary>(
+  agents: T[],
+  caller: PlanningCaller | undefined,
+): string | undefined {
+  const explicit = caller?.credentialGroup;
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  const callerKey = typeof caller?.agentKey === "string" && caller.agentKey.trim()
+    ? caller.agentKey : undefined;
+  if (!callerKey) return undefined;
+  const own = agents.find((agent) => agent.agentKey === callerKey);
+  const group = own?.credentialGroup;
+  return typeof group === "string" && group.length > 0 ? group : undefined;
+}
+
+/** 池姿态调用者身份：configured agentKey（用于排除自身）+ 实际运行模型。 */
+export interface FreePoolCaller {
+  /** 调用者自己的 agentKey；与候选同 key 时该候选不参与「外部更高档」比较。 */
+  agentKey?: string | null;
+  /** 调用者**实际运行**的模型（可能与自身配置模型不同，例如配置 kimi-k3 实跑 flash）。 */
+  model?: string | null;
+}
+
+/** 池姿态候选的最小形状（server/CLI 端由 toSafeAgentSummary 投影而来）。 */
+export interface FreePoolCandidate {
+  agentKey?: string | null;
+  model?: unknown;
+  requiresPaidApproval?: boolean;
+}
+
+const asCallerModel = (
+  caller: FreePoolCaller | string | null | undefined,
+): string | null | undefined =>
+  typeof caller === "string" ? caller : caller?.model ?? null;
+
+const asCallerAgentKey = (
+  caller: FreePoolCaller | string | null | undefined,
+): string => {
+  if (typeof caller === "string" || !caller) return "";
+  return typeof caller.agentKey === "string" ? caller.agentKey.trim() : "";
+};
+
+/**
+ * 相对池姿态推导（纯函数，零 I/O）：当前调用者是否已是「免付费池顶」。
+ *
+ * 首参兼容两种形态：旧式 `string | null | undefined`（调用者模型），或
+ * `{ model, agentKey }` 对象（推荐——带上 agentKey 才能严格排除自身）。
+ *
+ * 三态（保守优先不误判）：
+ * - 候选池为空 → undefined（无结论，调用方按既有行为走）；
+ * - 调用者模型档位推不出（unknown）→ undefined；
+ * - 过滤掉自身（agentKey 相同）后没有外部候选 → true（单模型池，自身即池顶）；
+ * - 存在 requiresPaidApproval === false 且档位**严格更高**的外部候选 → false；
+ * - 存在无法排除为「更高免付费档」的外部候选（requiresPaidApproval !== true 且
+ *   [档位推不出，或扣费未知但档位更高]）→ undefined；
+ * - 否则（外部候选要么明确需付费，要么已知档位 <= 自身）→ true。
+ *
+ * 「排除自身」是关键：实际运行模型与自身配置模型不一致时（配置 kimi-k3、实跑
+ * flash），不排除自身会把自身那条更高档配置当成外部免费升档 → 误判 false。
+ */
+export function isCallerAtFreePoolTop(
+  caller: FreePoolCaller | string | null | undefined,
+  candidates: ReadonlyArray<FreePoolCandidate>,
+): boolean | undefined {
+  if (candidates.length === 0) return undefined;
+  const currentTier = resolveModelTier(asCallerModel(caller));
+  if (currentTier === "unknown") return undefined;
+  const currentRank = DISPATCH_TIER_RANK[currentTier];
+  const callerAgentKey = asCallerAgentKey(caller);
+  // 自身只有「两边都有 agentKey 且相同」才算自身；缺 key 时不做身份猜测。
+  const external = candidates.filter(
+    (candidate) =>
+      !(
+        typeof candidate.agentKey === "string" &&
+        candidate.agentKey &&
+        callerAgentKey &&
+        candidate.agentKey === callerAgentKey
+      ),
+  );
+  // 过滤自身后池内只剩自身（单模型池）：没有可比的外部候选，自身即池顶。
+  if (external.length === 0) return true;
+
+  const hasStrictlyHigherFree = external.some((candidate) => {
+    if (candidate.requiresPaidApproval !== false) return false;
+    const tier = resolveModelTier(candidate.model);
+    return tier !== "unknown" && DISPATCH_TIER_RANK[tier] > currentRank;
+  });
+  if (hasStrictlyHigherFree) return false;
+
+  // 任何「既不确定要付费、也无法证明档位不高于自己」的外部候选都让结论不可下。
+  const hasUnresolvableCandidate = external.some((candidate) => {
+    if (candidate.requiresPaidApproval === true) return false;
+    const tier = resolveModelTier(candidate.model);
+    if (tier === "unknown") return true;
+    if (candidate.requiresPaidApproval === undefined) {
+      return DISPATCH_TIER_RANK[tier] > currentRank;
+    }
+    return false;
+  });
+  if (hasUnresolvableCandidate) return undefined;
+
+  return true;
 }
 
 export interface PlanningRecommendation {
@@ -177,13 +293,12 @@ function recommendPlanning(
   if (!callerKey) return { ...base, reason: "caller_unknown" };
   if (currentTier === "unknown") return { ...base, reason: "caller_tier_unknown" };
   if (!poolComplete) return { ...base, reason: "pool_incomplete" };
-  const ranks = { easy: 0, normal: 1, complex: 2, extreme: 3 };
   // Tier is weak guidance, not a domain/quality score. Keep domain fit conditional.
   // Availability annotations are advisory; do not turn stale quota/cooldown into gates.
   const higher = agents.filter(a => a.agentKey && a.agentKey !== callerKey
-    && a.modelTier !== "unknown" && ranks[a.modelTier] > ranks[currentTier]);
+    && a.modelTier !== "unknown" && DISPATCH_TIER_RANK[a.modelTier] > DISPATCH_TIER_RANK[currentTier]);
   const free = higher.filter(a => a.requiresPaidApproval === false);
-  free.sort((a, b) => ranks[b.modelTier as keyof typeof ranks] - ranks[a.modelTier as keyof typeof ranks]);
+  free.sort((a, b) => DISPATCH_TIER_RANK[b.modelTier as DispatchDifficulty] - DISPATCH_TIER_RANK[a.modelTier as DispatchDifficulty]);
   const best = free[0];
   if (best) return { ...base, action: "delegate", reason: "higher_suitable_agent",
     agentKey: best.agentKey, recommendedTier: best.modelTier };
@@ -302,7 +417,6 @@ export function matchesAgentQuery(agent: SafeAgentSummary, query?: string): bool
  * 截断后每个候选的 agentKey/tier/billingSource 全部落在被砍掉的中段。
  */
 export interface AgentDiscoveryResult {
-  planningRecommendation: PlanningRecommendation;
   total: number;
   offset?: number;
   limit?: number;
@@ -310,7 +424,32 @@ export interface AgentDiscoveryResult {
   unavailableCount: number;
   availableCount: number;
   agents: (CompactSafeAgentSummary | UltraCompactSafeAgentSummary | SafeAgentSummary)[];
+  planningRecommendation: PlanningRecommendation;
+  tierHints?: Partial<Record<DispatchDifficulty, { agentKey: string; name: string; model: string | null }>>;
   credentialGroups: CredentialGroupSummary[];
+}
+
+/** Infinity leaves candidates without a usable reset signal in existing list order. */
+function nearestFundedSubscriptionReset(agent: SafeAgentSummary, now: number): number {
+  let nearest = Infinity;
+  if (agent.billingSource !== "user_subscription") return nearest;
+  for (const window of agent.quota?.windows ?? []) {
+    const { resetAt, remaining, utilization } = window;
+    if (typeof resetAt === "number" && resetAt > now && resetAt < nearest &&
+        isSubscriptionPeriodWindow(window) &&
+        ((typeof remaining === "number" && remaining > 0) ||
+         (typeof utilization === "number" && utilization < 0.95))) {
+      nearest = resetAt;
+    }
+  }
+  return nearest;
+}
+
+function meteredUnitPrice(agent: SafeAgentSummary): number {
+  if (agent.billingSource === "user_subscription" || agent.billingSource === "owner_subscription") return Infinity;
+  const input = agent.inputPrice !== null && Number.isFinite(agent.inputPrice) ? agent.inputPrice : 0;
+  const output = agent.outputPrice !== null && Number.isFinite(agent.outputPrice) ? agent.outputPrice : 0;
+  return input > 0 || output > 0 ? input + output : Infinity;
 }
 
 /**
@@ -431,6 +570,54 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
         ? pagedAgents.map(toUltraCompactAgentSummary)
         : pagedAgents.map(toCompactAgentSummary);
 
+  // compact:true 的额外压缩：同一 credentialGroup 下窗口内容相同的 quota 只留一份，
+  // 提升到 credentialGroups[] 上（凭据级事实不该在 4~6 个 agent 条目里各抄一遍）。
+  // 只动输出投影，不动 sortedAgents：total/tierHints/availableCount 仍按完整摘要算。
+  // 注：下游按字节预算裁剪的分页器会在**实际交付的前缀**上重跑同一提升逻辑
+  // （candidateSpeedContext.ts），这里只负责不走分页时的整页结论。
+  type CompactQuotaCarrier = {
+    credentialGroup?: string;
+    isOwned?: boolean;
+    quota?: CompactAgentQuota;
+    quotaRef?: string;
+  };
+  const compacted =
+    options.compact === true && options.verbose !== true
+      ? (promoteSharedCredentialGroupQuota(
+          projectedAgents as unknown as CompactQuotaCarrier[],
+          credentialGroups,
+        ) as unknown as { agents: typeof projectedAgents; groups: typeof credentialGroups })
+      : { agents: projectedAgents, groups: credentialGroups };
+
+  const tierHints: NonNullable<AgentDiscoveryResult["tierHints"]> = {};
+  const tierHintPreferences =
+    new Map<DispatchDifficulty, { priority: number; differentGroup: boolean; resetAt: number; price: number }>();
+  const callerCredentialGroup = resolveCallerCredentialGroup(sortedAgents, options.caller);
+  for (const agent of sortedAgents) {
+    const { agentKey, name, model, modelTier, requiresPaidApproval, availabilityStatus } = agent;
+    if (!agentKey || requiresPaidApproval !== false || modelTier === "unknown" ||
+        availabilityStatus === "quota_exhausted" || availabilityStatus === "rate_limited") continue;
+
+    const priority = resolveAgentSelectionPriority(agent);
+    const current = tierHintPreferences.get(modelTier);
+    // Sorted agents are already grouped by priority; never replace a higher-priority hint.
+    if (current && current.priority !== priority) continue;
+    // 同档同优先级内优先与调用者异池（例如 Antigravity/Claude/ChatGPT OAuth 主座
+    // 优先把执行任务交给 DeepSeek/GLM 等独立池通道）。未知 credentialGroup 的候选
+    // 不算「确认异池」，不因缺少凭据信息插队；调用者凭据未知时整条规则不生效。
+    const differentGroup = callerCredentialGroup !== undefined &&
+      Boolean(agent.credentialGroup) && agent.credentialGroup !== callerCredentialGroup;
+    const resetAt = nearestFundedSubscriptionReset(agent, now);
+    const price = resetAt === Infinity ? meteredUnitPrice(agent) : Infinity;
+    if (current && current.differentGroup !== differentGroup) {
+      if (current.differentGroup) continue;
+    } else if (current && (resetAt > current.resetAt || (resetAt === current.resetAt && price >= current.price))) {
+      continue;
+    }
+    tierHintPreferences.set(modelTier, { priority, differentGroup, resetAt, price });
+    tierHints[modelTier] = { agentKey, name, model };
+  }
+
   // 键插入顺序即 JSON.stringify 的输出顺序：把 agents 放在最前，
   // credentialGroups 放到最后（见 AgentDiscoveryResult）。
   return {
@@ -440,12 +627,13 @@ export function buildAgentDiscoveryResult<T extends SafeAgentSummary>(
     ...(isTruncated ? { truncated: true } : {}),
     unavailableCount,
     availableCount: sortedAgents.length,
-    agents: projectedAgents,
+    agents: compacted.agents,
     planningRecommendation: recommendPlanning(
       sortedAgents, options.caller,
       !isTruncated && scope === "all" && !hasQuery && !options.poolRestricted,
     ),
-    credentialGroups,
+    ...(Object.keys(tierHints).length > 0 ? { tierHints } : {}),
+    credentialGroups: compacted.groups,
   };
 }
 

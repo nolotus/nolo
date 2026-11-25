@@ -7,11 +7,12 @@
  */
 
 import React from "react";
+import { useTranslation } from "react-i18next";
 import type { ApiSourceType } from "./PersonaSection";
 import type { FormData } from "../createAgentSchema";
 import ModelSourceSection from "./ModelSourceSection";
 import AdvancedRuntimeSection from "./AdvancedRuntimeSection";
-import ModelParamsSection from "./ModelParamsSection";
+import ModelParamsSection, { type ModelParamsSectionProps } from "./ModelParamsSection";
 
 type AdvancedSettingsTabProps = {
   errors: Record<string, string>;
@@ -20,13 +21,21 @@ type AdvancedSettingsTabProps = {
   apiSource: ApiSourceType;
   setApiSource: (next: ApiSourceType) => void;
   readOnly?: boolean;
+  discoveryConnectionSaved?: boolean;
+  thinkingControl: ModelParamsSectionProps["thinkingControl"];
+  createThinkingSelection?: ModelParamsSectionProps["createThinkingSelection"];
 };
 
 const AdvancedSettingsTab: React.FC<AdvancedSettingsTabProps> = (props) => {
   const { errors, values, set, apiSource, setApiSource, readOnly = false } = props;
 
+  const { t } = useTranslation("ai");
+  const inRoleModelTab = props.discoveryConnectionSaved !== undefined;
+  const runtimeSection = <AdvancedRuntimeSection errors={errors} values={values} set={set} apiSource={apiSource} readOnly={readOnly} />;
+
   return (
     <div className="adv-settings">
+      {inRoleModelTab && <h3 className="adv-settings__title">{t("editRoleModel.model", "模型")}</h3>}
       <ModelSourceSection
         errors={errors}
         values={values}
@@ -34,20 +43,18 @@ const AdvancedSettingsTab: React.FC<AdvancedSettingsTabProps> = (props) => {
         apiSource={apiSource}
         setApiSource={setApiSource}
         readOnly={readOnly}
+        discoveryConnectionSaved={props.discoveryConnectionSaved}
       />
-      <AdvancedRuntimeSection
-        errors={errors}
-        values={values}
-        set={set}
-        apiSource={apiSource}
-        readOnly={readOnly}
-      />
+      {!inRoleModelTab && runtimeSection}
       <ModelParamsSection
         errors={errors}
         values={values}
         set={set}
         readOnly={readOnly}
+        thinkingControl={props.thinkingControl}
+        createThinkingSelection={props.createThinkingSelection}
       />
+      {inRoleModelTab && runtimeSection}
       <style>{`
         .adv-settings {
           display: flex;

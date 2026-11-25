@@ -1,6 +1,6 @@
 {
   "name": "nolo-cli",
-  "version": "0.228.0",
+  "version": "0.228.1",
   "type": "module",
   "description": "Agent-first terminal workspace for Nolo",
   "bin": {
@@ -35,6 +35,8 @@
     "cliCommandTypes.ts",
     "cliEnvHelpers.ts",
     "cliAuthorityBrokerHealth.ts",
+    "cliAuthorityBrokerProcess.ts",
+    "cliAuthorityBrokerTls.ts",
     "cliSpaceHelpers.ts",
     "commandRegistry.ts",
     "connectorRunArtifact.ts",
@@ -75,6 +77,7 @@
     "clipboardy": "^5.3.1",
     "diff": "^8.0.2",
     "lovely-mermaid": "0.3.3",
+    "selfsigned": "^5",
     "string-width": "^8.2.2",
     "ulid": "^2.3.0"
   },

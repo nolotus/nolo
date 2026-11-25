@@ -4,7 +4,8 @@ import "../page.css";
 import React, { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import format from "date-fns/format";
-import { useAppDispatch } from "app/store";
+import { useAppDispatch, useAppSelector } from "app/store";
+import { selectRuntimeSnapshot } from "app/stateViews/runtime";
 import { read } from "database/dbSlice";
 import {
   LuInfo,
@@ -20,8 +21,6 @@ interface FileDetailsPanelProps {
 
 interface FileMeta {
   id?: string;
-  dbKey?: string;
-  pageKey?: string;
   title?: string;
   type?: string;
   lastSavedAt?: string;
@@ -29,7 +28,7 @@ interface FileMeta {
   tags?: string[];
 }
 
-const FileDetailsPanel: React.FC<FileDetailsPanelProps> = ({ pageKey }) => {
+const SignedInFileDetailsPanel: React.FC<FileDetailsPanelProps> = ({ pageKey }) => {
   const { t } = useTranslation();
   const dispatch = useAppDispatch();
   const [meta, setMeta] = useState<FileMeta | null>(null);
@@ -117,7 +116,7 @@ const FileDetailsPanel: React.FC<FileDetailsPanelProps> = ({ pageKey }) => {
   {
     icon: LuInfo,
     label: "ID",
-    value: meta.pageKey || meta.dbKey || pageKey
+    value: pageKey
   }];
 
 
@@ -142,6 +141,11 @@ const FileDetailsPanel: React.FC<FileDetailsPanelProps> = ({ pageKey }) => {
       
     </div>);
 
+};
+
+const FileDetailsPanel: React.FC<FileDetailsPanelProps> = (props) => {
+  const { currentToken } = useAppSelector(selectRuntimeSnapshot);
+  return currentToken?.trim() ? <SignedInFileDetailsPanel {...props} /> : null;
 };
 
 export default FileDetailsPanel;

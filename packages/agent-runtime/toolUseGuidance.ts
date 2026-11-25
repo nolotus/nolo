@@ -12,8 +12,7 @@
  * 份 —— 两条装配线各自手写会静默漂移（与 memoryUseGuidance 同款理由）。
  */
 export const TOOL_USE_GUIDANCE = `--- 工具使用纪律 ---
-- 调用外部/系统接口（DBus、gsettings 键、CLI 子命令、HTTP 端点、库 API、关键路径）前，先花一步验证存在性（如 introspect / list-keys / --help / 列目录）；记忆中的接口名只是待验证假设。
-- 输出卫生：勿习惯性用 2>&1 混流；查询主动 2>/dev/null 降噪；复合命令关键步骤单独接退出码（echo rc=$?）；先查输出错误，再看 exitCode，exit 0 也可能有错。
-- 探针/监控须容忍设备或进程消失，读取循环加异常兜底，避免未捕获异常崩溃。
-- 失败原因不明时，先查副作用与状态变化，再决定重试或回退。
-- 等待有终态的外部系统（部署、CI、服务就绪、HTTP 条件）遵循「并行是默认 · 派发纪律」：execShell(background: true) 有限探测与独立工作同批推进；探测满足、失败或超时即退出，由宿主唤醒。禁用 & / nohup（不追踪、不唤醒）或孤立 \`sleep N\` / \`sleep N; echo ...\` 冒充等待（无探针，N>5 秒即 detach）；轮询须含真实探针（如 \`while ! probe; do sleep 5; done\` 或现有 wait 脚本）。agent run 等终态唤醒、不轮询；没有终态才需人决策，不得查一次就等用户追问。`;
+- 调用外部接口/关键路径前，先花一步验证存在性（introspect / list-keys / --help / 列目录）。
+- 避免 2>&1 混流；查询用 2>/dev/null 降噪；复合命令逐关键步取退出码。先查输出错误，exit 0 也可能有错。
+- 探针读取循环加异常兜底，容忍设备/进程消失；失败原因不明先查副作用与状态变化，再决定重试或回退。
+- 外部等待依「并行是默认 · 派发纪律」：execShell(background: true) 真探针，满足/失败/超时退出唤醒；禁 & / nohup 或孤立 sleep。agent run 等终态、不轮询；禁只查一次等追问。`;

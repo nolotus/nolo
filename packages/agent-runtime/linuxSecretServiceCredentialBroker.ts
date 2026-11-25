@@ -83,15 +83,18 @@ function brokerFailure(op: string): never {
  */
 export function createDefaultSecretToolRunner(
   secretToolBin: string = DEFAULT_SECRET_TOOL_BIN,
+  timeoutMs = 15_000,
 ): SecretToolRunner {
   return (input) =>
     new Promise<SecretToolRunnerResult>((resolve) => {
       let stdout = "";
       let stderr = "";
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (result: SecretToolRunnerResult) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         resolve(result);
       };
 
@@ -99,11 +102,30 @@ export function createDefaultSecretToolRunner(
       try {
         child = spawn(secretToolBin, input.args, {
           stdio: ["pipe", "pipe", "pipe"],
+          detached: process.platform !== "win32",
         });
       } catch {
         finish({ exitCode: -1, stdout: "", stderr: "" });
         return;
       }
+
+      timer = setTimeout(() => {
+        try {
+          if (process.platform !== "win32" && child.pid !== undefined) {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+              return;
+            } catch {
+              // Fall back to killing the child directly.
+            }
+          }
+          child.kill("SIGKILL");
+        } catch {
+          // The child may have already exited.
+        } finally {
+          finish({ exitCode: -1, stdout: "", stderr: "" });
+        }
+      }, timeoutMs);
 
       child.stdout?.on("data", (chunk: string) => {
         stdout += chunk;
@@ -122,10 +144,9 @@ export function createDefaultSecretToolRunner(
         });
       });
 
-      if (input.stdin !== undefined) {
-        child.stdin?.write(input.stdin);
-      }
-      child.stdin?.end();
+      // The process can exit before consuming the pipe (EPIPE).
+      child.stdin?.on("error", () => {});
+      child.stdin?.end(input.stdin);
     });
 }
 

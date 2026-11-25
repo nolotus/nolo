@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
   queryModelReasoningCapability,
+  resolveModelReasoningCapabilityWithCache,
+  resolveThinkingControl,
   THINKING_MECHANISM_PROVIDERS,
   type ModelReasoningCapability,
 } from "../modelReasoningCapability";
@@ -11,8 +13,8 @@ import {
 } from "../createAgentSchema";
 
 export type UseModelReasoningCapabilityArgs = {
-  provider: string | null | undefined;
-  model: string | null | undefined;
+  provider?: string | null;
+  model?: string | null;
 };
 
 export type UseModelReasoningCapabilityResult = {
@@ -35,13 +37,13 @@ export function useModelReasoningCapability(
   const isOpenRouter = p === "openrouter";
 
   const [loading, setLoading] = useState(false);
-  const [info, setInfo] = useState<ModelReasoningCapability | null>(null);
+  const [result, setResult] = useState<{ provider: string; model: string; info: ModelReasoningCapability } | null>(null);
   const generationRef = useRef(0);
 
   useEffect(() => {
     if (!p || !trimmedModel) {
       setLoading(false);
-      setInfo(null);
+      setResult(null);
       return;
     }
 
@@ -54,12 +56,12 @@ export function useModelReasoningCapability(
           try {
             const res = await queryModelReasoningCapability(p, trimmedModel);
             if (currentGen === generationRef.current) {
-              setInfo(res);
+              setResult({ provider: p, model: trimmedModel, info: res });
               setLoading(false);
             }
           } catch {
             if (currentGen === generationRef.current) {
-              setInfo(null);
+              setResult(null);
               setLoading(false);
             }
           }
@@ -73,7 +75,16 @@ export function useModelReasoningCapability(
     };
   }, [p, trimmedModel, isOpenRouter]);
 
+  const info = result?.provider === p && result.model === trimmedModel
+    ? result.info
+    : trimmedModel && p ? resolveModelReasoningCapabilityWithCache(p, trimmedModel) : null;
   return { loading, info };
+}
+
+/** Use live capabilities only for the matching model, never a previous selection. */
+export function useThinkingControl(args: { provider?: string | null; model?: string | null; customProviderUrl?: string | null }) {
+  const { info } = useModelReasoningCapability(args);
+  return resolveThinkingControl({ ...args, capability: info });
 }
 
 /** 推理强度下拉的统一解析结果（创建面板三处 + 高级设置共用） */

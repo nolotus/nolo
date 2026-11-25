@@ -58,6 +58,17 @@ import {
   runTaskWait,
   runTasks,
 } from "./processTaskTools";
+import {
+  compileProcessOutputPattern,
+  createLaunchProcessStreamCapture,
+  createProcessLiveOutput,
+  LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS,
+  LAUNCH_PROCESS_STREAM_RING_CHARS,
+  runReadProcessOutput,
+  waitForProcessReady,
+  type LaunchProcessStreamCapture,
+  type LinearRegex,
+} from "./processOutput";
 
 type LocalWorkspaceToolArgs = {
   workspaceRoot: string;
@@ -99,6 +110,7 @@ type LocalWorkspaceToolArgs = {
   readFileNoLedger?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
+  disableBackgroundDetach?: boolean;
   /** Optional override for rg resolution (tests / hosts without PATH binaries). */
   resolveRipgrepBinary?: () => string | null;
   /** Optional override for grep resolution (tests / hosts without PATH binaries). */
@@ -2219,6 +2231,7 @@ async function execShellTool(args: {
   restrictToWorkspace?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
+  disableBackgroundDetach?: boolean;
   confirmed?: boolean;
   enableDestructiveShellGuard?: boolean;
   confirmDestructiveAction?: (request: PermissionRequest) => Promise<import("./actionGate").HostConfirmDecision>;
@@ -2236,6 +2249,7 @@ async function execShellTool(args: {
       restrictToWorkspace: args.restrictToWorkspace,
       abortSignal: args.abortSignal,
       detachMs: args.detachMs,
+      disableBackgroundDetach: args.disableBackgroundDetach,
       confirmed: args.confirmed,
       enableDestructiveShellGuard: args.enableDestructiveShellGuard,
       confirmDestructiveAction: args.confirmDestructiveAction,
@@ -2248,97 +2262,16 @@ async function execShellTool(args: {
   );
 }
 
-/**
- * P1 wake-safety backpressure fix: per-stream capture for the launchProcess
- * drain. Spawn attaches continuous data handlers, so a chatty child (dev
- * server, test run) can never fill the 64KB OS pipe buffer and wedge itself.
- * The capture keeps TWO things at once:
- *   (a) a bounded tail ring whose text becomes the capsule's inline
- *       stdout/stderr (the recent state of the log); and
- *   (b) from the first ring eviction on, the stream's FULL output (bounded,
- *       head-preserving) — so the close-time spill via
- *       buildProcessTaskResultCapsule is the actual process output, not
- *       just the surviving 64KB tail that a plain ring would leave behind.
- * Real char/line totals are counted from the original stream as chunks
- * arrive, so capsule.truncated and the spill metadata stay truthful even
- * when (b) hits its bound.
- */
-export const LAUNCH_PROCESS_STREAM_RING_CHARS = 65_536;
-/**
- * 长驻进程流捕获上限。
- * 实测依据：4M 字符 = 4MB 常驻/路（bun 对 ASCII 用 latin1）。多路长驻进程线性叠加。
- * 改为 1_000_000（4MB → 1MB/路）。保持 ring 65536 不变。
- */
-export const LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS = 1_000_000;
-
-export type LaunchProcessStreamCapture = {
-  push(chunk: string | Buffer): void;
-  /** SPILL source — the full captured text while it fit, else the bounded
-   *  head-preserving prefix once the capture bound was reached. Equals the
-   *  ring text when nothing evicted. NOT the inline-tail source: once the
-   *  capture bound is hit this no longer ends at the process's real tail. */
-  text(): string;
-  /** INLINE-TAIL source — the live ring's current text (the process's actual
-   *  last LAUNCH_PROCESS_STREAM_RING_CHARS bytes), always current. */
-  tailText(): string;
-  /** True when the tail ring evicted earlier data (stream > ring size). */
-  evicted(): boolean;
-  /** Chars in the original stream (never capped by the capture). */
-  totalChars(): number;
-  /** Lines in the original stream (`countLines` convention, never capped). */
-  totalLines(): number;
+export {
+  LAUNCH_PROCESS_STREAM_RING_CHARS,
+  LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS,
+  createLaunchProcessStreamCapture,
+  type LaunchProcessStreamCapture,
 };
 
-export function createLaunchProcessStreamCapture(): LaunchProcessStreamCapture {
-  let ring = "";
-  // Activated on the first ring eviction; holds the full output from the
-  // snapshot onward, bounded by LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS.
-  let full: string[] | null = null;
-  let capturedChars = 0;
-  let totalChars = 0;
-  let totalNewlines = 0;
-  return {
-    push(chunk: string | Buffer): void {
-      const str = typeof chunk === "string" ? chunk : chunk.toString("utf8");
-      if (!str) return;
-      totalChars += str.length;
-      for (let i = 0; i < str.length; i += 1) {
-        if (str.charCodeAt(i) === 10) totalNewlines += 1;
-      }
-      const combined = ring + str;
-      if (combined.length <= LAUNCH_PROCESS_STREAM_RING_CHARS) {
-        ring = combined;
-        return;
-      }
-      if (full === null) {
-        // First eviction: the ring still holds the complete stream so far,
-        // so snapshot it (plus this chunk) as the base of the full capture.
-        full = [combined];
-        capturedChars = combined.length;
-      } else if (capturedChars < LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS) {
-        const room = LAUNCH_PROCESS_STREAM_CAPTURE_MAX_CHARS - capturedChars;
-        const slice = str.length <= room ? str : str.slice(0, room);
-        full.push(slice);
-        capturedChars += slice.length;
-      }
-      ring = combined.slice(-LAUNCH_PROCESS_STREAM_RING_CHARS);
-    },
-    text(): string {
-      return full === null ? ring : full.join("");
-    },
-    tailText(): string {
-      return ring;
-    },
-    evicted(): boolean {
-      return full !== null;
-    },
-    totalChars(): number {
-      return totalChars;
-    },
-    totalLines(): number {
-      return totalChars > 0 ? totalNewlines + 1 : 0;
-    },
-  };
+function sanitizeProcessOutputField(text: string): string {
+  if (!text) return text;
+  return scrubSecrets(sanitizeToolOutputText(text)).cleaned;
 }
 
 async function launchProcessTool(args: {
@@ -2346,6 +2279,7 @@ async function launchProcessTool(args: {
   workspaceRoot: string;
   commandPrefix?: string[];
   restrictToWorkspace?: boolean;
+  abortSignal?: AbortSignal;
 }): Promise<AgentRuntimeToolResult> {
   const parsed = parseWorkspaceToolArguments(args.call.arguments);
   const command = requireShellCommand(parsed, args.call.name);
@@ -2356,9 +2290,25 @@ async function launchProcessTool(args: {
     }
   }
 
-  const labelArg = readTrimmedString((parsed as Record<string, unknown>).label);
+  const parsedRecord = parsed as Record<string, unknown>;
+  let compiledReadyPattern: { regex: LinearRegex; pattern: string } | undefined;
+  if (parsedRecord.readyPattern !== undefined && parsedRecord.readyPattern !== null) {
+    const compiled = compileProcessOutputPattern(parsedRecord.readyPattern, "readyPattern");
+    if (!compiled.ok) {
+      return {
+        content: JSON.stringify({
+          outcome: "invalid-arguments",
+          detail: compiled.detail,
+        }),
+        metadata: { command, status: "invalid-arguments", tool: args.call.name },
+      };
+    }
+    compiledReadyPattern = { regex: compiled.regex, pattern: compiled.pattern };
+  }
+
+  const labelArg = readTrimmedString(parsedRecord.label);
   const label = labelArg || deriveLabel(command);
-  const persist = readBoolean(parsed as Record<string, unknown>, "persist");
+  const persist = readBoolean(parsed, "persist");
 
   const fullCommand = buildWorkspaceShellCommand({
     toolName: args.call.name,
@@ -2389,13 +2339,18 @@ async function launchProcessTool(args: {
   // recoverable instead of silently losing its head.
   const stdoutCapture = createLaunchProcessStreamCapture();
   const stderrCapture = createLaunchProcessStreamCapture();
-  proc.stdout?.on("data", (chunk: string | Buffer) => stdoutCapture.push(chunk));
-  proc.stderr?.on("data", (chunk: string | Buffer) => stderrCapture.push(chunk));
+  const liveOutput = createProcessLiveOutput({
+    stdout: stdoutCapture,
+    stderr: stderrCapture,
+  });
+  proc.stdout?.on("data", (chunk: string | Buffer) => liveOutput.pushStdout(chunk));
+  proc.stderr?.on("data", (chunk: string | Buffer) => liveOutput.pushStderr(chunk));
   proc.stdout?.on("error", () => {});
   proc.stderr?.on("error", () => {});
 
   const pid = proc.pid;
   if (typeof pid !== "number") {
+    liveOutput.markClosed();
     return {
       content: JSON.stringify({ error: "Failed to spawn child process" }),
       metadata: { command, status: "failed" },
@@ -2414,6 +2369,7 @@ async function launchProcessTool(args: {
     // task. Terminal-time resume reads this record, never "current dialog".
     owner: readProcessOwner(args.call.runtimeContext),
   });
+  registry.attachLiveOutput(envelope.taskId, liveOutput);
 
   const cleanupChildOnHostSignal: NodeJS.SignalsListener = (signal) => {
     try {
@@ -2477,10 +2433,64 @@ async function launchProcessTool(args: {
     } catch {
       // Fail-open: a missing capsule must not swallow the terminal event.
     }
-    registry.markExited(pid, exitCode, capsule);
+    liveOutput.releaseFullCapture();
+    registry.markExited(pid, exitCode, capsule, envelope.taskId);
   });
 
   const activity = extractActivity(parsed);
+  if (compiledReadyPattern) {
+    const readyResult = await waitForProcessReady({
+      taskId: envelope.taskId,
+      liveOutput,
+      registry,
+      regex: compiledReadyPattern.regex,
+      timeoutMs: parsedRecord.readyTimeoutMs,
+      abortSignal: args.abortSignal,
+    });
+    const safeMatchedLine = readyResult.matchedLine !== undefined
+      ? sanitizeProcessOutputField(readyResult.matchedLine)
+      : undefined;
+    const safeStdoutTail = sanitizeProcessOutputField(readyResult.stdoutTail);
+    const safeStderrTail = sanitizeProcessOutputField(readyResult.stderrTail);
+    const resultData = {
+      pid,
+      label,
+      taskId: envelope.taskId,
+      status: readyResult.status,
+      ...(readyResult.exitCode !== undefined ? { exitCode: readyResult.exitCode } : {}),
+      ready: readyResult.ready,
+      readyOutcome: readyResult.readyOutcome,
+      ...(readyResult.matchedStream ? { matchedStream: readyResult.matchedStream } : {}),
+      ...(safeMatchedLine !== undefined ? { matchedLine: safeMatchedLine } : {}),
+      waitedMs: readyResult.waitedMs,
+      ...(readyResult.timeoutMs !== undefined ? { timeoutMs: readyResult.timeoutMs } : {}),
+      ...(readyResult.timeoutClamped ? { timeoutClamped: true as const } : {}),
+      cursor: readyResult.cursor,
+      stdoutTail: safeStdoutTail,
+      stderrTail: safeStderrTail,
+      truncated: readyResult.truncated,
+      ...(readyResult.scanIncomplete ? { scanIncomplete: true as const } : {}),
+    };
+    return {
+      content: JSON.stringify(resultData),
+      metadata: {
+        command,
+        pid,
+        label,
+        status: readyResult.status,
+        taskId: envelope.taskId,
+        ready: readyResult.ready,
+        readyOutcome: readyResult.readyOutcome,
+        waitedMs: readyResult.waitedMs,
+        executionState: readyResult.status === "running" ? "background" : "terminal",
+        trackedBackgroundTask: true,
+        completionNotification: "next-turn-notice",
+        processLaunch: { pid, label, taskId: envelope.taskId, status: readyResult.status },
+        ...(activity ? { activity } : {}),
+      },
+    };
+  }
+
   const resultData = { pid, label, taskId: envelope.taskId, status: "running" as const };
 
   return {
@@ -2513,6 +2523,50 @@ async function listProcessesTool(args: {
     metadata: {
       count: list.length,
       processes: list,
+    },
+  };
+}
+
+async function readProcessOutputTool(args: {
+  call: AgentRuntimeToolCallInput;
+  abortSignal?: AbortSignal;
+}): Promise<AgentRuntimeToolResult> {
+  const parsed = parseWorkspaceToolArguments(args.call.arguments) as Record<string, unknown>;
+  const taskId = requireTaskId(parsed);
+  if (!taskId) return missingTaskIdResult(args.call.name);
+  const result = await runReadProcessOutput({
+    taskId,
+    cursor: parsed.cursor,
+    stream: parsed.stream,
+    maxChars: parsed.maxChars,
+    waitForPattern: parsed.waitForPattern,
+    timeoutMs: parsed.timeoutMs,
+    registry: getProcessRegistry(),
+    abortSignal: args.abortSignal,
+  });
+  const sanitized = "stdout" in result
+    ? {
+        ...result,
+        stdout: sanitizeProcessOutputField(result.stdout),
+        stderr: sanitizeProcessOutputField(result.stderr),
+        ...("matchedLine" in result && result.matchedLine !== undefined
+          ? { matchedLine: sanitizeProcessOutputField(result.matchedLine) }
+          : {}),
+      }
+    : result;
+  return {
+    content: JSON.stringify(sanitized),
+    metadata: {
+      taskId,
+      outcome: sanitized.outcome,
+      ...("status" in sanitized && sanitized.status ? { status: sanitized.status } : {}),
+      ...("cursor" in sanitized && sanitized.cursor ? { cursor: sanitized.cursor } : {}),
+      ...("exitCode" in sanitized && sanitized.exitCode !== undefined
+        ? { exitCode: sanitized.exitCode }
+        : {}),
+      ...("waitedMs" in sanitized && sanitized.waitedMs !== undefined
+        ? { waitedMs: sanitized.waitedMs }
+        : {}),
     },
   };
 }
@@ -2849,6 +2903,7 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       restrictToWorkspace: args.restrictShellToWorkspace,
       abortSignal: opts?.abortSignal ?? args.abortSignal,
       detachMs: opts?.detachMs ?? args.detachMs,
+      disableBackgroundDetach: args.disableBackgroundDetach,
       confirmed: opts?.confirmed,
       enableDestructiveShellGuard: opts?.enableDestructiveShellGuard,
       confirmDestructiveAction: opts?.confirmDestructiveAction,
@@ -2860,9 +2915,14 @@ export function createLocalWorkspaceToolExecutors(args: LocalWorkspaceToolArgs) 
       workspaceRoot: args.workspaceRoot,
       commandPrefix: args.commandPrefix,
       restrictToWorkspace: args.restrictShellToWorkspace,
+      abortSignal: args.abortSignal,
     }),
     listProcesses: (call: AgentRuntimeToolCallInput) => listProcessesTool({
       call,
+    }),
+    readProcessOutput: (call: AgentRuntimeToolCallInput) => readProcessOutputTool({
+      call,
+      abortSignal: args.abortSignal,
     }),
     taskWait: (call: AgentRuntimeToolCallInput) => taskWaitTool({ call }),
     taskLogs: (call: AgentRuntimeToolCallInput) => taskLogsTool({

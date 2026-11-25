@@ -1,9 +1,9 @@
+import { buildProxyPayload } from "./buildProxyPayload";
 // 文件路径: ai/chat/fetchUtils.native.ts
 // React Native 版 fetch 工具 - 使用 react-native-sse 支持流式传输
 
 import { Agent } from "app/types";
 import { toErrorMessage } from "core/errorMessage";
-import { asOptionalTrimmedString } from "core/optionalString";
 import { API_ENDPOINTS } from "database/config";
 import EventSource from 'react-native-sse';
 import { buildProviderAuthHeaders } from "../../agent-runtime/providerResolution";
@@ -32,37 +32,6 @@ interface FetchParams {
     // 仅用于 server-proxy 的 provider-call 证据链路（不会发给上游 provider）
     dialogId?: string;
 }
-
-const buildProxyPayload = (
-    bodyData: BodyData,
-    api: string,
-    agentConfig: Agent,
-    dialogId?: string
-) => {
-    const apiSource =
-        agentConfig.apiSource === "custom" || agentConfig.apiSource === "cli"
-            ? agentConfig.apiSource
-            : undefined;
-    const provider =
-        bodyData.provider ||
-        agentConfig.provider ||
-        (apiSource === "custom" ? "custom" : undefined);
-    // Server-proxy KEY: only transient/raw apiKey. Never hydrate from local broker.
-    const apiKey = asOptionalTrimmedString(agentConfig.apiKey);
-
-    return {
-        ...bodyData,
-        url: api,
-        provider,
-        agentKey: agentConfig.dbKey,
-        ...(asOptionalTrimmedString(dialogId)
-            ? { dialogId: asOptionalTrimmedString(dialogId) }
-            : {}),
-        ...(apiSource ? { apiSource } : {}),
-        ...((agentConfig as any).apiKeyHeader ? { apiKeyHeader: (agentConfig as any).apiKeyHeader } : {}),
-        KEY: apiKey,
-    };
-};
 
 interface SSEFetchParams extends FetchParams {
     onChunk: (chunk: string) => void;
@@ -110,7 +79,8 @@ export const performSSEFetchRequest = (params: SSEFetchParams): (() => void) => 
             const useProxy =
                 resolveAgentCallPlan(
                     { ...agentConfig, provider: bodyData.provider || agentConfig.provider } as any,
-                    {},
+                    undefined,
+                    { canResolveLocalCredential: true },
                 ).transport === "server-proxy";
             const url = useProxy ? `${currentServer}${API_ENDPOINTS.CHAT}` : api;
 
@@ -321,7 +291,7 @@ export const performFetchRequest = async (
             ...params.agentConfig,
             provider: params.bodyData.provider || params.agentConfig.provider,
         };
-        return resolveAgentCallPlan(planConfig as any, {}).transport ===
+        return resolveAgentCallPlan(planConfig as any, undefined, { canResolveLocalCredential: true }).transport ===
             "server-proxy"
             ? await fetchWithServerProxy(params)
             : await fetchDirectly(params);

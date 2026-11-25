@@ -69,6 +69,19 @@ export async function agentRequest(
   }
 }
 
+const AGENT_CHANNEL_FIELDS = ["provider", "apiSource", "apiKeyRef", "customProviderUrl"] as const;
+
+/** Clear evidence tied to the previous channel after the authoritative patch merge. */
+export function clearQuotaOnAgentChannelChange(
+  previous: Record<string, unknown>,
+  saved: Record<string, unknown>,
+): void {
+  if (!AGENT_CHANNEL_FIELDS.some(field => (previous[field] ?? undefined) !== (saved[field] ?? undefined))) return;
+  delete saved.quota;
+  delete saved.quotaExhaustion;
+  delete saved.nextAvailableAt;
+}
+
 export async function updateAgentRecord(options: {
   server: string; state: any; dbKey: string; changes: Record<string, unknown>;
   localDb?: { get(key: string): Promise<any>; put(key: string, value: any): Promise<void> };
@@ -95,6 +108,7 @@ export async function updateAgentRecord(options: {
       return result;
     };
     const saved = merge(previous, { ...changes, isPublic: false, userId: "local" });
+    clearQuotaOnAgentChannelChange(previous, saved);
     saved.updatedAt = Date.now();
     // 本地记录的唯一持久化责任在此；调用方只更新 Redux，不再重复写入。
     try { await options.localDb.put(dbKey, saved); } catch { throw storageFailure(); }

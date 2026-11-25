@@ -84,6 +84,9 @@ export async function createBrowserShellApprovalBridge(args: {
   const bindings = new Map<string, Binding>();
   let closing: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout>;
+  const terminalOutcome = () => Date.now() >= deadline
+    ? { outcome: "expired", code: "USER_APPROVAL_EXPIRED" } as const
+    : { outcome: "cancelled", code: "USER_APPROVAL_CANCELLED" } as const;
   const active = () => !lifetime.signal.aborted && Date.now() < deadline;
   const requireActive = () => { if (!active()) throw new Error("Browser approval bridge revoked"); };
   const server = createServer(async (request, response) => {
@@ -92,7 +95,7 @@ export async function createBrowserShellApprovalBridge(args: {
       result?: unknown,
       extra?: Pick<BrowserShellApprovalReply, "outcome" | "code">,
     ) => {
-      if (!response.destroyed) {
+      if (!response.destroyed && !response.writableEnded) {
         response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
         response.end(JSON.stringify({
           status,
@@ -102,14 +105,19 @@ export async function createBrowserShellApprovalBridge(args: {
         }));
       }
     };
-    const disconnect = () => { if (!response.writableEnded) void close(); };
-    response.on("close", disconnect);
+    const revoke = () => reply("blocked", undefined, terminalOutcome());
     try {
       const authorization = request.headers.authorization ?? "";
       const expected = `Bearer ${capability}`;
       if (!active() || request.method !== "POST" || request.url !== "/approval" ||
         authorization.length !== expected.length ||
         !timingSafeEqual(Buffer.from(authorization), Buffer.from(expected))) return reply("rejected");
+      response.on("close", () => {
+        lifetime.signal.removeEventListener("abort", revoke);
+        if (!response.writableEnded) void close();
+      });
+      lifetime.signal.addEventListener("abort", revoke, { once: true });
+      response.setTimeout(timeoutMs + 5_000);
       let body = "";
       for await (const chunk of request) {
         body += chunk.toString();
@@ -181,16 +189,12 @@ export async function createBrowserShellApprovalBridge(args: {
         reply("retry_once", undefined, { outcome: "allowed" });
       } else {
         const metaCode = (flowResult.metadata as { code?: unknown } | undefined)?.code;
-        reply("blocked", undefined, mapBlockedOutcome(metaCode, Boolean(args.awaitHostApproval)));
+        reply("blocked", undefined, mapBlockedOutcome(Date.now() >= deadline ? "USER_APPROVAL_EXPIRED" : metaCode, Boolean(args.awaitHostApproval)));
       }
     } catch {
-      reply(
-        "blocked",
-        undefined,
-        lifetime.signal.aborted
-          ? { outcome: "cancelled", code: "USER_APPROVAL_CANCELLED" }
-          : { outcome: "unavailable", code: "USER_APPROVAL_UNAVAILABLE" },
-      );
+      reply("blocked", undefined, lifetime.signal.aborted || Date.now() >= deadline
+        ? terminalOutcome()
+        : { outcome: "unavailable", code: "USER_APPROVAL_UNAVAILABLE" });
     }
   });
   server.requestTimeout = timeoutMs;
@@ -198,13 +202,16 @@ export async function createBrowserShellApprovalBridge(args: {
   const onAbort = () => { void close(); };
   function close(): Promise<void> {
     if (closing) return closing;
-    lifetime.abort();
-    clearTimeout(timer);
-    args.signal?.removeEventListener("abort", onAbort);
-    bindings.clear();
     closing = new Promise(resolve => {
-      server.close(() => resolve());
-      server.closeAllConnections();
+      // Abort synchronously revokes approval and writes terminal replies. Drain them before closing
+      // active sockets; keep a short bound for peers that never finish sending or reading.
+      lifetime.abort();
+      clearTimeout(timer);
+      args.signal?.removeEventListener("abort", onAbort);
+      bindings.clear();
+      const forceClose = setTimeout(() => server.closeAllConnections(), 1_000);
+      server.close(() => { clearTimeout(forceClose); resolve(); });
+      server.closeIdleConnections();
     });
     return closing;
   }

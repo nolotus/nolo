@@ -262,16 +262,24 @@ function parseGetSecretFromStdout(stdout: string): string {
   return (parsed as { secret: string }).secret;
 }
 
+// A timed-out command may have already written a credential. Do not retry it
+// with another shell as we would a startup failure.
+const SHELL_TIMEOUT = Symbol("shell timeout");
+type ShellResult = WindowsCredentialRunnerResult | typeof SHELL_TIMEOUT;
+
 function spawnShell(
   bin: string,
   args: string[],
-  stdin?: string,
-): Promise<WindowsCredentialRunnerResult> {
-  return new Promise<WindowsCredentialRunnerResult>((resolve) => {
+  stdin: string | undefined,
+  timeoutMs: number,
+): Promise<ShellResult> {
+  return new Promise<ShellResult>((resolve) => {
     let settled = false;
-    const finish = (result: WindowsCredentialRunnerResult) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (result: ShellResult) => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
       resolve(result);
     };
 
@@ -285,6 +293,16 @@ function spawnShell(
       finish({ exitCode: -1, stdout: "", stderr: "" });
       return;
     }
+
+    timer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The child may have already exited.
+      } finally {
+        finish(SHELL_TIMEOUT);
+      }
+    }, timeoutMs);
 
     let stdout = "";
     let stderr = "";
@@ -307,10 +325,9 @@ function spawnShell(
       });
     });
 
-    if (stdin !== undefined) {
-      child.stdin?.write(stdin);
-    }
-    child.stdin?.end();
+    // The process can exit before consuming the pipe (EPIPE).
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(stdin);
   });
 }
 
@@ -319,25 +336,26 @@ function spawnShell(
  */
 export function createDefaultWindowsCredentialRunner(
   shellBin?: string,
+  timeoutMs = 15_000,
 ): WindowsCredentialRunner {
   let resolvedBin: string | null = shellBin ?? null;
 
   return async function defaultWindowsCredentialRunner(input) {
-    if (resolvedBin) {
-      return spawnShell(resolvedBin, input.args, input.stdin);
+    // Prefer Windows PowerShell, then PowerShell Core if the first is unavailable.
+    const bins = resolvedBin ? [resolvedBin] : ["powershell.exe", "pwsh"];
+    let result: WindowsCredentialRunnerResult = { exitCode: -1, stdout: "", stderr: "" };
+    for (const bin of bins) {
+      const attempt = await spawnShell(bin, input.args, input.stdin, timeoutMs);
+      if (attempt === SHELL_TIMEOUT) {
+        return { exitCode: -1, stdout: "", stderr: "" };
+      }
+      result = attempt;
+      if (result.exitCode !== -1) {
+        resolvedBin = bin;
+        break;
+      }
     }
-
-    // Prefer Windows PowerShell, then PowerShell Core.
-    const first = await spawnShell("powershell.exe", input.args, input.stdin);
-    if (first.exitCode !== -1) {
-      resolvedBin = "powershell.exe";
-      return first;
-    }
-    const second = await spawnShell("pwsh", input.args, input.stdin);
-    if (second.exitCode !== -1) {
-      resolvedBin = "pwsh";
-    }
-    return second;
+    return result;
   };
 }
 

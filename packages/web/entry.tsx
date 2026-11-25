@@ -19,9 +19,10 @@ import { applyAgentThemeToElement } from "app/theme/agentTheme.stylex";
 import { getDb } from "database/client/db";
 import { detectSite, loadRoutes, type SiteId } from "app/web/siteRoutes";
 import i18n from "app/i18n/client";
+import { clientLocaleScope } from "app/i18n/clientLocaleGate";
 import { loadClientLanguage } from "app/i18n/clientResources";
 import { readStoredLanguage } from "app/i18n/languagePreference";
-import { isProduction } from "app/utils/env";
+import { getIsDesktopUiPreview, isProduction } from "app/utils/env";
 import { resolveClientHydrateServer } from "app/settings/serverBootstrap";
 import { isCloudEdition } from "identity";
 import { toast } from "app/utils/toast";
@@ -480,8 +481,18 @@ const domNode = document.getElementById("root") as HTMLElement;
   // 包不可用时它会回退（de/es → EN，既有语言 → zh-CN）并返回回退后的语言；任一
   // promise reject 都会让整条启动链 reject → 不 hydrate（错误传播，不用半完成状态
   // 渲染）。
+  const historyState = window.history.state;
+  const routeState = historyState?.__noloRouter === true ? historyState.usr : historyState;
+  const scope = clientLocaleScope({
+    pathname: window.location.pathname,
+    cloud: isCloudEdition,
+    defaultSite: siteId === "default",
+    desktopShell: isDesktopShell || getIsDesktopUiPreview(),
+    signedIn: Boolean(bootstrappedAuthState),
+    overlay: Boolean(routeState?.backgroundLocation),
+  });
   const [lng, initialRoutes] = await Promise.all([
-    loadClientLanguage(i18n, requestedLng),
+    loadClientLanguage(i18n, requestedLng, scope),
     loadRoutes(siteId, undefined),
   ]);
 
@@ -489,7 +500,7 @@ const domNode = document.getElementById("root") as HTMLElement;
     <React.StrictMode>
       <Provider store={browserStore}>
         <RouterProvider>
-          <App hostname={hostname} lng={lng} initialRoutes={initialRoutes} />
+          <App hostname={hostname} manageClientLocales desktopShell={isDesktopShell} guestLocaleEligible={siteId === "default"} initialRoutes={initialRoutes} />
         </RouterProvider>
       </Provider>
     </React.StrictMode>

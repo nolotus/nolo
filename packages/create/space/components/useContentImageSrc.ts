@@ -1,10 +1,11 @@
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAppDispatch, useAppSelector } from "app/store";
 import { selectRuntimeCurrentServer } from "app/stateViews/runtime";
 import { readFileContent } from "database/dbSlice";
 import {
   buildSpaceContentImageUrl,
-  getSpaceContentImageFallbackFileIds,
+  loadSpaceContentImageBlob,
   isSpaceContentImage,
   type MinimalContentMediaItem,
 } from "./spaceContentMedia";
@@ -17,10 +18,13 @@ export const useContentImageSrc = (item: MinimalContentMediaItem) => {
   const isImage = isSpaceContentImage(item);
   const fallbackUrlRef = useRef<string | null>(null);
   const imageFallbackTriedRef = useRef(false);
+  const generation = useRef(0);
 
-  const remoteImageSrc = useMemo(() => {
-    return buildSpaceContentImageUrl(currentServer, item);
+  const originalSrc = useMemo(() => {
+    return buildSpaceContentImageUrl(item.serverOrigin || currentServer, item);
   }, [currentServer, item]);
+
+  const remoteImageSrc = useWebMediaSrc(originalSrc, { spaceId: item.spaceId });
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
 
@@ -31,12 +35,14 @@ export const useContentImageSrc = (item: MinimalContentMediaItem) => {
       URL.revokeObjectURL(fallbackUrlRef.current);
       fallbackUrlRef.current = null;
     }
+    generation.current++;
     imageFallbackTriedRef.current = false;
-    setImageSrc(remoteImageSrc);
-  }, [isImage, remoteImageSrc]);
+    setImageSrc(null);
+  }, [isImage, originalSrc, item.contentKey]);
 
   useEffect(() => {
     return () => {
+      generation.current++;
       if (fallbackUrlRef.current) {
         URL.revokeObjectURL(fallbackUrlRef.current);
         fallbackUrlRef.current = null;
@@ -48,27 +54,19 @@ export const useContentImageSrc = (item: MinimalContentMediaItem) => {
     if (!isImage || imageFallbackTriedRef.current) return;
     imageFallbackTriedRef.current = true;
     
-    let lastError: unknown = null;
+    const requestGeneration = generation.current;
     
-    for (const fileId of getSpaceContentImageFallbackFileIds(item)) {
-      try {
-        const result = await (dispatch as any)(readFileContent({ fileId })).unwrap();
-        if (fallbackUrlRef.current) {
-          URL.revokeObjectURL(fallbackUrlRef.current);
-        }
-        const objectUrl = URL.createObjectURL(result.blob);
-        fallbackUrlRef.current = objectUrl;
-        setImageSrc(objectUrl);
-        return;
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    console.warn("[useContentImageSrc] image fallback failed", {
-      contentKey: item.contentKey,
-      error: lastError,
-    });
-  }, [dispatch, isImage, item]);
+    const blob = await loadSpaceContentImageBlob(item.contentKey,
+      (fileId) => dispatch(readFileContent({ fileId, useServerFallback: false })).unwrap(),
+      () => requestGeneration === generation.current,
+    );
+    if (!blob || requestGeneration !== generation.current) return;
+    const objectUrl = URL.createObjectURL(blob);
+    fallbackUrlRef.current = objectUrl;
+    setImageSrc(objectUrl);
+  }, [dispatch, isImage, item.contentKey]);
+
+  useEffect(() => { if (isImage) void loadImageFallback(); }, [isImage, loadImageFallback, originalSrc]);
 
   return {
     imageSrc: imageSrc ?? remoteImageSrc,

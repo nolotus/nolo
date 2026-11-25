@@ -15,6 +15,12 @@ import { isAbortError } from "../core/abortError";
  */
 
 import { resolveProviderInputItemLimit } from "./providerInputItemLimits";
+import {
+  appendCompactionTelemetryRecord,
+  COMPACTION_TELEMETRY_SCHEMA_VERSION,
+  type CompactionTelemetryOutcome,
+  type CompactionTelemetryTrigger,
+} from "./compactionTelemetryLog";
 import { randomUUID } from "node:crypto";
 import type { ContextProvenance } from "./providerCallTelemetry";
 import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "../ai/llm/platformHostedRoutingTable";
@@ -582,6 +588,10 @@ export async function maybeAutoCompactLocalHistory(args: {
    * planCompression 据此在真实占用 ≥0.9 时强制触发，绕过本地启发式历史估算偏低导致的 400 溢出。
    */
   realContextUsagePercent?: number;
+  /** 触发前最后一次 provider 调用的真实 input_tokens（纯观测用，绝不参与提示词或截断）。 */
+  triggerPromptTokens?: number;
+  /** 可选：覆写压缩可观测 JSONL 路径（供单测隔离；缺省走 NOLO_HOME/telemetry/compaction.jsonl）。 */
+  telemetryLogFile?: string;
   /** Omitted preserves historical behavior for direct callers. */
   timeoutMs?: number;
   /**
@@ -863,6 +873,25 @@ export async function maybeAutoCompactLocalHistory(args: {
     contextWindow,
     canonicalizeToolName,
   });
+  const telemetryTrigger: CompactionTelemetryTrigger = invalidSummary
+    ? "invalid-summary"
+    : args.force
+      ? "budget-rescue"
+      : plan.diagnostics?.triggeredByItemLimit
+        ? "item-limit"
+        : plan.diagnostics?.triggeredByRealUsage
+          ? "real-usage"
+          : plan.diagnostics?.triggeredByEstimate
+            ? "estimate"
+            : "unknown";
+  const telemetryPromptTokens =
+    typeof args.triggerPromptTokens === "number" &&
+    Number.isFinite(args.triggerPromptTokens) &&
+    args.triggerPromptTokens > 0
+      ? Math.round(args.triggerPromptTokens)
+      : null;
+  const telemetryLogOpts = args.telemetryLogFile ? { logFile: args.telemetryLogFile } : undefined;
+
   if (bounded.status === "blocked") {
     const detail = `bounded compaction blocked: ${bounded.reason}`;
     // 数值分项只用于定位「哪一项撑爆」：不含消息正文，也不含路径内容
@@ -870,6 +899,39 @@ export async function maybeAutoCompactLocalHistory(args: {
     console.warn(
       `[localLoop] ${detail}`,
       ...(bounded.diagnostics ? [bounded.diagnostics] : []),
+    );
+    appendCompactionTelemetryRecord(
+      {
+        schemaVersion: COMPACTION_TELEMETRY_SCHEMA_VERSION,
+        ts: new Date(args.now?.() ?? Date.now()).toISOString(),
+        dialogId,
+        outcome: "blocked",
+        trigger: telemetryTrigger,
+        attempts: 0,
+        model: args.model ?? null,
+        provider: args.provider ?? null,
+        contextWindow,
+        triggerPromptTokens: telemetryPromptTokens,
+        realUsageRatio: plan.diagnostics?.realUsageRatio ?? null,
+        estimatedTokens: plan.diagnostics?.totalUsed ?? null,
+        elapsedMs: null,
+        primaryElapsedMs: null,
+        saveElapsedMs: null,
+        summaryInputTokens: null,
+        summaryInputCapTokens: bounded.diagnostics?.cap ?? null,
+        summaryExpandedMessages: bounded.diagnostics?.expandedMessages ?? null,
+        summaryOmittedMessages: null,
+        pendingMessageCount: plan.diagnostics?.pendingMsgCount ?? null,
+        compressedCount: null,
+        retainedCount: null,
+        compressedTokens: null,
+        newSummaryTokens: null,
+        residentReductionTokens: null,
+        beforeProjectedTokens: null,
+        afterProjectedTokens: null,
+        finishReason: null,
+      },
+      telemetryLogOpts,
     );
     return {
       ...projectExisting(),
@@ -892,7 +954,9 @@ export async function maybeAutoCompactLocalHistory(args: {
   let retryCount = 0;
   let attemptRoute: "platform" | "current" = "current";
   let attemptTimingLogged = false;
-  let compactionT0 = Date.now();
+  let telemetryWritten = false;
+  const compactionEventT0 = Date.now();
+  let compactionT0 = compactionEventT0;
   // token 估算口径与改动前的成功埋点一致：旧实现在日志对象字面量里求值，因此
   // elapsedMs 含这两次 estimateTokenCount。这里改为在 logCompactionTiming 内
   // 惰性求值：成功路径落在计时窗口内（elapsedMs 求值之前），失败路径在失败时算。
@@ -909,6 +973,54 @@ export async function maybeAutoCompactLocalHistory(args: {
   let summaryDiagnostics: { finishReason?: string; maxOutputTokens?: number; completionTokens?: number; outputChars?: number; responseStatus?: string; incompleteReason?: string } = {
     maxOutputTokens: bounded.outputTokenBudget,
   };
+  /** 每次压缩事件严格落盘 1 条最终态 JSONL（重试不双写）。 */
+  const writeCompactionTelemetryOnce = (
+    outcome: CompactionTelemetryOutcome,
+    fields: {
+      model?: string | null;
+      metrics?: CompactionMetrics;
+      beforeProjectedTokens?: number;
+      afterProjectedTokens?: number;
+    } = {},
+  ) => {
+    if (telemetryWritten) return;
+    telemetryWritten = true;
+    const m = fields.metrics;
+    const isSuccess = outcome === "success";
+    appendCompactionTelemetryRecord(
+      {
+        schemaVersion: COMPACTION_TELEMETRY_SCHEMA_VERSION,
+        ts: new Date(args.now?.() ?? Date.now()).toISOString(),
+        dialogId,
+        outcome,
+        trigger: telemetryTrigger,
+        attempts: attempt,
+        model: fields.model ?? summaryModel ?? null,
+        provider: summaryProvider ?? null,
+        contextWindow,
+        triggerPromptTokens: telemetryPromptTokens,
+        realUsageRatio: plan.diagnostics?.realUsageRatio ?? null,
+        estimatedTokens: plan.diagnostics?.totalUsed ?? null,
+        elapsedMs: Date.now() - compactionEventT0,
+        primaryElapsedMs: primaryElapsedMs ?? null,
+        saveElapsedMs: saveElapsedMs ?? null,
+        summaryInputTokens: m?.summaryInputTokens ?? bounded.inputTokens ?? null,
+        summaryInputCapTokens: m?.summaryInputCapTokens ?? bounded.capTokens ?? null,
+        summaryExpandedMessages: m?.summaryExpandedMessages ?? bounded.expandedMessages ?? null,
+        summaryOmittedMessages: isSuccess ? (m?.summaryOmittedMessages ?? bounded.omittedMessages ?? null) : null,
+        pendingMessageCount: m?.pendingMessageCount ?? plan.diagnostics?.pendingMsgCount ?? null,
+        compressedCount: m?.compressedCount ?? null,
+        retainedCount: m?.retainedCount ?? null,
+        compressedTokens: m?.compressedTokens ?? null,
+        newSummaryTokens: m?.newSummaryTokens ?? null,
+        residentReductionTokens: m?.residentReductionTokens ?? null,
+        beforeProjectedTokens: fields.beforeProjectedTokens ?? null,
+        afterProjectedTokens: fields.afterProjectedTokens ?? null,
+        finishReason: summaryDiagnostics.finishReason ?? null,
+      },
+      telemetryLogOpts,
+    );
+  };
   const logCompactionTiming = (
     outcome: "success" | "empty" | LocalAutoCompactionFailureReason,
     fields: { model?: string | null; outputChars?: number },
@@ -922,11 +1034,13 @@ export async function maybeAutoCompactLocalHistory(args: {
     if (compactionPrevSummaryTokens === undefined && compactionPrevSummarySource !== undefined) {
       compactionPrevSummaryTokens = estimateTokenCount(compactionPrevSummarySource);
     }
+    const elapsedMs = Date.now() - compactionT0;
+    const resolvedModel = fields.model ?? summaryModel ?? null;
     console.log(
       `[compaction-timing] ${JSON.stringify({
         attemptId: compactionAttemptId,
         attempt, maxAttempts, physicalAttempts: attempt, route: attemptRoute,
-        model: fields.model ?? summaryModel ?? null,
+        model: resolvedModel,
         provider: summaryProvider ?? null,
         inputTokens: compactionInputTokens ?? null,
         prevSummaryTokens: compactionPrevSummaryTokens ?? null,
@@ -936,7 +1050,7 @@ export async function maybeAutoCompactLocalHistory(args: {
         incompleteReason: summaryDiagnostics.incompleteReason ?? null,
         maxOutputTokens: summaryDiagnostics.maxOutputTokens ?? null,
         completionTokens: summaryDiagnostics.completionTokens ?? null,
-        elapsedMs: Date.now() - compactionT0,
+        elapsedMs,
         primaryElapsedMs: primaryElapsedMs ?? null,
         fallbackElapsedMs: fallbackElapsedMs ?? null,
         saveElapsedMs: saveElapsedMs ?? null,
@@ -1125,6 +1239,7 @@ export async function maybeAutoCompactLocalHistory(args: {
     if (!newSummary) {
       recordCompactionFailure(dialogId, args.now?.() ?? Date.now());
       logCompactionTiming("empty", { model: result?.model });
+      writeCompactionTelemetryOnce("empty", { model: result?.model });
       emitPhase({ kind: "compaction-end" });
       return { ...projectExisting(), failureMessage: "Summary empty", failureReason: "provider-error", decision: { outcome: "failed", reason: "provider-error", detail: "Summary empty", ...itemDiagnostics } };
     }
@@ -1193,6 +1308,11 @@ export async function maybeAutoCompactLocalHistory(args: {
       console.warn(`[localLoop] ${failureMessage}`);
       recordCompactionFailure(dialogId, args.now?.() ?? Date.now());
       logCompactionTiming("empty", {});
+      writeCompactionTelemetryOnce("unsafe-projection", {
+        model: result?.model ?? args.model ?? null,
+        beforeProjectedTokens,
+        afterProjectedTokens: projectedTokens,
+      });
       emitPhase({ kind: "compaction-end" });
       return {
         ...oldProjection,
@@ -1242,6 +1362,12 @@ export async function maybeAutoCompactLocalHistory(args: {
     logCompactionTiming("success", {
       model: result?.model ?? args.model ?? null,
       outputChars: newSummary.length,
+    });
+    writeCompactionTelemetryOnce("success", {
+      model: result?.model ?? args.model ?? null,
+      metrics,
+      beforeProjectedTokens,
+      afterProjectedTokens: projectedTokens,
     });
 
     emitPhase({ kind: "compaction-end" });
@@ -1304,6 +1430,7 @@ export async function maybeAutoCompactLocalHistory(args: {
       ...(safe.outputChars === undefined ? {} : { outputChars: safe.outputChars }),
     };
     logCompactionTiming(failureReason, {});
+    writeCompactionTelemetryOnce(failureReason, {});
     const failureNow = args.now?.() ?? Date.now();
     if (failureReason !== "aborted") recordCompactionFailure(dialogId, failureNow);
     if (failureReason === "aborted") emitPhase({ kind: "compaction-end" });
@@ -1510,6 +1637,7 @@ export function createTurnCompactionController(args: {
     // 记录缺失（旧对话）安全落到估算兜底。取「最后一次调用」而非累加值，
     // 精准反映真实上下文占用。主防线是轮内检查（maybeCompactInLoop）。
     let realContextUsagePercent: number | undefined;
+    let triggerPromptTokens: number | undefined;
     if (
       args.continueDialogId &&
       typeof (args.adapter as any).loadLastContextUsage === "function"
@@ -1531,6 +1659,7 @@ export function createTurnCompactionController(args: {
           Number.isFinite(args.contextWindow) &&
           args.contextWindow > 0
         ) {
+          triggerPromptTokens = inputTokens;
           realContextUsagePercent = Math.min(
             1,
             Math.max(0, inputTokens / args.contextWindow),
@@ -1557,6 +1686,7 @@ export function createTurnCompactionController(args: {
         resolveProvider: args.resolveProvider,
         contextWindow: args.contextWindow,
         realContextUsagePercent,
+        ...(triggerPromptTokens !== undefined ? { triggerPromptTokens } : {}),
         force,
         abortSignal: args.abortSignal,
         timeoutMs: args.timeoutMs,
@@ -1632,6 +1762,7 @@ export function createTurnCompactionController(args: {
         contextWindow: args.contextWindow,
         ...(force ? { force: true } : {}),
         ...(ratio !== undefined ? { realContextUsagePercent: ratio } : {}),
+        ...(inputTokens > 0 ? { triggerPromptTokens: inputTokens } : {}),
         abortSignal: args.abortSignal,
         timeoutMs: args.timeoutMs,
         summaryFallback: args.summaryFallback,

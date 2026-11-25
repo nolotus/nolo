@@ -15,20 +15,19 @@ import {
 export const fetchWebpageFunctionSchema = {
   name: "fetchWebpage",
   description:
-    "访问指定网页 URL 并提取 Markdown 内容（支持 JS 渲染/SPA）。" +
-    "对于 docs.* 文档站自动通过 /llms.txt 规范化。" +
-    "用户若已提供明确 URL，优先直接抓取作为权威来源，避免额外搜索步骤。",
+    "抓取指定 URL 并提取 Markdown（支持 JS 渲染/SPA）；docs.* 站自动经 /llms.txt 规范化。" +
+    "用户已给明确 URL 时直接抓取作为权威来源，不做额外搜索。",
   parameters: {
     type: "object",
     properties: {
       url: {
         type: "string",
         description:
-          "要抓取的网页完整 URL 地址（http/https）。docs.* 站点可传推测路径，工具会自动规范化。",
+          "网页完整 URL（http/https）；docs.* 可传推测路径，自动规范化。",
       },
       waitForNetworkIdle: {
         type: "boolean",
-        description: "是否等待网络请求结束再提取（适合 SPA 动态页面），默认 false。",
+        description: "等待网络空闲再提取（适合 SPA），默认 false。",
         default: false,
       },
     },

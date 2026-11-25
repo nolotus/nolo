@@ -89,7 +89,7 @@ import type { ToolExecutionLocation } from "../../agent-runtime/ownerOriginExecu
 import type { CompactDialogResult } from "../client/compactDialog";
 import { isBalanceExhaustedError, isQuotaExhaustedError } from "../agentRunCommand";
 import { classifyFailureSubclass } from "../../ai/agent/agentAvailabilityShared";
-import { backfillRunRecordParentDialog } from "../agentRunControl";
+import { backfillRunRecordParentDialog, resolveRunsDir } from "../agentRunControl";
 import type { SelfUpdateExecution } from "../updateCommands";
 import type { SpawnFn, spawnProcess } from "../processSpawn";
 import type { loadDialogHistoryForDisplay, runDialogPicker } from "./dialogPicker";
@@ -548,7 +548,10 @@ async function runAgentChat(
   const childRunNoticeBlocks =
     injectedChildRunNoticeItems.length > 0
       ? [{
-          content: buildWakeMessage(injectedChildRunNoticeItems, Date.now()),
+          content: buildWakeMessage(injectedChildRunNoticeItems, Date.now(), {
+            // WAKE-003-CONFIG：与 run 注册表同一有效 runs 目录（尊重自定义 NOLO_HOME）。
+            trustedResultDirs: [resolveRunsDir(env)],
+          }),
           cacheScope: "turn" as const,
         }]
       : [];
@@ -1721,6 +1724,9 @@ export async function runOneAgentTurn(
           userLanguage: ctx.state.userLanguage,
           responseViewport: TUI_RESPONSE_VIEWPORT,
           messages: ctx.history.turns,
+          // 回退估算必须与下面真正发请求的 runAgentChat 共用同一份 env：
+          // NOLO_EXPOSE_MCP_TOOLS / NOLO_EXPOSE_INSTABOX_PARAMS 会改变工具面。
+          env: ctx.options.env ?? process.env,
           ...resolveAgentModelIdentity({
             agentKey: ctx.state.agentKey,
             agentName: ctx.state.agentName,
@@ -2228,6 +2234,7 @@ export async function runOneAgentTurn(
                   userLanguage: ctx.state.userLanguage,
                   responseViewport: TUI_RESPONSE_VIEWPORT,
                   messages: ctx.history.turns,
+                  env: ctx.options.env ?? process.env,
                 }),
                 lastAuthorityTurnCount: undefined,
                 liveTurnEstimatedTokens: undefined,

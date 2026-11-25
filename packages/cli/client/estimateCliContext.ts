@@ -16,8 +16,6 @@ import {
 } from "../../ai/agent/toolGuidedSections";
 import { estimateTokenCount } from "../../ai/context/tokenUtils";
 import { estimateMessagesTokens } from "../../ai/context/contextOccupancy";
-import { prepareTools } from "../../ai/tools/prepareTools";
-import { expandEnabledPacks } from "../../ai/tools/toolPacks";
 import { buildIdentityBlock } from "../../agent-runtime/identityBlock";
 import { buildPlatformStaticPromptBlocks } from "../../agent-runtime/platformStaticPromptLayers";
 import {
@@ -25,23 +23,98 @@ import {
   type ResponseViewport,
 } from "../../agent-runtime/responseGuidelines";
 import { buildUserResponseLanguageContext } from "../../agent-runtime/userResponseLanguage";
+import { RUN_WAKE_CHANNEL_ENV } from "../../agent-runtime/agentRunIsolation";
 import {
-  buildLocalWorkspaceOpenAiTools,
-  buildLocalWorkspaceToolset,
-} from "../../agent-runtime/localWorkspaceTools";
+  INSTABOX_SCHEMA_EXPOSURE_ENV,
+  MCP_EXPOSURE_ENV,
+  buildLocalPolicyToolNames,
+  buildOpenAiTools,
+  resolveCliRequestedToolNames,
+} from "./localRuntimeTools";
 import { buildRuntimeGuidanceBlocks } from "../../agent-runtime/runtimeGuidance";
 import { buildSkillDiscoveryContextBlock } from "../../agent-runtime/skillDiscovery";
 import { canonicalizeToolNames } from "../../agent-runtime/toolNameAliases";
 import { readAgentsMdLayerFromDisk } from "../../agent-runtime/agentsMd";
 
-/** Default CLI packs when an agent does not declare enabledPacks. */
-const DEFAULT_CLI_PACKS = ["code", "agent-orchestration", "skills"] as const;
+/**
+ * 估算所依据的宿主环境：TUI 会话（context chip 的唯一调用方）带终态唤醒通道，
+ * 与 readlineWorkspace 启动时设置的 `NOLO_RUN_WAKE=1` 同源——它决定 taskWait 与
+ * controlAgentRun/startAgentRun 的 wake 形态是否出现在发给 provider 的 schema 里。
+ */
+const CLI_ESTIMATE_ENV = { [RUN_WAKE_CHANNEL_ENV]: "1" } as const;
 
-/** Default CLI light-web tools (ask_user 已移出默认面，不再计入估算)。 */
-const DEFAULT_CLI_PLATFORM_TOOLS = [
-  "exa_search",
-  "fetchWebpage",
-] as const;
+/** 估算器入参里的宿主 env（与本地运行时同一份形状，不引入新概念）。 */
+export type CliEstimateEnv = Record<string, string | undefined>;
+
+/**
+ * 估算所用的 env：**必须是运行时那一份**。
+ *
+ * 只写死 `{ NOLO_RUN_WAKE: "1" }` 会让估算器与实际装配分叉：运行时按
+ * `NOLO_EXPOSE_MCP_TOOLS=1` 补上 3 个 MCP 工具 schema（约 385 token），按
+ * `NOLO_EXPOSE_INSTABOX_PARAMS=1` 给 startAgentRun 补上 5 个 `instabox*` 参数
+ * schema；估算器看不见这些开关，context chip 就会低报。这里只**透传这两个开关**
+ * （不是整份 env：估算只关心影响工具面的变量，其余变量参与进来只会让口径漂移），
+ * 缺省读 `process.env` 兜底，与宿主的真实来源一致。
+ *
+ * 两个开关都未设置时返回值与旧的 `CLI_ESTIMATE_ENV` 逐字相同，既有估算断言不受影响。
+ */
+function resolveEstimateEnv(env?: CliEstimateEnv): Record<string, string | undefined> {
+  const source = env ?? process.env;
+  const exposeMcp = String(source[MCP_EXPOSURE_ENV] ?? "").trim();
+  const exposeInstaboxParams = String(
+    source[INSTABOX_SCHEMA_EXPOSURE_ENV] ?? "",
+  ).trim();
+  return {
+    ...CLI_ESTIMATE_ENV,
+    ...(exposeMcp ? { [MCP_EXPOSURE_ENV]: exposeMcp } : {}),
+    ...(exposeInstaboxParams
+      ? { [INSTABOX_SCHEMA_EXPOSURE_ENV]: exposeInstaboxParams }
+      : {}),
+  };
+}
+
+/**
+ * 默认 CLI 会话实际暴露的工具名集合：直接复用本地运行时的解析入口
+ * （resolveCliRequestedToolNames：默认 packs + ALWAYS_ON memory/skills +
+ * 默认挂载的 agent-orchestration + CLI 默认 web/ask_user/show_interaction 工具），
+ * 而不是在估算器里再手抄一份会漂移的清单。
+ */
+function resolveDefaultCliToolNames(
+  env: Record<string, string | undefined>,
+): string[] {
+  return canonicalizeToolNames(
+    resolveCliRequestedToolNames(
+      { key: BUILTIN_NOLO_AGENT_KEY } as Parameters<
+        typeof resolveCliRequestedToolNames
+      >[0],
+      env,
+      null,
+    ),
+  );
+}
+
+/**
+ * 真正暴露给模型的工具名（= 生产 localLoop 里的 `exposedToolNames`）：
+ * 请求名经同一个 `buildOpenAiTools` 构造后汇总出的 function 名。
+ *
+ * 两套名字必须分开：请求面（resolveCliRequestedToolNames）可能含本地 schema
+ * 不兑现的条目（如 show_interaction 只在 web/server 投影里落地），拿请求名去
+ * 解析工具引导段会白算一段永远不会生效的指引（估算虚高 149 tok，且与生产
+ * 实际发给 provider 的 prompt 不一致）。显式声明 show_interaction 时它本就在
+ * 暴露面里，行为不变。
+ */
+function resolveExposedCliToolNames(
+  requestedToolNames: string[],
+  env: Record<string, string | undefined>,
+): string[] {
+  return canonicalizeToolNames(
+    buildLocalPolicyToolNames({
+      agentKey: BUILTIN_NOLO_AGENT_KEY,
+      toolNames: requestedToolNames,
+      env,
+    }),
+  );
+}
 
 /**
  * 估算用的兜底 prompt——**近似基线，不是默认档的真实 prompt**。
@@ -57,21 +130,17 @@ function readAgentsMd(cwd: string): string {
   return readAgentsMdLayerFromDisk(cwd)?.content ?? "";
 }
 
-function estimateToolSchemas(toolNames: string[]): number {
-  const toolset = buildLocalWorkspaceToolset({
-    declaredToolNames: toolNames,
-    exposeShellTools: true,
+/** 与本地运行时同一个 schema 构造器（buildOpenAiTools），不再自拼子集。 */
+function estimateToolSchemas(
+  toolNames: string[],
+  env: Record<string, string | undefined>,
+): number {
+  const tools = buildOpenAiTools({
+    agentKey: BUILTIN_NOLO_AGENT_KEY,
+    toolNames,
+    env,
   });
-  const workspaceTools = buildLocalWorkspaceOpenAiTools({
-    toolNames: toolset.toolNames,
-    exposeShellTools: true,
-  });
-  const platformNames = DEFAULT_CLI_PLATFORM_TOOLS.filter((name) =>
-    toolNames.includes(name),
-  );
-  const platformTools =
-    platformNames.length > 0 ? prepareTools([...platformNames]) : [];
-  return estimateTokenCount(JSON.stringify([...workspaceTools, ...platformTools]));
+  return estimateTokenCount(JSON.stringify(tools));
 }
 
 /** 估算器接受的入参（导出是为了让测试与调用方共用同一份形状）。 */
@@ -97,6 +166,22 @@ export type CliContextEstimateOptions = {
    * 每个调用点都显式传 `TUI_RESPONSE_VIEWPORT`（narrow），与发给 runtime 的能力同源。
    */
   responseViewport?: ResponseViewport;
+  /**
+   * 可选：宿主已确认「当前模型已是免付费池顶」（池内无更高且免付费的候选）。
+   * 仅 true 时估算口径与生产装配一致地换成池顶姿态；缺省 undefined 时逐字不变。
+   */
+  callerIsPoolTop?: boolean;
+  /**
+   * 宿主 env（可选）。只为让估算看见**影响工具面**的开关——当前是
+   * `NOLO_EXPOSE_MCP_TOOLS=1`（本地运行时据此补上 3 个 MCP 工具 schema）与
+   * `NOLO_EXPOSE_INSTABOX_PARAMS=1`（据此给 startAgentRun 补上 5 个 `instabox*`
+   * 参数 schema）。
+   *
+   * 缺省读 `process.env`：TUI 各调用点大多不持有 env，而这两个开关本来就是宿主
+   * 进程级开关，兜底读进程环境与真实装配同源。传 `{}` 表示「明确没有宿主开关」，
+   * 估算退回只含 wake 开关的默认口径。
+   */
+  env?: CliEstimateEnv;
 };
 
 /**
@@ -118,18 +203,20 @@ export function buildCliEstimateSystemText(
   const agentKey = opts.agentKey?.trim() || BUILTIN_NOLO_AGENT_KEY;
   const prompt = opts.agentPrompt?.trim() || DEFAULT_PROMPT_ESTIMATE_BASELINE;
 
-  const packTools = canonicalizeToolNames(
-    expandEnabledPacks([...DEFAULT_CLI_PACKS], []),
+  const toolNames = resolveDefaultCliToolNames(resolveEstimateEnv(opts.env));
+  // 引导段按**暴露面**算，与生产 localLoop（agentConfig.exposedToolNames）同口径。
+  const guidanceToolNames = resolveExposedCliToolNames(
+    toolNames,
+    resolveEstimateEnv(opts.env),
   );
-  const toolNames = canonicalizeToolNames([
-    ...packTools,
-    ...DEFAULT_CLI_PLATFORM_TOOLS,
-  ]);
 
-  const guidance = buildRuntimeGuidanceBlocks(toolNames);
+  const guidance = buildRuntimeGuidanceBlocks(guidanceToolNames);
   // Same table the runtimes inject, so the estimate tracks the orchestration /
   // review-gate sections too.
-  const toolSections = resolveToolGuidedSections(toolNames);
+  const toolSections = resolveToolGuidedSections(guidanceToolNames, {
+    callerModel: opts.model?.trim() || undefined,
+    callerIsPoolTop: opts.callerIsPoolTop,
+  });
 
   // 回复准则：与装配线同一个入口（resolveResponseGuidelines），按宿主能力取。
   // 默认 unknown 只计行为段；显式 narrow/wide 时另计一份对应排版段，与相同能力的
@@ -180,13 +267,11 @@ export function buildCliEstimateSystemText(
 export function estimateDefaultCliContextTokens(
   opts: CliContextEstimateOptions = {},
 ): number {
-  const toolNames = canonicalizeToolNames([
-    ...canonicalizeToolNames(expandEnabledPacks([...DEFAULT_CLI_PACKS], [])),
-    ...DEFAULT_CLI_PLATFORM_TOOLS,
-  ]);
+  const env = resolveEstimateEnv(opts.env);
+  const toolNames = resolveDefaultCliToolNames(env);
 
   const systemTokens = estimateTokenCount(buildCliEstimateSystemText(opts));
-  const toolTokens = estimateToolSchemas(toolNames);
+  const toolTokens = estimateToolSchemas(toolNames, env);
   // 守卫：若同时传入 messages 与 historyText，优先使用结构化的 messages（estimateMessagesTokens），避免双计历史。
   const historyTokens =
     opts.messages && opts.messages.length > 0

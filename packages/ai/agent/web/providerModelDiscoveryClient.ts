@@ -47,7 +47,6 @@ export type FetchDiscoveredModelsArgs = {
   serverOrigin: string;
   token: string;
   presetId: string;
-  apiKey?: string;
   fetchImpl?: typeof fetch;
 };
 
@@ -96,9 +95,7 @@ export async function fetchDiscoveredModels(
   args: FetchDiscoveredModelsArgs,
 ): Promise<ProviderDiscoveryClientResult | null> {
   if (!isDiscoverablePreset(args.presetId)) return null;
-  const apiKey = (args.apiKey ?? "").trim();
-  const oauth = isOAuthDiscoveryPreset(args.presetId);
-  if (!oauth && !apiKey) return null;
+  if (!args.token) return null;
   const base = (args.serverOrigin ?? "").replace(/\/+$/, "");
   if (!base) return null;
 
@@ -114,7 +111,7 @@ export async function fetchDiscoveredModels(
           "Content-Type": "application/json",
           ...(args.token ? { Authorization: `Bearer ${args.token}` } : {}),
         },
-        body: JSON.stringify({ presetId: args.presetId, ...(!oauth ? { apiKey } : {}) }),
+        body: JSON.stringify({ presetId: args.presetId }),
         signal: controller.signal,
       });
     } finally {

@@ -6,6 +6,7 @@ import { ulid } from "ulid";
 import { Mutex } from "async-mutex";
 import { asOptionalTrimmedString } from "core/optionalString";
 import serverDb from "./db";
+import type { AuthorityBatchOperation } from "./authorityStoreTypes";
 import { blobKey, fileKey, fileIdIndexKey, fileStatKey } from "database/keys";
 import { isLevelNotFoundError } from "database/levelNotFoundError";
 import { buildTombstoneRecord, isTombstoneRecord } from "database/tombstones";
@@ -112,6 +113,9 @@ export interface SaveFileOptions {
 
     /** Explicit physical file record key; when provided, client metadata cannot override it. */
     mainKeyOverride?: string;
+
+    /** Trusted server callers only: publish related records with the file and its ID index. */
+    publicationOps?: (fileId: string, metadata: FileMetadata) => AuthorityBatchOperation[];
 }
 
 /**
@@ -142,7 +146,7 @@ const calculateSha256 = (buffer: Buffer): string => {
 const dbGetOrNull = async <T = any>(key: string): Promise<T | null> => {
     try {
         const value = await serverDb.get(key);
-        return value as T;
+        return (value ?? null) as T | null;
     } catch (err: any) {
         if (isLevelNotFoundError(err)) {
             return null;
@@ -333,7 +337,9 @@ export const saveBufferAsFile = async (
         tenantId,
         sha256: blob.sha256,
         size: blob.size,
-        mimeType: blob.mimeType,
+        // Space dedup shares bytes, not MIME: its entry and older sync clients
+        // use this upload's type, not whichever type first created the blob.
+        mimeType: options.ownerType === "space" || options.publicationOps ? mimeType : blob.mimeType,
         filePath: blob.path,
 
         originalName: options.originalName,
@@ -364,22 +370,28 @@ export const saveBufferAsFile = async (
             ? targetDbKey
             : fileKey.single(tenantId, fileId);
 
-    await serverDb.put(mainKey, { ...merged, dbKey: mainKey });
-
-    // 6) 写入 fileId 索引
+    const record = { ...merged, dbKey: mainKey };
     const indexKey = fileIdIndexKey(fileId);
-    await serverDb.put(indexKey, {
-        tenantId,
-        fileId,
-        mainKey,
-        createdAt: base.createdAt,
-    });
-
-    // 7) 更新简单统计（tenant / model）
-    const isAi = merged.source === "ai-generated";
-    await updateTenantDailyStatsOnCreate(tenantId, merged.size, isAi);
-    if (merged.model) {
-        await updateModelDailyStatsOnCreate(merged.model, merged.size);
+    const index = { tenantId, fileId, mainKey, createdAt: base.createdAt };
+    if (options.publicationOps) {
+        try {
+            await serverDb.batch([
+                { type: "put", key: mainKey, value: record },
+                { type: "put", key: indexKey, value: index },
+                ...options.publicationOps(fileId, record),
+            ]);
+        } catch (error) {
+            await decrementBlobRefCount(blob.sha256).catch(() => undefined);
+            throw error;
+        }
+        // Stats are not part of publication and must not turn a durable commit into a failed response.
+        await updateTenantDailyStatsOnCreate(tenantId, merged.size, merged.source === "ai-generated")
+            .catch(() => console.warn("[fileService] publication stats update failed"));
+    } else {
+        await serverDb.put(mainKey, record);
+        await serverDb.put(indexKey, index);
+        await updateTenantDailyStatsOnCreate(tenantId, merged.size, merged.source === "ai-generated");
+        if (merged.model) await updateModelDailyStatsOnCreate(merged.model, merged.size);
     }
 
     return { fileId, metadata: merged };
@@ -399,46 +411,37 @@ const resolveTenantAndFileId = async (
     return { tenantId: index.tenantId, fileId: index.fileId, mainKey: index.mainKey };
 };
 
-/**
- * 通过 fileId 获取 FileMetadata
- */
-export const getFileMetadataById = async (
-    fileId: string
-): Promise<FileMetadata | null> => {
-    // 1. 优先尝试直接读取（支持传入完整的 dbKey，如 file-userId-ulid）
-    if (fileId.startsWith("file-")) {
-        const metadata = await dbGetOrNull<FileMetadata>(fileId);
-        if (metadata && !isTombstoneRecord(metadata)) return metadata;
-        if (metadata && isTombstoneRecord(metadata)) return null;
-    }
+export type LocalFileLookup =
+    | { kind: "missing" }
+    | { kind: "deleted" }
+    | { kind: "found"; fileKey: string; metadata: FileMetadata };
 
-    // 2. 尝试通过 fileId 索引查找（支持传入纯 ulid）
-    const resolved = await resolveTenantAndFileId(fileId);
-    if (!resolved) return null;
-
-    // 优先使用索引中存储的 mainKey（避免重建不一致），回退到按规则拼接
-    const mainKey = resolved.mainKey || fileKey.single(resolved.tenantId, resolved.fileId);
-    const metadata = await dbGetOrNull<FileMetadata>(mainKey);
-    if (!metadata || isTombstoneRecord(metadata)) {
-        return null;
-    }
-
-    return metadata;
+const classifyLocalFile = (fileKey: string, metadata: FileMetadata | null): LocalFileLookup => {
+    if (metadata === null) return { kind: "missing" };
+    if (isTombstoneRecord(metadata)) return { kind: "deleted" };
+    return { kind: "found", fileKey, metadata };
 };
 
-export const hasFileTombstoneById = async (fileId: string): Promise<boolean> => {
+/** A direct key takes precedence over the ID index, including on deletion. */
+export async function lookupLocalFileById(fileId: string): Promise<LocalFileLookup> {
     if (fileId.startsWith("file-")) {
-        const metadata = await dbGetOrNull<FileMetadata>(fileId);
-        return Boolean(metadata && isTombstoneRecord(metadata));
+        const direct = classifyLocalFile(fileId, await dbGetOrNull<FileMetadata>(fileId));
+        if (direct.kind !== "missing") return direct;
     }
 
-    const resolved = await resolveTenantAndFileId(fileId);
-    if (!resolved) return false;
+    const index = await resolveTenantAndFileId(fileId);
+    if (!index) return { kind: "missing" };
+    const mainKey = index.mainKey || fileKey.single(index.tenantId, index.fileId);
+    return classifyLocalFile(mainKey, await dbGetOrNull<FileMetadata>(mainKey));
+}
 
-    const mainKey = resolved.mainKey || fileKey.single(resolved.tenantId, resolved.fileId);
-    const metadata = await dbGetOrNull<FileMetadata>(mainKey);
-    return Boolean(metadata && isTombstoneRecord(metadata));
+export const getFileMetadataById = async (fileId: string): Promise<FileMetadata | null> => {
+    const lookup = await lookupLocalFileById(fileId);
+    return lookup.kind === "found" ? lookup.metadata : null;
 };
+
+export const hasFileTombstoneById = async (fileId: string): Promise<boolean> =>
+    (await lookupLocalFileById(fileId)).kind === "deleted";
 
 /**
  * tombstoneFileById 的进程内串行锁：防止并发调用同时观察到"活文件"、
@@ -531,8 +534,13 @@ export const getFileContentById = async (
         throw new Error(`File not found: ${fileId}`);
     }
 
-    assertValidSha256(metadata.sha256);
-    const blobPath = path.join(UPLOAD_DIR, metadata.sha256);
+    return { buffer: await readFileBytesForMetadata(metadata), metadata };
+};
+
+/** Read bytes for an already authorized metadata snapshot; do not resolve the ID again. */
+export async function readFileBytesForMetadata(metadata: FileMetadata): Promise<Buffer> {
+    const fileId = metadata.id;
+    const blobPath = getBlobPathBySha256(metadata.sha256);
     const file = Bun.file(blobPath);
     const exists = await file.exists();
     if (!exists) {
@@ -549,8 +557,8 @@ export const getFileContentById = async (
         );
     }
 
-    return { buffer, metadata };
-};
+    return buffer;
+}
 
 /**
  * 按 sha256 读取 blob 的前 maxBytes 字节（流式截断，不整包入内存）。

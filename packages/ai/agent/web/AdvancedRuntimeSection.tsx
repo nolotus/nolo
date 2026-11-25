@@ -1,14 +1,13 @@
 /**
  * 运行时高级设置——从 AdvancedSettingsTab 拆出。
  *
- * 包含：服务器代理、思考模式 + thinkingBudget、托管执行授权。
+ * 包含：服务器代理、托管执行授权。
  * 自研 useForm：value/onChange 直连，无 Controller/useWatch。
  */
 
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FormField } from "render/web/form/FormField";
-import { Slider } from "render/web/form/Slider";
 import ToggleSwitch from "render/web/ui/ToggleSwitch";
 import { isRecord } from "core/isRecord";
 import { isLocalCustomProviderUrl, runtimePolicyAllowsHostedExec } from "../createAgentSchema";
@@ -72,7 +71,6 @@ const AdvancedRuntimeSection: React.FC<AdvancedRuntimeSectionProps> = ({
   // 是否已有自定义运行时配置：只决定**初始**展开状态。
   const hasCustomRuntimeSettings =
     values.useServerProxy === false ||
-    Boolean(values.enableThinking) ||
     allowHostedExec;
   // 受控展开状态 + 自己处理 summary 点击。
   // 为什么不用 <details defaultOpen>：React 19 不支持该 prop（实测不设 open 属性，
@@ -112,34 +110,6 @@ const AdvancedRuntimeSection: React.FC<AdvancedRuntimeSectionProps> = ({
           onChange={(v) => set("useServerProxy", v)}
         />
       </FormField>
-
-      <FormField
-        label={t("form.enableThinking")}
-        helperText={t("help.enableThinking")}
-        {...common}
-      >
-        <ToggleSwitch
-          checked={!!values.enableThinking}
-          onChange={(v) => set("enableThinking", v)}
-        />
-      </FormField>
-
-      {values.enableThinking ? (
-        <FormField
-          label={t("form.thinkingBudget")}
-          helperText={t("help.thinkingBudget")}
-          {...common}
-        >
-          <Slider
-            value={(values.thinkingBudget as number | null) ?? 8000}
-            onChange={(v) => set("thinkingBudget", v)}
-            min={1024}
-            max={32000}
-            step={512}
-            showValue
-          />
-        </FormField>
-      ) : null}
 
       {showHostedExecRuntimeControl && (
         <FormField

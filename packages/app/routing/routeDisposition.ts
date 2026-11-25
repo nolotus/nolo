@@ -24,7 +24,7 @@ const containsNotFoundCatchAll = (routes: RouteObject[]): boolean =>
 /**
  * 路由树里是否注册了 catch-all（id 为 NOT_FOUND_ROUTE_ID）。
  *
- * 这是启用 404 语义的前提：crm / date 等兄弟站点的路由树没有 catch-all，
+ * 这是启用 404 语义的前提：部分路由树没有 catch-all，
  * 它们的未匹配路径必须保持既有行为（200），不能被主站规则误伤。
  */
 export const hasNotFoundCatchAll = (routes: RouteObject[]): boolean =>

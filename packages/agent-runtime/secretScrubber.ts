@@ -74,13 +74,14 @@ const QUICK_PROBE_SUBSTRINGS = [
   "ghr_",
   "github_pat_",
   "PRIVATE KEY",
-  "Bearer ",
-  "bearer ",
-  "PASSWORD",
-  "password",
-  "PASSWD",
-  "SECRET_KEY",
 ];
+
+// 大小写不敏感规则（`Bearer` / `PASSWORD` / `PASSWD` / `SECRET_KEY`）的预检：
+// 用一条带 `i` 标志的正则，而不是手工枚举大小写变体（`BeArEr` / `PaSsWoRd`
+// 这类混合写法会漏），也与正式规则 `/…/gi` 的大小写语义 100% 一致。
+// 正则预检零字符串分配：不做 `.toLowerCase()` 整串拷贝。
+// 换行形态（`Authorization: Bearer\n<token>`）没有空格，预检不依赖空格。
+const CASE_INSENSITIVE_PROBE_REGEX = /bearer|password|passwd|secret_key/i;
 
 // 无前缀形态（BigModel / 智谱 `<32 hex>.<16 alnum>`）没有可用的子串探针，
 // 用一条自带边界的预检正则兜底；它在普通文本上首字符即失败，比跑完整流水线便宜得多。
@@ -92,6 +93,7 @@ const UNPREFIXED_PROBE_REGEX = /\b[0-9a-fA-F]{32}\.[A-Za-z0-9]{16}\b/;
 export function hasPotentialSecrets(text: string): boolean {
   if (typeof text !== "string" || text.length === 0) return false;
   if (QUICK_PROBE_SUBSTRINGS.some((probe) => text.includes(probe))) return true;
+  if (CASE_INSENSITIVE_PROBE_REGEX.test(text)) return true;
   return UNPREFIXED_PROBE_REGEX.test(text);
 }
 

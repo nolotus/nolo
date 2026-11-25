@@ -14,6 +14,7 @@ import { injectSpeedContextIntoListAgentsResult } from "ai/agent/candidateSpeedC
 
 import { isLocalDispatchSpeedSource, isServerDispatchSpeedSource } from "ai/agent/dispatchSpeedProvenance";
 import { listRecentRunRecords } from "./agentRunControl";
+import { resolveRecentRunHealthContext } from "./recentRunHealthScan";
 
 const createCliDispatchSampleDb = (db: any, userId: string, env: Record<string, string | undefined>) => {
   // Lazy metadata-only registry scan: no logs, messages or credential records.
@@ -505,17 +506,36 @@ export async function runAgentListCommand(
         upstreamTotal: cliUpstreamTotal,
       });
 
+      // 紧凑分页有自己的字节预算与字段投影（体积优先），不走下面两处注入。
+      const compactPage = compact === true && verbose !== true;
+      // 坏通道快败感知：只读本地 runs/ 的旁路标注，没有异常通道时字段完全省略。
+      // 它不参与 agents 排序、可用性判定或派发准入（advisory only）。
+      const healthContext = compactPage
+        ? undefined
+        : resolveRecentRunHealthContext({
+            agentKeys: discovery.agents
+              .map((agent) => (agent as { agentKey?: unknown }).agentKey)
+              .filter((key): key is string => typeof key === "string"),
+            env,
+          });
+
       const listResult = JSON.stringify({
         success: true,
         userId,
         ...(resolvedSpaceId ? { spaceId: resolvedSpaceId } : {}),
         planningRecommendation: discovery.planningRecommendation,
+        // tierHints 是 discovery 给的档位候选提示：原样透传，非空时才出现。
+        ...(discovery.tierHints && Object.keys(discovery.tierHints).length > 0
+          ? { tierHints: discovery.tierHints }
+          : {}),
         total: discovery.total,
         ...(typeof discovery.offset === "number" ? { offset: discovery.offset } : {}),
         ...(typeof discovery.limit === "number" ? { limit: discovery.limit } : {}),
         ...(discovery.truncated ? { truncated: true } : {}),
         unavailableCount: discovery.unavailableCount,
         availableCount: discovery.availableCount,
+        // 近期快败通道的参考标注（advisory only）：无异常时整段省略。
+        ...(healthContext ? { healthContext } : {}),
         // agents 在最前：host 截断长输出时保头保尾，派发所需的 agentKey
         // 必须落在头部；凭证分组是说明性大块，放最后。
         // 限流 agent 已合入 agents（带 availabilityStatus / nextAvailableAt
@@ -528,7 +548,7 @@ export async function runAgentListCommand(
       const cliNoloHome =
         env.NOLO_HOME?.trim() || (env.HOME?.trim() ? `${env.HOME.trim()}/.nolo` : "");
       const speedAwareListResult = await injectSpeedContextIntoListAgentsResult(listResult, {
-        compactPage: compact === true && verbose !== true,
+        compactPage,
         fragmentOffset, fragmentAgentKey, fragmentDigest,
         db: createCliDispatchSampleDb(deps.db ?? (await getReadableCliDb(output)), userId, env),
         userId,

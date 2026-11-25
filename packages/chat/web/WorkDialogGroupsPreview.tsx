@@ -39,11 +39,20 @@ import { MenuPopover } from "render/web/ui/MenuPopover";
 import { useTranslation } from "react-i18next";
 import { canDeleteSidebarItem } from "create/space/canDeleteSidebarItem";
 import { useDeleteContentEntry } from "create/space/components/useDeleteContentEntry";
+import { sidebarStyles } from "./sidebarStyles";
+import { withLiteralClass } from "./withLiteralClass";
 import { useRovingRowKeyboard } from "./sidebar/useRovingRowKeyboard";
 import {
   buildWorkDialogHierarchyView,
   type WorkDialogFlatRow,
 } from "./sidebar/workDialogHierarchyView";
+import {
+  projectWindowedEntries,
+  projectWindowedSections,
+  WORK_DIALOG_AUTO_LOAD_MAX_ROUNDS,
+  WORK_DIALOG_RENDER_WINDOW_INITIAL,
+  WORK_DIALOG_RENDER_WINDOW_STEP,
+} from "./sidebar/workDialogRenderWindow";
 import {
   aggregateRunningAncestors,
   collectRunningDialogKeys,
@@ -95,6 +104,7 @@ type DialogPages = {
   loading: boolean;
   hasMore: boolean;
   pendingSourceCount?: number;
+  idlePendingSourceCount?: number;
   identityKey?: string;
   /** 游标快照：推进/耗尽时变化；缺失时展示层退回行数信号。 */
   cursorKey?: string;
@@ -213,26 +223,35 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   const canLoadMore = ownedActionable || sharedActionable || partialFailure || loading;
   const failed = hardFailure;
   const [autoLoadStalled, setAutoLoadStalled] = useState(false);
+  const [autoLoadCapReached, setAutoLoadCapReached] = useState(false);
   // 自动续页的进展信号：游标快照（含耗尽为 null）推进即算进展。
   // 不能用 total/rows.length——重复页、已缓存、去重、类型过滤都会让行数不动却仍在翻页。
   const autoLoadProgressKey = `${ownedPages?.cursorKey ?? ""}|${sharedEnabled ? (sharedPagesView.cursorKey ?? "") : ""}`;
   const stalled = autoLoadStalled && (ownedActionable || sharedActionable);
   const controlLabel = loading ? "正在加载对话…" : failed ? "重试加载" : stalled ? "加载停滞，点击重试" : (ownedActionable || sharedActionable) ? "加载更多对话" : "稍后重试";
   const controlDisabled = loading || !(ownedActionable || sharedActionable || (sharedFailedCount > 0 && sharedPages.loadingSpaces.length === 0));
-  const autoLoadActive = typeof IntersectionObserver !== "undefined" && !autoLoadStalled && (ownedHealthyPending || sharedHealthyPending);
-  // 身份变化（账号/服务器/空间集合）后，旧身份的停滞结论不再适用：重新交给自动链条。
+  const autoLoadActive = typeof IntersectionObserver !== "undefined" && !autoLoadStalled && !autoLoadCapReached && (ownedHealthyPending || sharedHealthyPending);
+  // 身份变化（账号/服务器/空间集合）后，旧身份的停滞与自动翻页上限不再适用：重新交给自动链条。
   const autoLoadIdentityKey = `${ownedPages?.identityKey ?? ""}|${sharedPages.identityKey}`;
-  useEffect(() => { setAutoLoadStalled(false); }, [autoLoadIdentityKey]);
-
   const autoLoadFromProgressRef = useRef<string | null>(null);
   const autoLoadEmptyRoundsRef = useRef(0);
+  const autoLoadRoundsRef = useRef(0);
+  useEffect(() => {
+    setAutoLoadStalled(false);
+    setAutoLoadCapReached(false);
+    autoLoadRoundsRef.current = 0;
+  }, [autoLoadIdentityKey]);
+
   const loadCombined = (manual = false): Promise<void> => {
     // 手动重试重新开启自动续页：点击后若游标重新推进，自动链条继续；若仍停滞，再收敛回手动。
-    // 同时清空停滞计数与进展 snapshot，给重试一轮完整预算，避免一次重试就立刻再停滞。
+    // 同时清空停滞计数、自动翻页配额与进展 snapshot，给重试一轮完整预算，避免一次重试就立刻再停滞。
     if (manual) {
       setAutoLoadStalled(false);
+      setAutoLoadCapReached(false);
       autoLoadEmptyRoundsRef.current = 0;
       autoLoadFromProgressRef.current = null;
+      autoLoadRoundsRef.current = 0;
+      autoLoadLastTriggerAtRef.current = Date.now();
     }
     const tasks: Promise<unknown>[] = [];
     if (ownedPages && (manual ? ownedActionable : ownedHealthyPending)) {
@@ -243,6 +262,17 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     }
     return Promise.allSettled(tasks).then(() => undefined);
   };
+  const ownedHasIdlePending = ownedHealthyPending && (
+    ownedPages?.idlePendingSourceCount !== undefined
+      ? ownedPages.idlePendingSourceCount > 0
+      : !ownedBusy
+  );
+  const sharedHasIdlePending = sharedHealthyPending && (
+    sharedPagesView.actionableSourceCount !== undefined
+      ? sharedPagesView.actionableSourceCount > 0
+      : sharedPages.loadingSpaces.length === 0
+  );
+  const hasIdlePendingSource = ownedHasIdlePending || sharedHasIdlePending;
   const autoLoadSentinelRef = useRef<HTMLDivElement | null>(null);
   const autoLoadVisibleRef = useRef(false);
   const autoLoadTriggerRef = useRef(loadCombined);
@@ -250,10 +280,13 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
   const autoLoadCanLoadMoreRef = useRef(canLoadMore);
   const autoLoadProgressRef = useRef(autoLoadProgressKey);
   const autoLoadLoadingRef = useRef(false);
+  const autoLoadHasIdlePendingRef = useRef(hasIdlePendingSource);
+  const autoLoadWakeRef = useRef<(() => void) | null>(null);
   autoLoadTriggerRef.current = loadCombined;
   autoLoadCanLoadMoreRef.current = canLoadMore;
   autoLoadProgressRef.current = autoLoadProgressKey;
   autoLoadLoadingRef.current = Boolean(ownedPages?.loading) || (sharedEnabled && sharedPages.loadingSpaces.length > 0);
+  autoLoadHasIdlePendingRef.current = hasIdlePendingSource;
   useEffect(() => {
     if (!autoLoadActive) return;
     const node = autoLoadSentinelRef.current;
@@ -277,6 +310,16 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
       } else if (current !== from) {
         autoLoadEmptyRoundsRef.current = 0;
       }
+      // 全部待翻页来源均已在途（loading）：不空耗配额、不挂 0ms 轮询定时器，
+      // 等待下方 effect 在任一来源转为空闲（hasIdlePendingSource -> true）时唤醒续页。
+      if (!autoLoadHasIdlePendingRef.current) {
+        return;
+      }
+      if (autoLoadRoundsRef.current >= WORK_DIALOG_AUTO_LOAD_MAX_ROUNDS) {
+        setAutoLoadCapReached(true);
+        return;
+      }
+      autoLoadRoundsRef.current += 1;
       autoLoadLastTriggerAtRef.current = Date.now();
       autoLoadFromProgressRef.current = current;
       autoLoadTriggerRef.current();
@@ -292,6 +335,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
       const wait = Math.max(0, AUTO_LOAD_MIN_INTERVAL_MS - (Date.now() - autoLoadLastTriggerAtRef.current));
       timer = setTimeout(() => { flush(); }, wait);
     };
+    autoLoadWakeRef.current = schedule;
     const observer = new IntersectionObserver((entries) => {
       const visible = entries.some((entry) => entry.isIntersecting);
       autoLoadVisibleRef.current = visible;
@@ -300,10 +344,17 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     observer.observe(node);
     return () => {
       disposed = true;
+      autoLoadWakeRef.current = null;
+      autoLoadVisibleRef.current = false;
       if (timer !== undefined) clearTimeout(timer);
       observer.disconnect();
     };
   }, [autoLoadActive, total]);
+  useEffect(() => {
+    if (autoLoadActive && hasIdlePendingSource && autoLoadVisibleRef.current) {
+      autoLoadWakeRef.current?.();
+    }
+  }, [autoLoadActive, hasIdlePendingSource]);
 
   const [activeMenuKey, setActiveMenuKey] = useState<string | null>(null);
   const [menuAnchorEl, setMenuAnchorEl] = useState<HTMLElement | null>(null);
@@ -880,7 +931,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     () => new Map(eligibleRows.map((r) => [r.key, r])),
     [eligibleRows]
   );
-  const defaultFocusedKey = useMemo(() => {
+  // 当前路由上真实打开的那一行（无回退）：供「空间外」分组自动展开使用，
+  // 也作为侧栏焦点行的首选，避免同一判据写两遍。
+  const activeRowKey = useMemo(() => {
     for (const row of eligibleRows) {
       if (
         isRoutableContentActive({
@@ -894,8 +947,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         return row.key;
       }
     }
-    return eligibleRows[0]?.key ?? null;
+    return null;
   }, [eligibleRows, userId, currentSpaceId, location.pathname]);
+  const defaultFocusedKey = activeRowKey ?? eligibleRows[0]?.key ?? null;
 
   const canDeleteRow = useCallback(
     (key: string) => {
@@ -925,7 +979,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     [eligibleRowMap, deleteContent, titles]
   );
 
-  const { containerRef, containerProps, getRowProps } = useRovingRowKeyboard({
+  const { containerRef, containerProps, getRowProps, setFocusedKey } = useRovingRowKeyboard({
     defaultFocusedKey,
     canDeleteRow,
     onDeleteRow: handleDeleteRow,
@@ -1005,20 +1059,131 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     );
   };
 
-  const renderHierarchy = (view: ReturnType<typeof buildWorkDialogHierarchyView>) => (<div aria-label="最近活动对话">
-      {view.runningRows.length > 0 && (
-        <div data-hook="work-dialog-running-group" data-group-id="running">
-          <div data-hook="work-dialog-date-header">正在进行</div>
-          {view.runningRows.map((entry) => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
-        </div>
-      )}
-      {view.sections.map((section) => (
-        <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
-          <div data-hook="work-dialog-date-header">{dateGroupLabel(section.groupId)}</div>
-          {section.rows.map((entry) => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
-        </div>
-      ))}
-    </div>);
+  const [windowLimits, setWindowLimits] = useState<Record<string, number>>({});
+  const windowScopeKey = `${userId}|${homeScope.kind}|${homeScope.kind === "project" ? homeScope.projectId : ""}|${typeFilter}`;
+  useEffect(() => {
+    setWindowLimits({});
+  }, [windowScopeKey]);
+  const pendingShowMoreFocusRef = useRef<{
+    key: string;
+    listEl: HTMLElement | null;
+  } | null>(null);
+  useEffect(() => {
+    const pending = pendingShowMoreFocusRef.current;
+    if (!pending) return;
+    pendingShowMoreFocusRef.current = null;
+    const scopeEl =
+      pending.listEl && pending.listEl.isConnected
+        ? pending.listEl
+        : containerRef.current;
+    if (!scopeEl) return;
+    const rows = Array.from(
+      scopeEl.querySelectorAll<HTMLElement>('[data-sidebar-row="true"]'),
+    );
+    const targetEl =
+      rows.find((el) => el.getAttribute("data-content-key") === pending.key) ??
+      null;
+    if (targetEl) {
+      setFocusedKey(pending.key);
+      targetEl.focus();
+    }
+  }, [windowLimits, setFocusedKey, containerRef]);
+  const getWindowLimit = useCallback(
+    (windowKey: string) => windowLimits[windowKey] ?? WORK_DIALOG_RENDER_WINDOW_INITIAL,
+    [windowLimits],
+  );
+  const expandWindow = useCallback(
+    (windowKey: string, firstNewKey?: string | null, listEl?: HTMLElement | null) => {
+      if (firstNewKey) {
+        pendingShowMoreFocusRef.current = {
+          key: firstNewKey,
+          listEl: listEl ?? null,
+        };
+      }
+      setWindowLimits((prev) => ({
+        ...prev,
+        [windowKey]:
+          (prev[windowKey] ?? WORK_DIALOG_RENDER_WINDOW_INITIAL) + WORK_DIALOG_RENDER_WINDOW_STEP,
+      }));
+    },
+    [],
+  );
+
+  const renderHierarchy = (
+    view: ReturnType<typeof buildWorkDialogHierarchyView>,
+    windowKey = "project",
+  ) => {
+    const runningKeySet = new Set(view.runningRows.map((entry) => entry.row.key));
+    const { visibleSections, activeOutsideWindow, remainingCount } = projectWindowedSections(
+      view.sections,
+      getWindowLimit(windowKey),
+      activeRowKey,
+      runningKeySet,
+    );
+    const visibleCount = visibleSections.reduce((sum, section) => sum + section.rows.length, 0);
+    const allSectionEntries = view.sections.flatMap((section) => section.rows);
+    const firstNewKey =
+      allSectionEntries
+        .slice(visibleCount)
+        .find((entry) => entry.row.key !== activeOutsideWindow?.entry.row.key)
+        ?.row.key ??
+      allSectionEntries[visibleCount]?.row.key ??
+      null;
+    const activeMatchedExistingSection =
+      activeOutsideWindow &&
+      visibleSections.some((section) => section.key === activeOutsideWindow.sectionKey);
+    const renderedSections = activeMatchedExistingSection
+      ? visibleSections.map((section) =>
+          section.key === activeOutsideWindow!.sectionKey
+            ? { ...section, rows: [...section.rows, activeOutsideWindow!.entry] }
+            : section,
+        )
+      : visibleSections;
+    return (
+      <div aria-label="最近活动对话">
+        {view.runningRows.length > 0 && (
+          <div data-hook="work-dialog-running-group" data-group-id="running">
+            <div data-hook="work-dialog-date-header">正在进行</div>
+            {view.runningRows.map((entry) => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
+          </div>
+        )}
+        {renderedSections.map((section) => (
+          <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
+            <div data-hook="work-dialog-date-header">{dateGroupLabel(section.groupId)}</div>
+            {section.rows.map((entry) => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth))}
+          </div>
+        ))}
+        {activeOutsideWindow && !activeMatchedExistingSection && (
+          <div
+            key={`${activeOutsideWindow.sectionKey}:active`}
+            data-hook="work-dialog-date-group"
+            data-group-id={activeOutsideWindow.groupId}
+          >
+            <div data-hook="work-dialog-date-header">{dateGroupLabel(activeOutsideWindow.groupId)}</div>
+            {renderDialogRow(
+              activeOutsideWindow.entry.row,
+              activeOutsideWindow.entry.loadedChildCount,
+              activeOutsideWindow.entry.isChild,
+              activeOutsideWindow.entry.depth,
+            )}
+          </div>
+        )}
+        {remainingCount > 0 && (
+          <button
+            type="button"
+            data-hook="work-dialog-show-more"
+            onClick={(event) => expandWindow(windowKey, firstNewKey, event.currentTarget.parentElement)}
+            {...withLiteralClass("WorkDialogGroups__showMore", sidebarStyles.workDialogShowMoreButton)}
+          >
+          {t("workspace_show_more", {
+            count: remainingCount,
+            defaultValue: `显示更多（剩余 ${remainingCount} 条）`,
+          })}
+          </button>
+        )}
+      </div>
+    );
+  };
 
   const flatHierarchyCache = useMemo(
     () => new WeakMap<readonly WorkDialogFlatRow[], ReturnType<typeof buildWorkDialogHierarchyView>>(),
@@ -1066,30 +1231,67 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     return map;
   }, [spaceGroups, records, hasResolvedRemoteScope, memberCategoriesBySpaceId, typeFilter, pendingCategories, nameScope]);
 
-  // Flat means no visible recency headings, not strict time order:
-  // intentionally keep running subtrees pinned first and preserve parent/child folding.
+  // Keep running subtrees first and preserve parent/child folding, but render
+  // ordinary history as one continuous list without invisible date sections.
   const renderFlatHierarchy = (
     groupRows: readonly WorkDialogFlatRow[],
     groupSpaceKey?: string | null,
+    windowKey = "flat",
   ) => {
     let view = flatHierarchyCache.get(groupRows);
     if (!view) {
       view = buildWorkDialogHierarchyView(groupRows, expandedDialogKeys, Date.now(), runningDialogKeys);
       flatHierarchyCache.set(groupRows, view);
     }
+    const allHistoryEntries = view.sections.flatMap((section) => section.rows);
+    const runningKeySet = new Set(view.runningRows.map((entry) => entry.row.key));
+    const { visibleEntries, activeOutsideWindow, remainingCount } = projectWindowedEntries(
+      allHistoryEntries,
+      getWindowLimit(windowKey),
+      activeRowKey,
+      runningKeySet,
+    );
+    const firstNewKey =
+      allHistoryEntries
+        .slice(visibleEntries.length)
+        .find((entry) => entry.row.key !== activeOutsideWindow?.row.key)
+        ?.row.key ??
+      allHistoryEntries[visibleEntries.length]?.row.key ??
+      null;
     return <div aria-label="最近活动对话">
       {view.runningRows.length > 0 && <div data-hook="work-dialog-running-group" data-group-id="running">
         <div>正在进行</div>
         {view.runningRows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
       </div>}
-      {view.sections.map(section => <div key={section.key} data-hook="work-dialog-date-group" data-group-id={section.groupId}>
-        {section.rows.map(entry => renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey))}
-      </div>)}
+      {visibleEntries.map(entry =>
+        renderDialogRow(entry.row, entry.loadedChildCount, entry.isChild, entry.depth, groupSpaceKey)
+      )}
+      {activeOutsideWindow && renderDialogRow(
+        activeOutsideWindow.row,
+        activeOutsideWindow.loadedChildCount,
+        activeOutsideWindow.isChild,
+        activeOutsideWindow.depth,
+        groupSpaceKey,
+      )}
+      {remainingCount > 0 && (
+        <button
+          type="button"
+          data-hook="work-dialog-show-more"
+          onClick={(event) => expandWindow(windowKey, firstNewKey, event.currentTarget.parentElement)}
+          {...withLiteralClass("WorkDialogGroups__showMore", sidebarStyles.workDialogShowMoreButton)}
+        >
+          {t("workspace_show_more", {
+            count: remainingCount,
+            defaultValue: `显示更多（剩余 ${remainingCount} 条）`,
+          })}
+        </button>
+      )}
     </div>;
   };
 
   const renderSpace = (group: (typeof spaceGroups)[number]) => {
     const groupSpaceKey = normalizeSpaceId(group.spaceId) ?? null;
+    const groupWindowKey = `space:${group.spaceId ?? "__unassociated__"}`;
     const fallbackCats =
       !hasResolvedRemoteScope && group.spaceId
         ? memberCategoriesBySpaceId.get(group.spaceId)
@@ -1097,9 +1299,9 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
     const record =
       (group.spaceId ? records?.get(group.spaceId) : undefined) ??
       (fallbackCats ? { categories: fallbackCats } : undefined);
-    if (group.directoryUnavailable) return <><p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>{renderFlatHierarchy(group.rows, groupSpaceKey)}</>;
+    if (group.directoryUnavailable) return <><p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>{renderFlatHierarchy(group.rows, groupSpaceKey, groupWindowKey)}</>;
     const hasCategories = Object.values(record?.categories ?? {}).some(category => category?.name?.trim());
-    if (!hasCategories) return renderFlatHierarchy(group.rows, groupSpaceKey);
+    if (!hasCategories) return renderFlatHierarchy(group.rows, groupSpaceKey, groupWindowKey);
     const dropEmpty = typeFilter !== "all";
     const activePendingForSpace =
       group.spaceId && pendingCategories?.scope === nameScope
@@ -1113,7 +1315,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
       groupWorkDialogsByCategory(group.rows, record, { dropEmpty, keepCategoryIds });
     // 特定类型筛选下，若所有具名分类均为空被隐去、仅剩「未分类」桶，省去多余的一层「未分类」壳直接平铺。
     if (dropEmpty && categories.every(category => category.id === null)) {
-      return renderFlatHierarchy(group.rows, groupSpaceKey);
+      return renderFlatHierarchy(group.rows, groupSpaceKey, groupWindowKey);
     }
     const canManage = canManageSpaceCategories({ spaceId: group.spaceId, userId, memberSpaces, record });
     const isInsideThisSpace =
@@ -1131,7 +1333,7 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
         onCategoryRenamed={handleCategoryRenamed}
         onCategoryDeleted={handleCategoryDeleted}
       >
-        {rows => renderFlatHierarchy(rows, groupSpaceKey)}
+        {(rows, categoryId) => renderFlatHierarchy(rows, groupSpaceKey, `${groupWindowKey}:cat:${categoryId ?? "__uncat__"}`)}
       </WorkDialogCategoryGroups>
     );
   };
@@ -1194,12 +1396,13 @@ function WorkDialogGroupsExpanded({ items, userId, homeScope, onSelectHomeScope,
             homeScope={homeScope}
             onSelectHomeScope={onSelectHomeScope}
             onSpaceRecordUpdate={handleSpaceRecordUpdate}
+            activeRowKey={activeRowKey}
           >
             {renderSpace}
           </WorkDialogSpaceGroups>
         )
     )}
-    {(homeScope.kind === "all" ? spaceGroups.every(group => group.rows.length === 0) : total === 0) ? <p role={partialFailure ? "alert" : undefined}>{emptyMessage}</p> : homeScope.kind === "project" ? renderHierarchy(hierarchyView) : null}
+    {(homeScope.kind === "all" ? spaceGroups.every(group => group.rows.length === 0) : total === 0) ? <p role={partialFailure ? "alert" : undefined}>{emptyMessage}</p> : homeScope.kind === "project" ? renderHierarchy(hierarchyView, `project:${homeScope.projectId}`) : null}
     {sharedEnabled && records && memberSpaces.some(member => { const id = normalizeSpaceId(member.spaceId); if (!id) return false; return !records.get(id)?.contents; }) && <p role="status">{t("workspace_directory_unavailable", "空间目录暂不可用，保留已加载内容")}</p>}
     {ownershipFailedKeys.size > 0 && <p role="status" data-hook="work-dialog-ownership-unverified">
       {`有 ${ownershipFailedKeys.size} 条内容的归属未能核实（暂时按不可删除处理，内容不受影响）。`}

@@ -1,3 +1,5 @@
+import { asOptionalTrimmedString } from "../core/optionalString";
+
 /** Shared provider-key derivation used by web clients and server handlers. */
 export const PROVIDER_KEY_PRESET_IDS = new Set([
   "token-plan",
@@ -42,4 +44,18 @@ export function providerSecretKey(presetId: string): string {
 
 export function providerCredentialRef(presetId: string): string {
   return `provider-key:${presetId.trim()}`;
+}
+
+/** An opaque reference is a lookup identifier, never consent to read the cloud copy. */
+export function isAgentCredentialShared(agent?: { credentialSynced?: unknown } | null): boolean {
+  return agent?.credentialSynced === true;
+}
+
+/** The final nolo proxy body may carry a key only after explicit sharing. */
+export function resolveOutboundProxyApiKey(credential: { apiKey?: unknown; credentialSynced?: unknown }): string | undefined {
+  const apiKey = asOptionalTrimmedString(credential.apiKey);
+  if (apiKey && !isAgentCredentialShared(credential)) {
+    throw new Error("未授权将此密钥发送到 nolo 代理。请使用本机直连，或启用跨设备共享后重试。");
+  }
+  return apiKey;
 }

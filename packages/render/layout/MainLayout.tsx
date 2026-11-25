@@ -64,8 +64,9 @@ import "./sidebarContextToggle.css";
 
 // 页脚只出现在内容型路由，懒加载避免拖累工作区首屏
 // GuestPageChrome stays lazy-only: eager import races layout unit tests (mock.restore timing)
+// 引游客 chrome 模块（不含创建入口），访客首页因此不必下载登录态菜单依赖。
 const GuestPageChrome = lazy(() =>
-  import("./PageTopChrome").then((module) => ({ default: module.GuestPageChrome })),
+  import("./GuestPageChrome").then((module) => ({ default: module.GuestPageChrome })),
 );
 const SiteFooter = lazy(() => import("./SiteFooter"));
 const chatSidebarImport = () => import("chat/web/ChatSidebar");
@@ -77,11 +78,9 @@ const SidebarUserSection = lazy(
   () => import("chat/web/sidebar/SidebarUserSection")
 );
 
-// Warm the sidebar chunk as soon as the shell mounts so first open is not cold.
-// and the Suspense slot below already reserves full --topbar-height (0px height jump).
-if (typeof window !== "undefined") {
-  void chatSidebarImport();
-}
+// ChatSidebar 只在真正渲染时才加载（下方 lazy + 渲染条件）。
+// 这里原本有一段模块顶层的无条件预取，会让访客下载永远渲染不到的侧栏 chunk（约 270KB）；
+// 已移除：默认侧栏在满足条件的那次渲染就由 lazy 自行加载，无需额外预热。
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 480;

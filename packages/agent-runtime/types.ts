@@ -58,6 +58,8 @@ export interface AgentRuntimeChatMessage {
   content: AgentRuntimeMessageContent;
   /** Internal system-prompt boundary used by explicit-cache providers. */
   stable_prefix_chars?: number;
+  /** Internal ChatGPT OAuth metadata, not an upstream message field. */
+  agent_prompt_in_messages?: true;
   /** Internal provenance: buildMessages already included the configured agent prompt. */
   [AGENT_PROMPT_IN_MESSAGES]?: true;
   /**
@@ -274,6 +276,11 @@ export type AgentRuntimeShellPolicy = {
   mode?: "off" | "worktree";
   commandPolicy?: "denylist" | "allowlist" | "approval";
   networkPolicy?: "default-deny" | "allowed" | "approval";
+  /** Web-hosted shell only; exact DNS domains and their subdomains. */
+  allowedEgressDomains?: string[];
+  /** Web-hosted shell only; names in the authenticated user's hosted secret store. */
+  allowedSecrets?: string[];
+  maxWorkspaceBytes?: number;
   maxOutputBytes?: number;
 };
 

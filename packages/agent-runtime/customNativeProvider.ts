@@ -140,8 +140,7 @@ export type CreateCustomNativeProviderArgs = {
   /** 诊断日志用（`provider.request.start` 的 payload）。 */
   requestedToolNames?: readonly string[];
   /**
-   * gemini 通道内联图片白名单用的本机 server origin；缺省时 `isAllowedImageUrl`
-   * 恒为 false（与「origin 不匹配」走同一条路径）。
+   * Gemini 内联图片的可信服务器配置；与其他 provider 共用公开检查。
    */
   serverUrl?: string;
   /** 拉取本机 server 图片时带的本地登录态。 */
@@ -232,7 +231,7 @@ export function createCustomNativeProvider(
 // ---------------------------------------------------------------------------
 
 function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeProvider {
-  const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, serverUrl, authToken, transport, log, recordAvailability } = p;
+  const { model, endpoint, nativeEndpoint, apiKey, apiKeyHeader, agentConfig, tools, fetchImpl, fallbackSessionId, requestedToolNames, serverUrl, transport, log, recordAvailability } = p;
   const budgetBody = buildGeminiGenerateContentRequest({ messages: [], tools: tools as unknown[],
     attachSkipThoughtSignature: resolveGeminiModelQuirks(model).allowsThoughtSignatureSentinel,
     maxTokens: typeof agentConfig.max_tokens === "number" ? agentConfig.max_tokens : undefined });
@@ -245,8 +244,9 @@ function buildGeminiCustomNativeProvider(p: ResolvedCustomNative): AgentRuntimeP
     complete: async (messages, options) => {
       const inlineResult = await inlineImageUrlsForCustomProvider({ messages }, {
         shouldInline: true,
-        isAllowedImageUrl: (url) => { try { return new URL(url).origin === new URL(serverUrl as string).origin; } catch { return false; } },
-        fetchImage: async (url) => { const image = await fetchImpl(url, { headers: authToken ? { Authorization: `Bearer ${authToken}` } : undefined, signal: options?.signal }); if (!image.ok) return { ok: false, error: `HTTP ${image.status}` }; return { ok: true, mimeType: image.headers.get("content-type") ?? "application/octet-stream", bytes: new Uint8Array(await image.arrayBuffer()) }; },
+        serverUrl,
+        request: fetchImpl,
+        signal: options?.signal,
       }) as { messages: typeof messages };
       const toolImagePolicy = {
         routeKind: "gemini-native",

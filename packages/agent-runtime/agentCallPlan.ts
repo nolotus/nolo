@@ -1,3 +1,4 @@
+import { isAgentCredentialShared } from "../shared/providerSecrets";
 /**
  * Phase 1 — Agent Call Plan resolver.
  *
@@ -291,6 +292,7 @@ export function hasOwnCustomProviderKey(
 export function resolveAgentCallPlan(
   agentConfig: AgentRuntimeAgentConfig,
   _env?: EnvLike,
+  capabilities?: { canResolveLocalCredential?: boolean },
 ): AgentCallPlan {
   const apiKeyRef = asTrimmedLowercaseString(agentConfig.apiKeyRef);
   const provider = asTrimmedLowercaseString(
@@ -400,7 +402,11 @@ export function resolveAgentCallPlan(
 
   // ── Custom provider (customProviderUrl) ──
   if (agentConfig.customProviderUrl || agentConfig.apiSource === "custom") {
-    const transport = agentShouldUseServerProxy(agentConfig) ? "server-proxy" : "direct";
+    const useLocalCredential = capabilities?.canResolveLocalCredential === true &&
+      agentConfig.apiSource === "custom" && agentConfig.useServerProxy === false &&
+      !isAgentCredentialShared(agentConfig) &&
+      Boolean(asOptionalTrimmedString(agentConfig.credentialRef) || asOptionalTrimmedString(agentConfig.apiKey));
+    const transport = !useLocalCredential && agentShouldUseServerProxy(agentConfig) ? "server-proxy" : "direct";
     const endpoint = asOptionalTrimmedString(agentConfig.customProviderUrl) ?? "";
 
     // A custom endpoint serves whichever wire its MODEL speaks: read the

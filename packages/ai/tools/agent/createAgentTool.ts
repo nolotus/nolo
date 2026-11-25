@@ -1,4 +1,3 @@
-import { resolveDefaultReasoningEffort } from "ai/agent/defaultReasoningEffort";
 // 文件路径: ai/tools/agent/createAgentTool.ts
 
 import type { RootState } from "app/store";
@@ -68,6 +67,7 @@ export type CreateAgentToolArgs = {
     presence_penalty?: number;
     max_tokens?: number;
     reasoning_effort?: ReasoningEffort;
+    enableThinking?: boolean;
     runtimeToolPolicy?: Record<string, unknown> | null;
 };
 
@@ -301,6 +301,7 @@ export const createAgentToolFunctionSchema = {
                 type: "number",
                 description: i18n.t("tools.createAgent.params.max_tokens"),
             },
+            enableThinking: { type: "boolean" },
             reasoning_effort: {
                 type: "string",
                 enum: ["low", "medium", "high"],
@@ -352,6 +353,7 @@ const buildPlatformFormDataFromArgs = async (args: CreateAgentToolArgs): Promise
         presence_penalty,
         max_tokens,
         reasoning_effort,
+        enableThinking,
         runtimeToolPolicy,
     } = args;
 
@@ -377,7 +379,7 @@ const buildPlatformFormDataFromArgs = async (args: CreateAgentToolArgs): Promise
 
         apiSource: "platform",
         useServerProxy: true,
-        enableThinking: false,
+        ...(enableThinking !== undefined ? { enableThinking } : {}),
         defaultInteractionMode: "text",
 
         // 根据模型配置自动赋值 hasVision（支持图片 / 多模态）
@@ -414,7 +416,7 @@ const buildPlatformFormDataFromArgs = async (args: CreateAgentToolArgs): Promise
         frequency_penalty,
         presence_penalty,
         max_tokens,
-        reasoning_effort: reasoning_effort ?? resolveDefaultReasoningEffort({ provider: trimmedProvider, model: trimmedModel, fallback: "medium" }),
+        ...(reasoning_effort !== undefined ? { reasoning_effort } : {}),
 
         whitelist: [],
     };
@@ -535,6 +537,7 @@ export async function createAgentToolFunc(
             ...(args.frequency_penalty !== undefined ? { frequency_penalty: args.frequency_penalty } : {}),
             ...(args.presence_penalty !== undefined ? { presence_penalty: args.presence_penalty } : {}),
             ...(args.max_tokens !== undefined ? { max_tokens: args.max_tokens } : {}),
+            ...(args.enableThinking !== undefined ? { enableThinking: args.enableThinking } : {}),
             ...(args.reasoning_effort !== undefined ? { reasoning_effort: args.reasoning_effort } : {}),
             isPublic: !!args.isPublic,
             allowFork: !!args.allowFork,

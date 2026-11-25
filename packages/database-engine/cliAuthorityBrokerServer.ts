@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { createServer, type AddressInfo, type Server, type Socket } from "node:net";
+import { createServer as createTlsServer, type SecureContextOptions } from "node:tls";
 import { toErrorMessage } from "core/errorMessage";
 
 import { createCliAuthorityBrokerClient } from "./cliAuthorityBrokerClient";
@@ -37,6 +38,9 @@ export type CliAuthorityBrokerServerOptions = {
   healthPath?: string;
   now?: () => number;
   transportMode?: "socket" | "inprocess";
+  keepProcessAlive?: boolean;
+  tls?: SecureContextOptions;
+  supervisorPid?: number;
   /** Override maximum single-frame size (defaults to MAX_BROKER_FRAME_CHARS). */
   maxFrameChars?: number;
 };
@@ -261,7 +265,7 @@ async function executeCliAuthorityBrokerRequest(
         return { ok: true, result: { type: "conditionalPut", status: "updated" } };
       }
       case "status":
-        return { ok: true, result: { type: "status" } };
+        return { ok: true, result: { type: "status", ...(request.includeLocation && store.location ? { location: store.location } : {}) } };
       case "open":
         await store.open();
         return { ok: true, result: { type: "open" } };
@@ -387,7 +391,7 @@ async function createBrokerHandle(
   let store: AuthorityStore | undefined;
   let ownershipLock: LevelDbOwnershipLock | undefined;
   const sockets = new Set<Socket>();
-  const server = createServer((socket) => {
+  const onConnection = (socket: Socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
     socket.on("error", () => {});
@@ -400,7 +404,10 @@ async function createBrokerHandle(
       return;
     }
     bindSocketRequestHandler({ socket, store, maxFrameChars: options.maxFrameChars });
-  });
+  };
+  const server = options.tls
+    ? createTlsServer({ ...options.tls, requestCert: true, rejectUnauthorized: true, handshakeTimeout: 5_000 }, onConnection)
+    : createServer(onConnection);
   let storeReady = false;
   try {
     if (socketMode) {
@@ -415,7 +422,7 @@ async function createBrokerHandle(
         if (target.kind === "unix") server.listen(target.path, onListening);
         else server.listen(target.port, target.host, onListening);
       });
-      server.unref();
+      if (!options.keepProcessAlive) server.unref();
     }
     if (options.dbPath) {
       // 端口已经属于本进程之后才碰 db 目录：抢不到端口时连锁文件都不创建。
@@ -434,6 +441,8 @@ async function createBrokerHandle(
       : options.endpoint;
     writeJsonFile(options.metadataPath, {
       pid: process.pid,
+      ...(options.tls ? { transportSecurity: "mutual-tls" } : {}),
+      ...(options.supervisorPid === undefined ? {} : { supervisorPid: options.supervisorPid }),
       endpoint: listeningEndpoint,
       location: readyStore.location ?? listeningEndpoint,
       startedAt: new Date(now()).toISOString(),

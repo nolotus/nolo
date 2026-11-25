@@ -112,7 +112,7 @@ const SpaceContentBlockComponent: React.FC<SpaceContentBlockProps> = ({
             </div>
           )}
           <img
-            src={imageSrc ?? ""}
+            src={imageSrc ?? undefined}
             alt={item.title}
             className="content-block__img"
             loading="lazy"

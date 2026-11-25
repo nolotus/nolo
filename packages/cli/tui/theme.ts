@@ -241,6 +241,7 @@ export function setActiveThemeMode(
   activeThemeMode = mode;
   if (mode === "terminal") {
     resolvedBrightness = null;
+    trustedCanvasBrightness = null;
     // Only a user-facing choice (`/theme terminal|auto`, or the env var, which
     // is resolved by shouldUseTruecolorTokens) counts as explicit. Startup also
     // calls this setter with the resolved mode, so inferring "explicit" from the
@@ -559,6 +560,20 @@ function pushToContrast(
 }
 
 /**
+ * Whether we have authoritative evidence of the terminal's own canvas
+ * (exact OSC 11 RGB, host/terminal brightness declaration such as Ptyxis
+ * `interface-style` or DECSET 2031, or `COLORFGBG`). OS appearance signals
+ * alone are NOT included.
+ */
+function hasTrustedCanvasEvidence(env: Record<string, string | undefined>): boolean {
+  return (
+    activeTerminalBaseHex !== null ||
+    trustedCanvasBrightness !== null ||
+    detectColorFgBgBrightness(env) !== null
+  );
+}
+
+/**
  * Decide between canvas-adaptive truecolor and the ANSI-16 fallback.
  * Explicit terminal-native choices (env `NOLO_TUI_THEME=terminal` or an
  * in-session `/theme terminal`) keep ANSI foregrounds; the untouched default
@@ -572,7 +587,7 @@ function shouldUseTruecolorTokens(env: Record<string, string | undefined>): bool
   // In-session `/theme terminal` must behave exactly like the env var: ANSI
   // indexed foregrounds, no fixed RGB, so the terminal keeps owning the palette.
   if (terminalModeExplicit) return false;
-  return activeTerminalBaseHex !== null || detectColorFgBgBrightness(env) !== null;
+  return hasTrustedCanvasEvidence(env);
 }
 
 /**
@@ -636,8 +651,16 @@ const TERMINAL_BASE: Record<TuiBrightness, string> = {
  */
 let activeTerminalBaseHex: string | null = null;
 
+/**
+ * Authoritative terminal/host canvas brightness when exact RGB hex is
+ * unavailable (e.g. Ptyxis `interface-style` or DECSET 2031 report). Cleared
+ * whenever an exact hex is set or canvas state is reset.
+ */
+let trustedCanvasBrightness: TuiBrightness | null = null;
+
 /** Record the terminal's actual background hex, or clear it with null. */
 export function setActiveTerminalBaseHex(hex: string | null) {
+  trustedCanvasBrightness = null;
   if (hex === null) {
     activeTerminalBaseHex = null;
     return;
@@ -670,18 +693,25 @@ export function resetWorkspaceThemeState() {
 export function applyDetectedBackground(detected: {
   brightness: TuiBrightness;
   hex: string;
+  trustedCanvas?: boolean;
 }): boolean {
   // Normalize before comparing against the stored base (uppercase, no '#');
   // keeps a lower-case / '#'-prefixed input from re-triggering every poll.
   const normalizedHex = detected.hex.replace(/^#/, "").toUpperCase();
+  const validHex = Boolean(readHexChannels(normalizedHex));
+  const nextTrustedCanvas: TuiBrightness | null =
+    !validHex && detected.trustedCanvas === true ? detected.brightness : null;
   // An empty hex means "no exact color info" (e.g. the system dark-mode
-  // fallback path). Compare brightness only in that case; comparing "" against
-  // the stored null would be always-true and force a repaint every poll.
+  // fallback or host-scheme path). Compare brightness and trust state in that
+  // case; comparing "" against the stored null would force a repaint every poll.
   const hexChanged =
     normalizedHex !== "" && normalizedHex !== activeTerminalBaseHex;
-  const changed = detected.brightness !== resolvedBrightness || hexChanged;
+  const trustedChanged = nextTrustedCanvas !== trustedCanvasBrightness;
+  const changed =
+    detected.brightness !== resolvedBrightness || hexChanged || trustedChanged;
   resolvedBrightness = detected.brightness;
   setActiveTerminalBaseHex(detected.hex);
+  trustedCanvasBrightness = nextTrustedCanvas;
   return changed;
 }
 
@@ -900,8 +930,7 @@ function resolveSurfaceWashFallback(
   // appearance or the default dark palette. No truecolor uses ANSI 100 too.
   if (
     !supportsTruecolor(env) ||
-    (activeTerminalBaseHex === null &&
-      detectColorFgBgBrightness(env) === null &&
+    (!hasTrustedCanvasEvidence(env) &&
       resolveTuiThemeMode(env) === "terminal")
   ) {
     return "\x1b[100m";
@@ -934,9 +963,11 @@ function resolveSurfaceWashFallback(
  * or without truecolor, use ANSI 100 (bright black), a terminal-palette neutral
  * band, not a guessed RGB canvas that could bury the default foreground.
  */
-export function composerSurfaceBackgroundSequence(
-  env: Record<string, string | undefined> = process.env,
-  brightness: TuiBrightness = resolveTuiBrightness(env),
+function neutralSurfaceBackgroundSequence(
+  env: Record<string, string | undefined>,
+  brightness: TuiBrightness,
+  darkWeight: number,
+  lightWeight: number,
 ): string {
   const fallback = resolveSurfaceWashFallback(env);
   if (fallback !== null) return fallback;
@@ -954,8 +985,30 @@ export function composerSurfaceBackgroundSequence(
   // lower because a drop from white saturates the eye sooner than a lift from
   // near-black.
   const tint = darkCanvas ? "FFFFFF" : "000000";
-  const weight = darkCanvas ? 0.1 : 0.07;
+  const weight = darkCanvas ? darkWeight : lightWeight;
   return hexToBgSgr(blendHex(tint, base, weight));
+}
+
+export function composerSurfaceBackgroundSequence(
+  env: Record<string, string | undefined> = process.env,
+  brightness: TuiBrightness = resolveTuiBrightness(env),
+): string {
+  return neutralSurfaceBackgroundSequence(env, brightness, 0.1, 0.07);
+}
+
+/**
+ * Compact neutral surface wash for user turns in the history transcript.
+ *
+ * Uses the same neutral canvas lift/drop as the composer (one notch stronger
+ * so user bubbles stand out immediately during fast scrolling without
+ * introducing a saturated blue wall or full-width bar). Shares the exact
+ * three-tier canvas gate (`resolveSurfaceWashFallback`).
+ */
+export function userBubbleSurfaceBackgroundSequence(
+  env: Record<string, string | undefined> = process.env,
+  brightness: TuiBrightness = resolveTuiBrightness(env),
+): string {
+  return neutralSurfaceBackgroundSequence(env, brightness, 0.13, 0.08);
 }
 
 /**
@@ -1019,7 +1072,8 @@ export function tuiRenderThemeFingerprint(
       ? "truecolor"
       : "ansi";
   const surface = colorEnabled ? userSurfaceBackgroundSequence(env) : "";
-  return `${activeThemeName}|${mode}|${colorKind}|${resolveTuiBrightness(env)}|${activeTerminalBaseHex ?? ""}|${env.COLORFGBG ?? ""}|${surface}`;
+  const bubbleSurface = colorEnabled ? userBubbleSurfaceBackgroundSequence(env) : "";
+  return `${activeThemeName}|${mode}|${colorKind}|${resolveTuiBrightness(env)}|${activeTerminalBaseHex ?? ""}|${env.COLORFGBG ?? ""}|${surface}|${bubbleSurface}`;
 }
 
 /**

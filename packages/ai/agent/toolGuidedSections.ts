@@ -7,11 +7,17 @@
  * 是仓库层级规则。本模块只依赖 agent-runtime/menuUsage，可安全被两个包共用。
  */
 import { MENU_USAGE_INSTRUCTIONS } from "agent-runtime/menuUsage";
+import {
+    PLATFORM_RISK_CONTROL_RULE,
+    SHELL_BROWSER_RISK_CONTROL_RULE,
+} from "agent-runtime/platformRiskControl";
 import { TOOL_USE_GUIDANCE } from "agent-runtime/toolUseGuidance";
 import { AGENT_SELECTION_PRIORITY_INSTRUCTIONS } from "./agentSelectionPriority";
+import { CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES } from "../tools/chromeConnectorTools";
 import {
     DIFFICULTY_GRADING_ORDER,
     DIFFICULTY_GRADING_TIERS,
+    resolveModelTier,
 } from "./dispatchSelectionPolicy";
 
 // ============================================================================
@@ -22,13 +28,11 @@ import {
 // 选人优先级契约由「多 Agent 协作」段唯一承载，本段只保留派发之后的盯梢与排错。
 // ============================================================================
 const AGENT_ORCHESTRATION_RUN_INSTRUCTIONS = `--- 多 Agent 编排（后台 Run） ---
-controlAgentRun 控制/诊断；派发机制、key 与凭证并发规则见同注入的「多 Agent 协作」。
-1. **异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。** 承诺通知须确认失败也能终态唤醒（tracked background、有界超时、失败即退出）。发布等待仅用 \`scripts/ci/pushAndAwaitLive.ts\`，禁手写轮询。等待三选一：① 有 controlAgentRun wait 且预计 <100s 马上用结果或用户要求同步，阻塞至终态；② 无 wait 有 terminal wake，无工作才结束本轮等唤醒；③ 均无，告知后台运行、需手动查询。agent run 禁止轮询；execShell sleep 不算等待：\`sleep N\` (N>5s) 立即 detach，其它命令默认 120s detach。外部系统用有探测退出条件的有限轮询或专用 wait 脚本。
-2. 禁止空转/复述 status。status 仅诊断卡死、failed 详情/日志或回答执行细节（tailLines:0 仅摘要），不是 stop 前置检查。只有真实依赖才串行、禁止的串行借口见无条件注入的「并行是默认 · 派发纪律」。
-3. key 未照抄先修正；not found / invalid ref / Local agent config not found 先 readAgent 复核，不能据此判通道/凭证故障。仅已验证 key 失败且明确指向通道（429/鉴权失败/machine offline）才记故障；整体不可用须 ≥2 个不同候选用已验证 key 实际失败，不足则报「仅此候选且通道失败」。orphaned 或立即退出（0 tool calls）先查 logTail.stderr，排除崩溃后再重派。
-4. 仅 status=failed、超时或 progress 久无变化才取 tailLines:30。**终态必读 status.resultFile 全文（readFile）**，不以 .log 或 2000 字 lastAssistantText 替代；缺 resultFile 按「无结论」，不算工具故障、不推断用户中断、不回读日志。append、stop 直接调用，stop 对已终态原样返回不覆盖。
-5. 派发用 startAgentRun / controlAgentRun；不要用 \`execShell\` 调 \`nolo agent run\`（绕过运行面板与终态回收）。目录用 \`startAgentRun\` 的 \`cwd\` 参数，须为已存在的绝对路径。
-6. \`continueDialogId\` 续跑须显式传原 dialog 的 \`primaryAgentKey\`；省略会回落当前编排者。closure/定向闭合优先原 agent，但仍须当次重读可用性；仅原 agent 真实不可用时换新 key 并在 task 说明理由。`;
+- 异步派发后先推进独立已授权工作，只有无可推进工作才结束等待终态。有 wait 且（预计 <100s 即需结果或用户要求同步）才阻塞；否则等 terminal wake，无则告知需手查。禁轮询；通知须可在失败/超时唤醒。发布等待仅用 \`scripts/ci/pushAndAwaitLive.ts\`。
+- status 仅诊断/答执行细节（tailLines:0 摘要；失败/超时/久无进展才用 tailLines:30）；append、stop 直调，stop 不改终态。只有真实依赖才串行；禁止的串行借口见「并行是默认 · 派发纪律」。
+- key/ref 报错先纠正并 readAgent 复核；已验证 key 的通道错误才算故障，≥2 候选实败才报整体不可用。orphaned/0 tool calls 先查 logTail.stderr 排除崩溃再重派。
+- 终态必读 status.resultFile（readFile）：先 \`lines:"1-60"\`；有缺漏/异常/高风险或须独立核验时按区间续读。review 结论文件完整核验 verdict/findings；不以 .log 或 2000 字 lastAssistantText 替代。无文件＝无结论，不补读日志或猜故障/中断。
+- 不要用 \`execShell\` 调 \`nolo agent run\`（绕过运行面板与终态回收）；用 \`startAgentRun\` 的 \`cwd\` 参数（已存在的绝对路径）。continueDialogId 显式传原 primaryAgentKey，否则回落当前编排者；closure 优先原 agent，重查可用性，确实不可用才换 key 并在 task 说明。`;
 
 // ============================================================================
 // 多 Agent 协作 - 计划/派发/审查 方法论纪律（命中编排工具时注入）
@@ -36,8 +40,8 @@ controlAgentRun 控制/诊断；派发机制、key 与凭证并发规则见同�
 // 项目自己的 skill 里）。原则：默认提供，agent 无编排工具则不注入。
 // 仓库级 plan / review / worktree 细节以 AGENTS.md 为准，这里只留指针与平台独有纪律。
 // ============================================================================
-const AGENT_DISPATCH_MECHANICS = `startAgentRun 异步返回 runId（不等于完成）；省略 agentKey 或传 'self' 派自身，须先全池扫描兜底；其他 agentKey 必须原样照抄 listAgents 的 agentKey（禁拼接/推断/换格式/传 name），not found 重新 listAgents 取 key。派发后先推进独立已授权工作，只有无可推进工作才结束等待终态，禁止轮询；done/failed 靠 terminal wake 接回读结果，wait 能力看工具表，无唤醒须说明。并行用同一 batchId，runId/上下文独立。
-同一凭证默认允许并发，受服务端准入预算/上游 429 约束，必要时降并发或换通道；分压优先按 credentialGroup 分散。credentialed:false 是未知非独立凭证，守卫只限制「这些候选彼此之间的同批并发」（同批一个，或显式 allowUnknownCredential 确认风险），**不把整轮工作降级为串行**；其它通道/读取/独立命令仍同轮并行。`;
+const AGENT_DISPATCH_MECHANICS = `startAgentRun 异步返回 runId。省略 agentKey 或传 'self' 派自身（全池扫描后兜底）；其他 agentKey 必须原样照抄 listAgents 的 agentKey（禁拼接/推断/换格式/传 name），not found 重查。并行同 batchId，禁止轮询；无终态唤醒须说明。
+同一凭证默认允许并发（准入预算/429 除外）；按 credentialGroup 分散，必要时降并发/换通道。credentialed:false 是未知、非独立凭证，只限制「这些候选彼此之间的同批并发」（同批一个，或显式 allowUnknownCredential 确认风险），不把整轮工作降级为串行。并发依常驻「并行是默认 · 派发纪律」。`;
 
 const AGENT_COLLABORATION_VALUE_AND_METHOD = `--- Agent 编排与协作（多 Agent 协作：读取 → 规划 → 派发 → 审查） ---
 产出优先：不为「凑数量」派发，不包办可并行领域；按证据推进。
@@ -52,22 +56,18 @@ const AGENT_COLLABORATION_VALUE_AND_METHOD = `--- Agent 编排与协作（多 Ag
 - **保护用户注意力**：编排者先完成内部比较与默认判断，不把“请选择 A/B/C”当规划；仅目标、风险、审美、费用、权限、不可逆后果打断用户，有足够依据时先给推荐、理由及改选条件。`;
 
 // ── 安全硬门（常在，不随派发意图裁剪；最小协议与完整协议共用同一常量）──────
-const AGENT_PLATFORM_CREDITS_GATE = `**平台 Agent / 平台积分扣费确认硬闸门（必须先确认，后调用）**：
-- **判据看数据不看记忆**：billingSource 只描述归属，费用确认只消费 listAgents 的 requiresPaidApproval（源 isPlatformPaidAgentCall）；true 必须先取得用户明确扣费授权才能派发；requiresPaidApproval 缺失按可能扣费先问；false 不等于免费，仍可能消耗订阅/API 用量。
-- **仅告知用户“会消耗平台积分”不等于获得授权。** startAgentRun 前说明原优先通道不可用原因、候选平台 Agent、预计扣费/积分影响，停下等当次明确肯定授权。
-- **“它被收藏”“是我自建的”“availability 正常”“排序第一”都不是授权。** favorite + platform_credits 只表示用户表达过偏好。
-- “继续”“按计划”“你处理”“可以”等不授权新增费用；须明确同意平台 Agent/扣积分/本次扣费。
-- 未授权禁止调用平台 Agent，不得以异步/同步/并行、自动 fallback、换平台 Agent 或重试绕过。用户拒绝后停止所有平台尝试，只能等私有恢复、用可用非平台 Agent，或重新说明并获明确授权。
-- 授权是一次性的，仅限明确批准的 Agent、子任务和本次调用，不延伸到后续 review、组件或其他 Agent。`;
+const AGENT_PLATFORM_CREDITS_GATE = `**平台 Agent / 平台积分扣费确认硬闸门**：
+- billingSource 只描述归属；认当次 listAgents.requiresPaidApproval（源 isPlatformPaidAgentCall）：true 必须先取得用户明确扣费授权才能派发；requiresPaidApproval 缺失按可能扣费先问；false 不等于免费（仍可能消耗订阅/API 用量）。
+- **仅告知用户“会消耗平台积分”不等于获得授权。** startAgentRun 前说明原通道不可用原因、平台候选和预计扣费，等当次明确授权；“收藏”“自建”“availability 正常”“排序第一”“继续”“按计划”“你处理”“可以”等都不授权新增费用。
+- 未授权禁止调用平台 Agent（禁异步/并行、fallback、换平台 Agent 或重试绕过）；拒绝即停止所有平台尝试。授权是一次性的，仅限获批 Agent、子任务及本次调用。`;
 
-const AGENT_DISPATCH_PRECHECK = `**派发前自检**：每次 startAgentRun 前核对真实 agentKey、候选证据与当前授权；费用判据见上方安全门，不得先派后补。占用只认真实锁/通道证据，不把同一 agent 在跑当锁。
-**改换候选或派自身须给出具体理由**：领域优势、真实失败证据、用户指定或通道约束。unknown 档位不拦截；档位差异提醒不阻止启动，不触发自动取消重派。`;
+const AGENT_DISPATCH_PRECHECK = `**派发前自检**：startAgentRun 前核对 agentKey、候选证据与授权，禁先派后补；占用认实证。**改换候选或派自身须给出具体理由**（领域/失败证据/用户指定/通道约束）；unknown 档位不拦截，档位差异提醒不阻止启动。`;
 
-const AGENT_VERSION_BOUND_ACCEPTANCE = `**按版本验收**：执行证据须标明 worktree、受检版本（含未提交改动范围）、命令、检查范围、pass/fail 与原始输出引用；未执行或证据不可用明确报告，不推定成功。同版本有效检查默认复用，不要求父方再跑；仅版本变化、证据缺失/冲突或集成风险时追加相关检查。父方验收后只就具体缺口要求返工，不要求重做已验收部分。复用测试证据不替代独立 review 或授权门；APPROVE 仅覆盖被审版本。
-**子 Agent 最终交付**：结论与状态（已完成 / 未完成 / 阻塞）、受检 worktree 与版本范围、产物与改动范围、实际执行的检查命令与结果、原始证据引用（worktree 路径、commit、artifact、run/dialog）、事实 / 推断 / 未知分开写、剩余问题与精确下一步；失败不得写成未验证，done 不代替验收；按任务适用性取舍，不为格式制造无关字段；能解释清楚就详述，但不复制冗长日志、源码或 diff 全文。`;
+const AGENT_VERSION_BOUND_ACCEPTANCE = `**按版本验收**：记录 worktree、受检版本（含未提交改动范围）、命令、检查范围、pass/fail 与原始输出引用；未执行/证据不可用须明示，不推定成功。同版本有效检查默认复用；仅版本变化、证据缺失/冲突或集成风险才追加相关检查。验收后返工仅补缺口；复用不代替独立 review 或授权。
+**子 Agent 最终交付**：结论置顶、证据后置；前 30 行给状态（已完成 / 未完成 / 阻塞）、受检 worktree 与版本范围、产物/改动、检查命令与结果汇总、剩余问题与下一步；证据（路径、commit、artifact、run/dialog）放后半段，分清事实 / 推断 / 未知。失败不得写成未验证，done 不代替验收，不复制冗长日志、源码或 diff。`;
 
-const AGENT_EXECUTION_OWNERSHIP = `**平台默认：规划 → 执行 → 请教**：简单任务直接做；默认规划/遇阻请教见常驻「请教模式」块，不以加载 skill 为前提。父方亲读目标与关键决策所需一级材料，确定边界与验收契约；执行者负责定位、实现、相关测试与失败修复闭环，父方不重演探索。子任务不递归规划，不另启规划链。`;
-const AGENT_INCREMENTAL_HANDOFF = `上下文最小化是去掉无关材料，不是丢弃已有有效判断，也不是把 brief 精简到丢掉接续所需信息。brief 须足够详细准确，并防父方幻觉污染：已验证事实附一级证据引用（文件:行、命令输出、日志片段、真实数据），无证据的父方陈述只能当待验证；已选方向与关键理由、未验证假设及未决问题、未知与争议点列明，边界与验收方式写清。用户明确的目标与决策是边界：父方推断与建议显式标为待验证，不把猜测的根因写成既定修复任务；执行者须先核验关键前提、可反驳父方假设，反证成立时可在同一范围内调整实现路径，但不擅改用户目标；源码、日志、diff 等长文用路径/行号引用，不内嵌原文。复用已有实验与排除路径，仅反证、状态变化或必要正确性风险才重验；独立 review/会商保持独立判断，不传作者自评或期待结论。子 Agent 不继承本对话历史：新建 dialog 没有此前上下文，同 agentKey ≠ 同上下文，只有显式传 continueDialogId 续那个已有 dialog 才有其历史；brief 里的文件路径 / 证据引用不等于对方已读。full 审查用新 dialog，定向 closure 才续原审。`;
+const AGENT_EXECUTION_OWNERSHIP = `**平台默认：规划 → 执行 → 请教**：简单任务直接做；默认规划/遇阻请教见常驻「请教模式」。父方定边界与验收，执行者负责定位、实现、相关测试与失败修复闭环，父方不重演探索。子任务不递归规划。`;
+const AGENT_INCREMENTAL_HANDOFF = `上下文最小化是去掉无关材料，不是丢弃已有判断或压缩掉接续所需信息。brief 须详细准确并防父方幻觉污染：已验证事实附一级证据（文件:行、命令输出、日志、真实数据），无证据陈述只能当待验证；已选方向与理由、未验证假设、未知与争议点、边界与验收方式写清。用户明确的目标与决策是边界：父方推断显式标为待验证，不把猜测根因写成既定任务；执行者先核验关键前提、可反驳父方假设，反证成立可同范围调整路径，但不擅改用户目标；源码/日志/diff 用路径行号引用，不内嵌原文。复用已有排除路径，仅反证或状态变化才重验；独立 review/会商保持独立判断，不传作者自评或期待结论。子 Agent 不继承本对话历史：同 agentKey ≠ 同上下文，只显式传 continueDialogId 才有其历史；brief 的路径/证据引用不等于对方已读；full 审查用新 dialog，定向 closure 才续原审。**反模式禁令**：父方不手写实现代码贴给子任务，只写签名、不变量、行号边界与验收命令。`;
 
 // ── 拆分规则（min / full 共用同一段，避免两档各写一份）──────────────────────
 // 拆块依据是「子问题能否独立验收」，不是工时/调用次数：后者是人为限额，
@@ -80,14 +80,14 @@ ${DIFFICULTY_GRADING_TIERS}
 // ── 完整编排协议（仅检测到派发意图时注入；见 dispatchIntent.ts）─────────────
 const AGENT_DELEGATE_FIRST_CORE = `${AGENT_EXECUTION_OWNERSHIP}
 ${AGENT_VERSION_BOUND_ACCEPTANCE}
-- **按难度与领域分工**：简单任务直接做；开放式创作、复杂取舍、重大决策按认知杠杆派发。
-- **同一规划定人选与并发**：先读必要材料、按「可独立验收」拆块，逐块定难度、领域、实际 agentKey、依赖与验收，再按依赖并发派发。档位取工具/当次列表，不猜。无合适执行者则自做。每块按「选人」派发；并发/落点/准入见常驻「并行是默认 · 派发纪律」「派发落点」「派发选人」。
+- **按难度与领域分工**：主动拆派多模块/多文件只读摸底、大输出统计、重复验证循环、无写冲突的独立改动；仅单文件 ≤30 行确定性小改或纯问答直接做，多文件实现或反复跑修不留在主循环。
+- **同一规划定人选与并发**：先读必要材料，定实际 agentKey；档位取工具/当次列表，不猜。
 ${AGENT_RECURSIVE_DECOMPOSITION}
-- **交接传结论与证据路径**：${AGENT_INCREMENTAL_HANDOFF}需要连续上下文的任务（架构设计、长篇写作、整体审美/叙事一致性）按里程碑分阶段，不按分钟强切。
-- **独立 review 优先序**：优先其他合规可用 Agent；只有当列表所有其他合规候选均不可用（须当次错误证据）才派自身隔离实例；禁止图方便自审。
-- **关键决策上下文不外包**：架构、计费、安全、权限、数据完整性、不可逆迁移、长期产品语义须编排者亲读一级代码/正式真值/原始日志与真实数据；子 Agent 摘要不能替代。
-- **多线跟进**：用上下文或已有 checkpoint 维护当前对话内已授权任务的目标、阶段、未决项与下一动作；收到终态先读结果并验收。实现、已知失败修复与验证须推进，不以建议替代执行。区分实现/验证/合入/生效，后台 run done 不等于任务完成；禁止轮询，如实说明无唤醒能力；用户要求 stop/取消立即遵从；提交、push、部署仍过原授权门。**目标范围控制**见下文「确认边界」。
-**完整编排协议入口**：按已注入并行/落点/选人块执行；仅引用 \`loadSkill\`/项目指令实有规范，禁止编造。review 保留全部硬门。startAgentRun / controlAgentRun 调用后自动切完整协议，不假装已加载。`;
+- **交接**：保留必要判断（含已选方向与理由、未验证假设、未知与争议点）；已验证事实附一级证据，父方推断显式标为待验证；源码/日志/diff 用路径行号引用，不等于对方已读。父方不手写实现代码贴给子任务；独立审查不传作者自评或期待结论。子 Agent 不继承本对话历史，同 agentKey ≠ 同上下文，只显式传 continueDialogId 才有其历史；full 审查用新 dialog，定向 closure 才续原审。连续上下文按里程碑分阶段，不按分钟强切。
+- **独立 review**：只有当列表所有其他合规候选均有当次不可用证据才派自身隔离实例。常规/局部改动 review 按 diff 复杂度，优先异家族 \`easy\`/\`normal\`，不为作者回避升档。
+- 关键决策上下文不外包：亲读一级证据。
+- **多线跟进**：维护已授权各线目标/阶段/未决项/下一动作；收到终态先读结果并验收，推进实现、已知失败修复与验证，不以建议替代执行。run done 不等于任务完成；stop/取消立即遵从。
+startAgentRun / controlAgentRun 调用后自动切完整协议；只引用 loadSkill/项目实有规范。`;
 
 // ── 完整协议专属细节：仅 dispatchIntent=true 时注入（最小档走上面的 CORE）──
 const AGENT_DELEGATE_FIRST_DETAIL = `
@@ -126,26 +126,27 @@ ${AGENT_DISPATCH_MECHANICS}
 
 **选人**：多个专长 Agent 优先按专长分工，只认 listAgents 记录；key、候选池兜底与并发规则见上文，执行收件人按下文「优先级契约」。
 ${AGENT_SELECTION_PRIORITY_INSTRUCTIONS}
-   - reviewer 选人（先盘点、后挑选，不取列表第一个）：派 reviewer 前先把**全部**可用候选过一遍（含 user_subscription / owner_subscription / user_api / local）——订阅/免费通道 inputPrice 常为 0，但仍消耗旗舰额度。review 按本次 diff 的真实难度判档：不默认 normal、不默认高于执行档，也不固定「某模型写、另一模型审」；领域匹配、作者回避与当次可用性优先于档位。reviewer 专项规则优先于通用「没有合适候选」兜底：候选档为空时**不得**直接派自身——按通道排除硬门先在其他合规可用候选里挑选（含成本规则允许的换档，换档须在回复说明）；只有当**全部合规候选**都有当次失败/不可用证据（401/429/配额耗尽/无凭据）时，才允许派自身隔离实例并在回复出示证据来源。跨档可因领域优势、真实可用性、用户指定；通道失败只换候选、不升难度，也不要求先制造低档失败；跨档仍保留真实 difficulty 并写具体 selectionReason。某通道失败（401 凭据过期、429、余额不足、网关错误、卡死超时）后，回到这份盘点清单换**另一个**通道重派，不顺着列表滑到下一个更贵的档；有决策价值的差异才说明。
+   - reviewer 选人（先盘点、后挑选，不取列表第一个）：派 reviewer 前先把**全部**可用候选过一遍（含 user_subscription / owner_subscription / user_api / local）——订阅/免费通道 inputPrice 常为 0，但仍消耗旗舰额度。review 按本次 diff 的真实难度判档：不默认 normal、不默认高于执行档，也不固定「某模型写、另一模型审」；小改动或定向 closure 的文案复核按本次 diff 真实复杂度（常 easy/normal）选低档独立 reviewer，不为作者回避或收藏惯性升旗舰档。领域匹配、作者回避与当次可用性优先于档位。reviewer 专项规则优先于通用「没有合适候选」兜底：候选档为空时**不得**直接派自身——按通道排除硬门先在其他合规可用候选里挑选（含成本规则允许的换档，换档须在回复说明）；只有当**全部合规候选**都有当次失败/不可用证据（401/429/配额耗尽/无凭据）时，才允许派自身隔离实例并在回复出示证据来源。跨档可因领域优势、真实可用性、用户指定；通道失败只换候选、不升难度，也不要求先制造低档失败；跨档仍保留真实 difficulty 并写具体 selectionReason。某通道失败（401 凭据过期、429、余额不足、网关错误、卡死超时）后，回到这份盘点清单换**另一个**通道重派，不顺着列表滑到下一个更贵的档；有决策价值的差异才说明。
    - 通道排除：先按「优先级契约」的领域匹配筛选，再在胜任候选中排除「本次改动作者」与「有当次错误证据的坏通道」（按基础可用性证据区分；review 自身兜底只认当次尝试中的配额耗尽/余额不足/限流等错误，不以有效 quota 或冷却标注代替）。家族多样性只是最后一层偏好：在已通过领域胜任、作者回避、当次可用性、候选优先级分组、上面的 reviewer 成本档规则、收藏硬门与平台积分授权门的候选中，优先选与执行者不同模型家族的 reviewer（同家族模型容易共享同类错误），它不使任何高复杂度档或平台候选获得资格，并排在 reset-aware economics 之后；没有异家族合规候选时仍按上面规则选同家族的独立实例；**只有当列表所有其他合规候选均不可用（须有当次错误证据）时，才允许派自身的隔离实例作为最后保底，严禁在仍有其他可用 Agent 时图省事派自身**。自身另一实例也可 review（上下文隔离即合规，flash 档成本可忽略）。不凭名字编造能力，不索取 prompt/密钥/数据库 key；派发前跳过已知坏通道（配置缺失/区域限制/网关 400）。
 
 **Tool call 参数体量纪律**：tool_call（尤其 startAgentRun 的 task/brief 与 input）不内嵌 diff、日志、长文档或测试输出，只传路径（worktree + 文件清单 + 精确改动行号区间），执行方自行 git diff / 按区间读文件，减少全文翻找往返。单次 arguments 控制在 ~5k 字符内，避免上游截断为非法 JSON、触发 tool-error 整轮重发。`;
 
 // ── 安全硬门（常在，不随派发意图裁剪）──────────────────────────────────────
 const AGENT_COMMIT_REVIEW_GATE = `**commit 前硬门（阶段划分与独立审查）**：
-- **阶段区分**：区分「实现/构建/安装/用户测试/反馈迭代」与「准备提交/合并」。需用户验收的功能先交付真实可测试产物，等待用户测试与反馈；真实验收依赖 review、提交或测试部署时，在已有授权内先推进，不因尚未用户验收阻塞建立真实环境；不扩大权限，也不等于用户验收。安全关键审查与 commit 前独立 review 硬门不变。
-- **最终审查时机**：默认须用户确认准备提交/合并才最终 review；显式启用 auto-review 且任务在作用域内，持续授权 review、修复、提交、本地集成；未启用不自动授权。除 ≤2 步零逻辑风险机械改动外，commit 前须不同实例（上下文隔离）且非作者的 reviewer 审工作区 diff；无 review 不 commit。依授权派 reviewer 审 diff → 修 finding → 复审至 APPROVE 且无 CRITICAL/HIGH 才提交；BLOCK 必修，WARNING 报用户。stop/暂停/单次覆盖优先。验收通过且授权适用则继续，无需确认。push、main/production 合并、发布、回滚仍独立授权。**APPROVE 只覆盖被审的那一版**：此后任何改动（含 nit/注释/文档/日志文案）须复审才可提交；作者自评不算复核。review 只挡 commit，不是执行锁；等待期间推进无关独立工作。
-- **review 证据硬门**：新协议由程序核验版本、completed 与 findings，无 CRITICAL/HIGH 才算 APPROVE；旧协议须 reviewer 可读最终文本明确含 APPROVE 且无 CRITICAL/HIGH 才通过；done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均视为未审查，严禁提交。审查契约（review context contract）：派 reviewer 前按范围加载项目指令（AGENTS.md 类）、工作流/计划、命中 skill/references、完整 diff；brief 列实际 context，清单依仓库 review 规范。审查清单：可读性/可搜索性、可维护性/删除成本、可组合性/复用、重复实现、可删除代码。单 Agent、其他 agent 不可达或用户要求直接提交也**不得凭 [no-review: …] 跳过**（闸门不解析此写法）。自有闸门认 Reviewed-by: <非空署名> + Review: 结论（APPROVE / Approved / WARNING）；pre-merge 可能另有 owner-only 豁免（如正文 No-Review: <原因> 加 author email 命中 NO_REVIEW_OWNER_EMAILS 白名单，以该仓库闸门实现为准），agent 身份不适用。被卡住就如实报告卡点，由 owner 决定。涉及仓库文件写入必须用独立 worktree。仓库级 plan / review / worktree 纪律以 AGENTS.md 为准。`;
+- **阶段区分**：区分「实现/构建/安装/用户测试/反馈迭代」与「准备提交/合并」。需验收先交付真实可测试产物，等待用户测试与反馈；真实验收依赖 review、提交或测试部署时，在已有授权内先推进，不扩大权限，也不等于用户验收。安全关键审查与 commit 前独立 review 硬门不变。
+- **最终审查时机**：默认须用户确认准备提交/合并才最终 review；显式启用 auto-review 且任务在作用域内，持续授权 review、修复、提交、本地集成；未启用不自动授权。stop/暂停/单次覆盖优先；验收通过且授权适用则继续，无需确认；push、main/production 合并、发布、回滚仍独立授权。
+- **独立 reviewer**：无 review 不 commit（≤2 步零逻辑风险机械改动除外）。依授权派 reviewer 审 diff（非作者、不同实例）；BLOCK 必修，WARNING 报用户。仅 APPROVE 且无 CRITICAL/HIGH 才提交；APPROVE 只覆盖被审的那一版，任何改动须复审。review 不锁实现。
+- **review 证据硬门**：新协议程序核验版本、completed、findings（无 CRITICAL/HIGH）；旧协议须 reviewer 可读最终文本明确含 APPROVE 且无 CRITICAL/HIGH 才通过。done、exit 0、空 dialog、messagesCount=0、agentReply=null、超时均不算审查。审查契约（review context contract）：派审前读项目指令（AGENTS.md 类）、计划、命中 skill/references、完整 diff；查可读性/可搜索性、可维护性、可组合性、重复实现。trailer 须 Reviewed-by: <非空署名> + Review: 结论（APPROVE / Approved / WARNING）；禁 [no-review: …]，No-Review: <原因> 仅 owner 豁免（NO_REVIEW_OWNER_EMAILS，agent 不适用）。受阻如实报告；仓库写入依常驻 worktree 隔离规程。`;
 
 const AGENT_CONFIRM_BOUNDARY = `--- 确认边界 ---
-- 涉及不可逆操作（修改文件、删除数据、发送消息、生成正式文件、执行交易）或高成本动作（大规模重构/长时运行/大量 token）时优先预览或向用户确认；工具返回"预览/待确认"时暂停，等明确确认再继续；未确认前不连续发多次破坏性修改。
-- 收到「子对话禁止再创建孙对话」＝你已是子对话，禁止再派发，把结果返回父对话即可。
-- **目标范围控制**：发现原交付物不能实现，不得自行缩成文案/手动退路后宣称完成；陈述已证实限制、原目标差距、推荐替代及影响，缩减用户可见能力需明确确认；同范围技术细节不需问，已授权不变范围继续推进，防变成事事确认。新增前置任务，须指出其阻断当前交付的具体证据；否则不进入关键路径。
+- 不可逆、有外部后果或高成本动作须先预览确认（删数据、生产库写/停服、外发/发布、交易/付费、main/生产回滚、大重构/长运行/高 token）；预览/待确认即停。已授权可逆改文件、写文档、只读排查与隔离验证直接执行。
+- 子对话禁止再创建孙对话；向父对话交结果。
+- **目标范围控制**：不得自行缩成文案/手动退路称完成；报实证限制、差距与替代。缩减用户可见能力需明确确认；同范围技术细节不需问，已授权不变范围继续推进。新增前置须有阻断证据。
 - **合并与部署确认**：在一次合并范围选择中明确远端目标与可能部署；已明确批准同一后果不重复询问，保留所有安全闸门。`;
 
 const AGENT_COLLABORATION_MIN_DISPATCH = `--- 多 Agent 派发（最小协议） ---
 ${AGENT_DISPATCH_MECHANICS}
-- 无派发意图，仅注入最小协议；需编排时遵守本协议、startAgentRun 工具描述及下列硬门。`;
+- 参数见 startAgentRun。`;
 
 /**
  * commit 前独立审查硬门缺省注入。
@@ -164,7 +165,49 @@ function isCommitReviewGateEnabled(): boolean {
 }
 
 const AGENT_SUBTASK_COLLABORATION_HEADER = `--- 子任务执行与交付约束 ---
-${AGENT_EXECUTION_OWNERSHIP}`;
+${AGENT_EXECUTION_OWNERSHIP}
+**熔断升级（need_escalation）**：发现根因超出 brief 预设范围，或同一问题连续修复 2 次仍未收敛时，立刻停手，不再打补丁硬扛；在最终交付返回 need_escalation，列明已验证事实（附证据引用：文件:行、命令输出、run/dialog）、失败尝试与具体卡点，由父 Agent 决定换更高档执行者或换路。与 brief 同范围的必要推进照做，不以熔断规避本可完成的工作。`;
+
+// ── 单模型多实例精简模式（externalAgentCount === 0 且非 subtask 时替换 min/full）──
+// 没有任何外部 Agent 可派时，多模型选人契约、能力档映射、配额分组与跨模型比较
+// 都是死重量（纯 token 成本，零可执行收益）：单模型下没有"选谁"这个问题。
+// 换来的那份节省用来换"多实例"：同一 agent 的独立实例隔离上下文、并行提速，
+// 但恢复能力有限，因此 commit 前 review 硬门与安全/确认边界逐字保留。
+const AGENT_SINGLE_MODEL_MULTI_INSTANCE = `--- 单模型多实例模式（无外部可派 Agent） ---
+当次扫描确认没有外部 Agent 可派：不存在跨模型选人、档位映射与配额分组问题，不要再花预算比较模型。用同一 agent 的独立实例换取上下文隔离与并行，但不得用它冒充能力升档：
+- **主实例守住判断**：Plan、关键代码亲读与最终验收留在主实例，不外包决策依据。
+- **可并发派 \`self\` 独立实例**：多模块/多文件只读摸底、大输出统计、机械实现与小改动复核按依赖并发派发（隔离上下文、并行提速），brief 仍传路径与改动行号区间，不内嵌 diff/日志。
+- **提交前独立 review**：派 \`self\` 的全新空白上下文实例审工作区 diff（不得作者自评、不得复用已读过该 diff 的上下文），APPROVE 且无 CRITICAL/HIGH 才提交。`;
+
+// ── 主 Agent 强弱姿态（callerModel 显式传入且非 subtask、非精简模式）─────────
+// 强档主 Agent 的失败模式是"顺手把体力活自己包了"；轻档主 Agent 的失败模式是
+// "定不了根因还硬扛规划"。两者各给一句纠偏，长度压在 1 句以内，避免抬 token。
+const AGENT_CALLER_POSTURE_STRONG = `**强主 Agent 姿态**：守需求、契约与高风险亲读及验收；>3 轮盲搜、≥2 文件实现测试与常规初审卸低档（\`tierHints.easy\`/\`normal\`）；仅单文件 ≤30 行小改自做。`;
+const AGENT_CALLER_POSTURE_LIGHT = `**轻主 Agent 姿态**：禁自定复杂方案；跨 ≥2 模块、改接口/schema、涉安全计费或 2 轮未定根因即只读请教高档，契约明确后自闭环。`;
+// 池顶轻档：池内已无更高免付费档时，轻姿态里那句「向上请教高档」是空指
+// （唯一更高的档位要么需要付费授权、要么根本不存在），照发只会换来无谓的
+// 请示与等待。保留「不自己乱定复杂方案、按需拆实例复核」的纠偏，砍掉空指针。
+const AGENT_CALLER_POSTURE_POOL_TOP_LIGHT = `**池顶执行姿态**：池内无更高免付费档；常规任务直接闭环、按需拆独立实例隔离复核，不可逆或高危取舍交用户拍板，不空找高档。`;
+
+/**
+ * 由主 Agent 模型推导强弱姿态；
+ * 未传 / 非字符串 / 推不出档位（unknown）一律返回空串 —— 零追加文本。
+ * callerIsPoolTop 仅对轻档生效：true 时换成池顶轻姿态，undefined/false 逐字不变。
+ */
+function resolveCallerPosture(
+    callerModel: string | null | undefined,
+    callerIsPoolTop?: boolean,
+): string {
+    if (typeof callerModel !== "string") return "";
+    const tier = resolveModelTier(callerModel);
+    if (tier === "extreme" || tier === "complex") return AGENT_CALLER_POSTURE_STRONG;
+    if (tier === "normal" || tier === "easy") {
+        return callerIsPoolTop === true
+            ? AGENT_CALLER_POSTURE_POOL_TOP_LIGHT
+            : AGENT_CALLER_POSTURE_LIGHT;
+    }
+    return "";
+}
 
 function buildAgentCollaborationInstructions(opts?: ToolGuidedSectionsOptions): string {
     const gateEnabled = isCommitReviewGateEnabled();
@@ -177,6 +220,19 @@ function buildAgentCollaborationInstructions(opts?: ToolGuidedSectionsOptions): 
             AGENT_CONFIRM_BOUNDARY,
         ].join("\n\n");
     }
+    // 只在显式 0 时进精简模式；undefined / > 0 不改既有 min/full 任何字节。
+    const singleModelCompact = opts?.externalAgentCount === 0;
+    if (singleModelCompact) {
+        return [
+            AGENT_SINGLE_MODEL_MULTI_INSTANCE,
+            AGENT_DISPATCH_MECHANICS,
+            AGENT_PLATFORM_CREDITS_GATE,
+            AGENT_DISPATCH_PRECHECK,
+            ...(gateEnabled ? [AGENT_COMMIT_REVIEW_GATE] : []),
+            AGENT_CONFIRM_BOUNDARY,
+        ].join("\n\n");
+    }
+    const posture = resolveCallerPosture(opts?.callerModel, opts?.callerIsPoolTop);
     const isFull = opts?.dispatchIntent === true;
     const sections = isFull
         ? [
@@ -196,6 +252,7 @@ function buildAgentCollaborationInstructions(opts?: ToolGuidedSectionsOptions): 
             ...(gateEnabled ? [AGENT_COMMIT_REVIEW_GATE] : []),
             AGENT_CONFIRM_BOUNDARY,
         ];
+    if (posture) sections.push(posture);
     return sections.join("\n\n");
 }
 
@@ -213,15 +270,14 @@ const AGENT_COLLABORATION_MIN_INSTRUCTIONS = buildAgentCollaborationInstructions
 // ============================================================================
 
 const CONVERSATION_INTERACTION_INSTRUCTIONS = `--- 对话内交互（show_interaction） ---
-“展示结构化内容 + 让用户选择”同时出现时用 show_interaction，内容与选项在同一块呈现且提交后原位只读。纯提问等待回答请用 ask_user，纯展示用 Markdown，持久工具交付 App。非阻塞，选择将作为新消息回传，不要用它代替 ask_user 等待回答。`;
+“展示结构化内容 + 让用户选择”同时出现时用 show_interaction，内容与选项在同一块呈现且提交后原位只读。选择非阻塞，以新消息回传，不要用它代替 ask_user 等待回答；纯提问等待回答请用 ask_user，纯展示用 Markdown，持久工具用 App。`;
 
 // ============================================================================
 // 网页访问（有 exa_search 工具时注入）
 // ============================================================================
 
 const WEBPAGE_ACCESS_INSTRUCTIONS = `--- 网页访问能力 (Web Access) ---
-已给 URL → 先直接 fetchWebpage，不先搜索或猜网址（失败/缺字段才搜索并说明）；无 URL → 先 exa_search 找权威入口。
-需登录/填表/多步交互 → browser_openSession 会话；结构化站点用对应 Scraper。不要用 execShell 调 curl 等抓网页。`;
+已给 URL 先直接 fetchWebpage，不先搜索或猜网址（失败/缺字段才搜索并说明）；无 URL 先 exa_search 找权威入口。登录/填表/多步用 browser_openSession，结构化站点用 Scraper；不要用 execShell 调 curl 等抓网页。`;
 
 // ============================================================================
 // 本地文件整理（有 local desktop file tools 时注入）
@@ -243,11 +299,9 @@ const KNOWLEDGE_MANAGEMENT_INSTRUCTIONS = `--- 知识管理 ---
 // ============================================================================
 
 const MEMORY_CAPTURE_INSTRUCTIONS = `--- 长期记忆 ---
-用 rememberMemory 记录可长期保留的 episodic memory（详见 schema）。
-- 拿不准是否值得记时，优先记下可复用项（偏好、约定、经验）；一次性流水、进度快照及易过期状态（配额、冷却、部署态）不进记忆。
-- 偏好/事实演进用最新表述写清，但 rememberMemory 是写入新记录，底层不保证自动识别、合并或替代同一事实的旧记录。
-- 召回记忆须带来源/置信度/变更记录，禁止自行推理填补。
-- 物理删除仅在用户明确要求且在权限内（deleteMemory），严禁模型擅自调用 deleteMemory 作为版本维护或清理手段；新旧冲突以当前输入为准。`;
+用 rememberMemory 记长期 episodic memory。拿不准是否值得记时，优先记下可复用项，禁流水/进度/易过期态。
+变化写最新表述；rememberMemory 是写入新记录，底层不保证自动识别、合并或替代同一事实的旧记录。召回注明来源/置信度/变更，禁止自行推理填补；冲突以当前输入为准。
+物理删除仅在用户明确要求且在权限内，严禁模型擅自调用 deleteMemory 作为版本维护或清理手段。`;
 
 // ============================================================================
 // Agent 配置维护（有 updateSelf / updateAgent 工具时注入；两段合并为一块）
@@ -303,6 +357,26 @@ export type ToolGuidedSectionsOptions = {
      * 仅保留子任务执行交付、按版本验收与安全/commit 前 review 硬门。
      */
     runKind?: "interactive" | "subtask";
+    /**
+     * 主 Agent 当前模型（可选，文本 id 或 name 均可）。
+     * 显式传入时用 resolveModelTier 推导主 Agent 强弱姿态，只追加一句短指引；
+     * 缺省 / null / 推不出档位（unknown）→ 不追加任何文本，保持既有 token 与
+     * 缓存前缀完全不变（向后兼容旧调用方）。
+     */
+    callerModel?: string | null;
+    /**
+     * 宿主当次扫描到的「外部可派 Agent」数量（可选）。
+     * 仅当显式传入 0 且非 subtask 时进入「单模型多实例精简模式」：不注入多模型
+     * 选人契约/档位映射/配额分组/跨模型比较，改为同一 agent 多独立实例的短指引。
+     * undefined 或 > 0 一律维持既有 min / full 行为（缺省不改任何输出）。
+     */
+    externalAgentCount?: number;
+    /**
+     * 可选：宿主当次扫描确认「当前模型已是免付费池顶」（池内不存在档位更高且
+     * 免付费的候选）。仅显式 true 时把轻档姿态换成池顶姿态，不再向轻主模型
+     * 下发「向上请教高档」这个空指针；undefined / false 逐字保持既有 LIGHT 行为。
+     */
+    callerIsPoolTop?: boolean;
 };
 
 /**
@@ -318,7 +392,7 @@ export type ToolGuidedSectionsOptions = {
  * 能力一直闲着。这段文字就是去把它用起来。
  */
 const TOOL_ROUND_ECONOMY_INSTRUCTIONS = `--- 工具轮次经济学 ---
-一次 tool 往返重发完整对话；同轮多调用成本近似一次，分轮各调成本成倍。已知且互不依赖的调用同轮完成；只有后续确实依赖前项结果才分轮。能一次表达就合并（如 glob 花括号、单命令、多文件按需行段）。等待类工具按预计耗时一次给足预算，勿短超时续等；有终态自动唤醒则不另等。`;
+一次 tool 往返重发完整对话；独立调用同轮完成，可合则合。范围未明先窄搜定位再按段读，不做猜测性批量盲读。等待按预计耗时一次给足预算；有终态唤醒不另等。`;
 
 // ============================================================================
 // 权限提升（有 execShell 时注入）
@@ -328,11 +402,50 @@ const TOOL_ROUND_ECONOMY_INSTRUCTIONS = `--- 工具轮次经济学 ---
 // 优先级写进行为规则：GUI 授权 → 用户级等价方案 → 粘贴式降级，禁止静默绕过。
 // ============================================================================
 const PRIVILEGE_ESCALATION_INSTRUCTIONS = `--- 权限提升 ---
-命令因权限不足（sudo: 需要密码 / Permission denied / EACCES / Operation not permitted）失败时，按以下优先级处理：
-1. 桌面会话（有 DISPLAY/WAYLAND_DISPLAY）先用 \`pkexec <命令>\` 弹 GUI 密码框（弹前一句说明原因，复杂命令写脚本后 \`pkexec bash /tmp/xxx.sh\`）。
-2. 无图形会话或 pkexec 不可用时：① 用户级等价方案先行（systemctl --user、无特权路径、setcap、加组）；② 确需 root 时给一条含副作用说明的可粘贴命令，等用户回报。
-3. Windows 用 \`Start-Process -Verb RunAs\`，macOS 用 \`osascript ... with administrator privileges\`（弹窗前说明）。
-4. 禁止静默绕过：不重试同一特权命令、不用管道/环境变量喂密码给 sudo、不修改 polkit/sudoers 放宽授权。`;
+权限失败先说明再弹窗：Linux 桌面（DISPLAY/WAYLAND_DISPLAY） \`pkexec\` 弹 GUI 密码框，复杂命令用 \`pkexec bash /tmp/xxx.sh\`；Windows 用 \`Start-Process -Verb RunAs\`，macOS 用 \`osascript ... with administrator privileges\`。
+无 GUI 或 pkexec 不可用：用户级等价方案先行；确需 root 给一条注明副作用的可粘贴命令并等回报。不重试同一特权命令、不用管道/环境变量喂密码给 sudo、不改 polkit/sudoers 放宽授权。`;
+
+/**
+ * 只读 Chrome connector 工具（列页签、读 DOM、截图、读 console/network）：
+ * 不改变页面状态，不触发风控纪律。注意新增工具默认**不在此表**——
+ * 触发集合由 `CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES` 减去本表派生，
+ * 未来新增的动作工具（滚动、关页签等）自动被覆盖，不会静默漏触发。
+ */
+const CHROME_CONNECTOR_READONLY_TOOLS = [
+    "browser_list_tabs",
+    "browser_read_page",
+    "browser_screenshot",
+    "browser_read_console",
+    "browser_read_network",
+    "chrome_list_tabs",
+    "chrome_read_page",
+    "chrome_screenshot",
+    "chrome_read_console",
+    "chrome_read_network",
+];
+
+/**
+ * 触发「平台风控纪律」完整版的浏览器自动化 / 社媒读取工具。
+ *
+ * Chrome connector 部分从 `CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES`（canonical + legacy
+ * 唯一真源）派生后剔除只读项：历史上手抄清单漏过 `browser_scroll` / `*_close_tab`，
+ * deltaY 滚动与关页签同样改变页面状态却失去停手机制。
+ */
+const PLATFORM_RISK_CONTROL_TRIGGER_TOOLS = [
+    // Playwright 会话工具
+    "browser_openSession",
+    "browser_probePage",
+    "browser_typeText",
+    "browser_click",
+    "browser_selectOption",
+    // Chrome connector：全部改变页面状态的工具（canonical + legacy）
+    ...CHROME_CONNECTOR_ACCEPTED_TOOL_NAMES.filter(
+        (name) => !CHROME_CONNECTOR_READONLY_TOOLS.includes(name),
+    ),
+    // 社媒读取（真实站点、可能弹人机校验）
+    "read_x_post",
+    "read_xhs_profile",
+];
 
 const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
     {
@@ -374,6 +487,23 @@ const TOOL_GUIDED_SECTIONS: ToolGuidedSection[] = [
         // （派发机制 + 安全硬门常在：平台积分授权门 / commit review 硬门）。
         build: (_tools, opts) => buildAgentCollaborationInstructions(opts),
     },
+    {
+        id: "platformRiskControl",
+        // 双档按需注入：
+        // ① 挂载浏览器/社媒自动化工具 → 完整版 PLATFORM_RISK_CONTROL_RULE；
+        // ② 只挂 execShell（默认 CLI 就属于这档）→ 紧凑版 SHELL_BROWSER_RISK_CONTROL_RULE。
+        //    必须覆盖这一档：shell 里跑 `nolo browser` / Playwright 同样操作真实浏览器
+        //    （.agents/skills/browser-probe/SKILL.md 就是这条路），只按 browser_* 门控
+        //    会让 shell 路径整体失去扫码/滑块停手与不可逆动作交用户的约束。
+        // ③ 两者皆无（exa_search / fetchWebpage / readFile / browser_readContent）→ 不触发。
+        triggerTools: [...PLATFORM_RISK_CONTROL_TRIGGER_TOOLS, "execShell"],
+        build: (tools) => {
+            if (PLATFORM_RISK_CONTROL_TRIGGER_TOOLS.some((t) => tools.includes(t))) {
+                return PLATFORM_RISK_CONTROL_RULE;
+            }
+            return tools.includes("execShell") ? SHELL_BROWSER_RISK_CONTROL_RULE : "";
+        },
+    },
     { id: "menuUsage", triggerTools: ["ask_user"], build: () => MENU_USAGE_INSTRUCTIONS },
     {
         id: "showInteraction",
@@ -406,6 +536,7 @@ export const TOOL_GUIDED_SECTION_ORDER = [
     "agentOrchestration",
     "agentCollaboration",
     "webAccess",
+    "platformRiskControl",
     "menuUsage",
     "showInteraction",
     "knowledgeManagement",

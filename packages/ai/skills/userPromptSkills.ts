@@ -3,6 +3,11 @@
  *
  * 仅用于无工具、纯 prompt 注入的方法论指导 Skill（如 ub-mode）。
  * 平台不默认启用，不授予工具权限，不改动 agent 配置。
+ *
+ * 依赖分层：零依赖的 slug 白名单与规范化在 `userPromptSkillSlugs.ts`；
+ * 本文件保留重依赖（builtinSkillRegistry、skillDocProtocol/js-yaml），只服务真正需要
+ * 解析 prompt 正文的调用方。只做偏好读写的模块请直接 import `userPromptSkillSlugs`，
+ * 否则会把全部内置 Skill 正文与 YAML 解析器带进 web entry。
  */
 
 import { resolveBuiltinSkillEntry } from "./builtinSkillRegistry";
@@ -11,63 +16,19 @@ import {
   isAgentSkillDisabled,
   type AgentSkillConfigSource,
 } from "ai/tools/agentSkillConfig";
+import {
+  normalizeEnabledPromptSkills,
+  type PromptSkillConfigSource,
+} from "./userPromptSkillSlugs";
 
-/**
- * 纯提示 Skill 偏好解析支持的 Agent 配置来源。
- *
- * 兼容标准 AgentSkillConfigSource、带 rawRecord 的运行时 AgentRuntimeAgentConfig、
- * 以及从底层存储读取的 Record<string, unknown>。
- */
-export type PromptSkillConfigSource =
-  | AgentSkillConfigSource
-  | {
-      skills?: Record<string, unknown> | null;
-      enabledPacks?: string[] | null;
-      rawRecord?: Record<string, unknown> | null;
-      [key: string]: unknown;
-    }
-  | Record<string, unknown>;
-
-/**
- * 推荐纯提示 Skill slug 清单（供 UI 展示与发现）。
- */
-export const RECOMMENDED_PROMPT_SKILL_SLUGS = ["ub-mode"] as const;
-
-export type RecommendedPromptSkillSlug =
-  (typeof RECOMMENDED_PROMPT_SKILL_SLUGS)[number];
-
-const ALLOWED_PROMPT_SKILL_SLUGS = new Set<string>(
+export {
   RECOMMENDED_PROMPT_SKILL_SLUGS,
-);
-
-/**
- * 规范化用户启用的纯提示 Skill 列表。
- *
- * 严格只接受数组形式，且元素必须是严格字符串。
- * 仅允许已审定的纯提示 slug（当前仅 'ub-mode'），过滤任意正文、非审定 slug 与工具 skill。
- * 自动去重。非数组（包括单个字符串、null/undefined/对象）一律返回空数组。
- */
-export function normalizeEnabledPromptSkills(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const result: string[] = [];
-  const seen = new Set<string>();
-
-  for (const item of value) {
-    if (typeof item !== "string") {
-      continue;
-    }
-    const trimmed = item.trim();
-    if (ALLOWED_PROMPT_SKILL_SLUGS.has(trimmed) && !seen.has(trimmed)) {
-      seen.add(trimmed);
-      result.push(trimmed);
-    }
-  }
-
-  return result;
-}
+  normalizeEnabledPromptSkills,
+} from "./userPromptSkillSlugs";
+export type {
+  PromptSkillConfigSource,
+  RecommendedPromptSkillSlug,
+} from "./userPromptSkillSlugs";
 
 /**
  * 从 builtin registry 解析用户启用的纯提示 Skill patches。

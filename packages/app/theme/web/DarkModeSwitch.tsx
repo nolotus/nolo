@@ -23,8 +23,8 @@ export const DarkModeSwitch: React.FC<DarkModeSwitchProps> = ({ compact = false,
     }
   }, [active]);
 
-  const handleSelect = (v: string, origin: Element) => {
-    applyThemeMode(v as ThemeMode, origin);
+  const handleSelect = (v: string) => {
+    applyThemeMode(v as ThemeMode);
   };
 
   const options = [
@@ -52,7 +52,7 @@ export const DarkModeSwitch: React.FC<DarkModeSwitchProps> = ({ compact = false,
           key={opt.v}
           className="mode-tab-item"
           data-active={active === opt.v}
-          onClick={(e) => handleSelect(opt.v, e.currentTarget)}
+          onClick={() => handleSelect(opt.v)}
           aria-label={opt.l}
         >
           {opt.i}

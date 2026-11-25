@@ -7,7 +7,7 @@
  * Security rules:
  * - One Keychain item per credential ref (service = namespace + hex(ref)).
  * - Fixed account slot under the nolo namespace (isolation is via service).
- * - put: `add-generic-password -U ... -w` with -w last; password via stdin prompt.
+ * - put: pass a single batch command with an encoded password via `security -i` stdin.
  * - get miss → null; delete item-not-found is idempotent.
  * - Hard failures throw only `credential_broker_{op}_failed` (no ref/secret/stderr).
  */
@@ -27,6 +27,9 @@ export const MACOS_KEYCHAIN_SERVICE_PREFIX = "nolo.credentials.keys";
 /** Fixed account attribute; isolation is via `service`, not account. */
 export const MACOS_KEYCHAIN_ACCOUNT = "api-key";
 
+/** Marks versioned, ASCII-encoded passwords in Keychain. */
+export const MACOS_KEYCHAIN_B64_PREFIX = "nolo-b64v1:";
+
 /** CLI exit code for SecKeychain item-not-found. */
 export const SECURITY_ITEM_NOT_FOUND_EXIT = 44;
 
@@ -40,7 +43,7 @@ export type SecurityRunnerResult = {
 
 /**
  * Injectable `security` command runner.
- * Callers must never put secrets into `args`; use `stdin` for password prompts.
+ * Callers must never put secrets into `args`; use `stdin` for batch commands.
  */
 export type SecurityRunner = (input: {
   args: string[];
@@ -91,13 +94,16 @@ function rethrowBrokerError(op: string, _error?: unknown): never {
  */
 export function createDefaultSecurityRunner(
   securityBin: string = DEFAULT_SECURITY_BIN,
+  timeoutMs: number = 15_000,
 ): SecurityRunner {
   return function defaultSecurityRunner(input) {
     return new Promise<SecurityRunnerResult>((resolve) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
       const finish = (result: SecurityRunnerResult) => {
         if (settled) return;
         settled = true;
+        clearTimeout(timer);
         resolve(result);
       };
 
@@ -105,11 +111,32 @@ export function createDefaultSecurityRunner(
       try {
         child = spawn(securityBin, input.args, {
           stdio: ["pipe", "pipe", "pipe"],
+          detached: process.platform !== "win32",
         });
       } catch {
         finish({ exitCode: -1, stdout: "", stderr: "" });
         return;
       }
+
+      timer = setTimeout(() => {
+        try {
+          if (process.platform !== "win32" && child.pid !== undefined) {
+            try {
+              process.kill(-child.pid, "SIGKILL");
+              return;
+            } catch {
+              // Fall back to killing the child directly.
+            }
+          }
+          try {
+            child.kill("SIGKILL");
+          } catch {
+            // Child may have exited before SIGKILL landed.
+          }
+        } finally {
+          finish({ exitCode: -1, stdout: "", stderr: "" });
+        }
+      }, timeoutMs);
 
       let stdout = "";
       let stderr = "";
@@ -124,18 +151,19 @@ export function createDefaultSecurityRunner(
       child.on("error", () => {
         finish({ exitCode: -1, stdout: "", stderr: "" });
       });
+      let stdinFailed = false;
+      child.stdin?.on("error", () => {
+        stdinFailed = true;
+      });
       child.on("close", (code) => {
         finish({
-          exitCode: typeof code === "number" ? code : -1,
+          exitCode: !stdinFailed && typeof code === "number" ? code : -1,
           stdout,
           stderr,
         });
       });
 
-      if (input.stdin !== undefined) {
-        child.stdin?.write(input.stdin);
-      }
-      child.stdin?.end();
+      child.stdin?.end(input.stdin);
     });
   };
 }
@@ -182,8 +210,21 @@ export function createMacOsKeychainCredentialBroker(
         rethrowBrokerError("get");
       }
       // find -w prints password only; strip a single trailing newline.
-      const secret = result.stdout.replace(/\n$/, "");
-      return secret.length > 0 ? secret : null;
+      const secret = result.stdout.replace(/\r?\n$/, "");
+      if (!secret.startsWith(MACOS_KEYCHAIN_B64_PREFIX)) {
+        return secret.length > 0 ? secret : null;
+      }
+      const encoded = secret.slice(MACOS_KEYCHAIN_B64_PREFIX.length);
+      const bytes = Buffer.from(encoded, "base64");
+      const decoded = bytes.toString("utf8");
+      // Buffer accepts malformed base64 and replaces invalid UTF-8 by default.
+      if (
+        bytes.toString("base64") !== encoded ||
+        !Buffer.from(decoded, "utf8").equals(bytes)
+      ) {
+        rethrowBrokerError("get");
+      }
+      return decoded;
     },
 
     async put(ref, secret) {
@@ -193,27 +234,27 @@ export function createMacOsKeychainCredentialBroker(
         throw new Error("Cannot store an empty credential secret.");
       }
       const service = serviceFor(safeRef);
-      // -w last → interactive prompt reads password (and retype) from stdin.
-      // Never place the secret in argv.
-      const stdin = `${value}\n${value}\n`;
+      const unsafeToken = /[^A-Za-z0-9._:@/-]/;
+      if (
+        !account ||
+        account.startsWith("-") ||
+        service.startsWith("-") ||
+        unsafeToken.test(account) ||
+        unsafeToken.test(service)
+      ) {
+        rethrowBrokerError("put");
+      }
+      // A bare -w opens /dev/tty instead of reading the pipe. Supply its value
+      // in the batch command, not in the security process's argv.
+      const encoded = `${MACOS_KEYCHAIN_B64_PREFIX}${Buffer.from(value, "utf8").toString("base64")}`;
+      const stdin = `add-generic-password -U -a ${account} -s ${service} -w ${encoded}\n`;
       let result: SecurityRunnerResult;
       try {
-        result = await runner({
-          args: [
-            "add-generic-password",
-            "-a",
-            account,
-            "-s",
-            service,
-            "-U",
-            "-w",
-          ],
-          stdin,
-        });
+        result = await runner({ args: ["-i"], stdin });
       } catch (error) {
         rethrowBrokerError("put", error);
       }
-      if (result.exitCode !== 0) {
+      if (result.exitCode !== 0 || /(?:^|\r?\n)security:/i.test(result.stderr)) {
         rethrowBrokerError("put");
       }
     },

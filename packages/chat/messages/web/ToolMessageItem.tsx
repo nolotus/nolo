@@ -251,8 +251,6 @@ export const ToolMessageItem = memo(
       if (isQuietDetailTool(toolName)) return true;
       // 进行中：展开，让用户看到实时进度。
       if (isStreaming) return false;
-      // 个别工具（如星盘）产品上要求默认可见。
-      if (toolName === "ziweiChart") return false;
       // 报价完成、等待用户选档的交互卡默认可见（数据条件：quoted + 有效报价）。
       if (shouldKeepToolRowExpanded({ toolName, rawData, statusStr })) return false;
       // 已完成的工具行默认折叠 —— loop 里只让“当前正在跑”的那行展开，
@@ -268,13 +266,6 @@ export const ToolMessageItem = memo(
     useEffect(() => {
       if (showConfirmBanner) setCollapsed(false);
     }, [showConfirmBanner]);
-
-    useEffect(() => {
-      if (toolName === "ziweiChart") {
-        userCollapsedOverrideRef.current = true;
-        setCollapsed(false);
-      }
-    }, [toolName]);
 
     // 只让当前活动行展开：进行中展开，一完成(success)即折叠；
     // 失败保持展开；用户手动展开/折叠后不再被自动抢回。

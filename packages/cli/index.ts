@@ -120,7 +120,17 @@ async function launchTuiWorkspace(args: { scriptDir: string; env: NodeJS.Process
   }
 }
 
-async function main(): Promise<never> {
+async function main(): Promise<void> {
+  if (args[0] === "__authority-broker") {
+    const { runCliAuthorityBrokerProcess } = await import("./cliAuthorityBrokerProcess");
+    await runCliAuthorityBrokerProcess(args.slice(1));
+    return;
+  }
+  if (args[0] === "__authority-broker-supervise") {
+    const { superviseCliAuthorityBrokerProcess } = await import("./cliAuthorityBrokerProcess");
+    await superviseCliAuthorityBrokerProcess(args.slice(1));
+    return;
+  }
   // 应用本体动态 import：bridge 装好后才执行应用模块顶层代码。
   const { createCliRuntimeContext, looksLikeDaemonShortcut, renderHelpText, resolveCommand, runResolvedCommand } =
     await import("./commandRegistry");

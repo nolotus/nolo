@@ -193,9 +193,18 @@ export const agentFormStyles = stylex.create({
     color: "var(--textSecondary)",
     lineHeight: 1.5,
   },
+  createSourceModeChoices: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    minWidth: 0,
+  },
   createSourceStepCards: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    // 窄屏换行后也跟随最高的一张卡，不固定像素高度。
+    gridAutoRows: "1fr",
+    alignItems: "stretch",
     gap: "clamp(12px, 1.2vw, 16px)",
     "@media (max-width: 760px)": {
       gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
@@ -207,7 +216,7 @@ export const agentFormStyles = stylex.create({
   createSourceCard: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "stretch",
     gap: "8px",
     padding: "16px 12px",
     textAlign: "left",
@@ -218,6 +227,7 @@ export const agentFormStyles = stylex.create({
     backgroundColor: "var(--backgroundElevated, var(--backgroundSecondary))",
     color: "var(--text)",
     cursor: "pointer",
+    overflowWrap: "anywhere",
     transition:
       "border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease",
     ":focus-visible": {
@@ -234,8 +244,29 @@ export const agentFormStyles = stylex.create({
     backgroundColor: "var(--primaryGhost, rgba(99, 102, 241, 0.08))",
     boxShadow: "0 0 0 1px var(--primary)",
   },
+  createSourceCliEntry: {
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+    padding: "4px 0",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "var(--textSecondary)",
+    fontSize: "var(--fontSize-sm)",
+    textAlign: "start",
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+    textDecoration: "underline",
+    cursor: "pointer",
+    ":focus-visible": { outline: "2px solid var(--primary)", outlineOffset: "2px" },
+    ":disabled": { opacity: 0.55, cursor: "not-allowed" },
+  },
+  createSourceCliEntryActive: {
+    color: "var(--primary)",
+    fontWeight: 600,
+  },
   createSourceCardTop: {
     display: "flex",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: "8px",
     width: "100%",
@@ -270,6 +301,23 @@ export const agentFormStyles = stylex.create({
     fontSize: "var(--fontSize-xs)",
     color: "var(--textTertiary)",
     lineHeight: 1.4,
+  },
+  createSourceSubscriptionFootnote: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: "4px",
+    minWidth: 0,
+  },
+  createSourceSubscriptionPreview: {
+    minWidth: 0,
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+  },
+  createSourceSubscriptionCount: {
+    flexShrink: 0,
+    whiteSpace: "nowrap",
   },
   createSourceStepMore: {
     fontSize: "var(--fontSize-sm)",
@@ -336,6 +384,16 @@ export const agentFormStyles = stylex.create({
     fontSize: "var(--fontSize-sm)",
     color: "var(--textSecondary)",
     lineHeight: 1.5,
+  },
+  createSourcePanelError: {
+    color: "var(--error)",
+    overflowWrap: "anywhere",
+  },
+  createSourceEndpointHint: {
+    margin: 0,
+    fontSize: "var(--fontSize-xs)",
+    color: "var(--textTertiary)",
+    overflowWrap: "anywhere",
   },
   createSourceField: {
     display: "flex",

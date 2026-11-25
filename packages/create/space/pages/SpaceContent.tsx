@@ -13,6 +13,7 @@ import { useRightSidebar } from "render/layout/RightSidebarContext";
 import { openObjectAssistantSidebar } from "chat/dialog/objectAssistantSidebar";
 import { buildObjectAssistantSidebarId } from "chat/dialog/objectAssistantRegistry";
 import { isImageResourceLike } from "app/utils/fileUtils";
+import { isEpubReaderTarget } from "../epub/epubFile";
 import FileDropZone from "../components/FileDropZone";
 import { uploadAndAddFileToSpace } from "../content/contentThunks";
 import { useSpaceData } from "../hooks/useSpaceData";
@@ -580,7 +581,9 @@ const SpaceContent: React.FC = () => {
         isPageContent(item) ||
         isImageContent(item) ||
         isAppContent(item) ||
-        isTaskContent(item)
+        isTaskContent(item) ||
+        // EPUB 进主区域阅读页（/space/:spaceId/file-...），不再弹窗。
+        isEpubReaderTarget(item)
       ) {
         // Stamp card-icon/card-title names only for this real route morph;
         // they self-clear when the route VT finishes (idle stays nameless).
@@ -602,7 +605,13 @@ const SpaceContent: React.FC = () => {
         return;
       }
 
-      if (isDialogContent(item) || isAgentContent(item) || isAppContent(item) || isTaskContent(item)) {
+      if (
+        isDialogContent(item) ||
+        isAgentContent(item) ||
+        isAppContent(item) ||
+        isTaskContent(item) ||
+        isEpubReaderTarget(item)
+      ) {
         stampSpaceContentCardMorphNames(item.contentKey);
         enableNextRouteViewTransition();
         navigate(buildContentRoute(item));
@@ -953,6 +962,7 @@ const SpaceContent: React.FC = () => {
             </section>
           )}
           <SpaceContentList
+            spaceId={spaceId}
             items={items}
             loading={spaceLoading}
             viewMode={viewMode}
@@ -971,6 +981,7 @@ const SpaceContent: React.FC = () => {
         </div>
 
         <SpaceContentOverlays
+          spaceId={spaceId}
           showBackToTop={showBackToTop}
           onBackToTop={handleBackToTop}
           t={t}

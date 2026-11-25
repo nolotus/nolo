@@ -1477,3 +1477,9 @@ export const platformHostedModels: Model[] = [
   }),
 ];
 
+
+/** MiMo's Chat Completions wire is also used by custom Xiaomi endpoints. */
+export function usesMimoThinkingWire(provider: string | undefined, model: string, endpoint?: string | null): boolean {
+  return /xiaomimimo\.com/i.test(endpoint ?? "") ||
+    provider?.toLowerCase() === "mimo" || isPlatformMimoProviderModel(provider, model);
+}

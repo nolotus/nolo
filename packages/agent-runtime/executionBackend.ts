@@ -4,7 +4,10 @@ import type {
 } from "./runGrant";
 import type { AgentRuntimeIsolationPolicy } from "./types";
 
-export type ExecutionClass = "oneshot" | "session" | "service";
+/** 运行期词汇表（与 `ExecutionClass` 同源）：审计/清单脚本按它校验取值，不各抄一份。 */
+export const EXECUTION_CLASSES = ["oneshot", "session", "service"] as const;
+
+export type ExecutionClass = (typeof EXECUTION_CLASSES)[number];
 
 export type ExecutionFilesystemAuthority = {
   readScope: AgentRunGrantWorkspaceScope["readScope"];

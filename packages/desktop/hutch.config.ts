@@ -1,4 +1,4 @@
-// @hutch cli=0.29.0 cottontail=0.7.3
+// @hutch cli=0.30.0 cottontail=0.7.3
 /**
  * Hutch configuration for the Nolo Desktop electrobun 2 toolchain.
  *
@@ -8,11 +8,15 @@
  * CI builds: without it Hutch floats on the `canary` release channel and
  * needs network access to resolve the latest release on every `sync`/`build`.
  *
- * The `@hutch` pragma pins the paired Hutch CLI (0.29.0) and Cottontail
- * (0.7.3) toolchain that Electrobun 2.0.6 ships with. The npm `electrobun`
- * dependency and this devkit pin must move together: the npm package version
- * decides which Hutch release the bootstrap downloads, while
+ * The `@hutch` pragma pins the paired Hutch CLI (0.30.0) and build-time
+ * Cottontail (0.7.3) toolchain that Electrobun 2.0.7 ships with. The npm
+ * `electrobun` dependency and this devkit pin must move together: the npm
+ * package version decides which Hutch release the bootstrap downloads, while
  * `electrobun.version` decides which devkit Hutch projects.
+ *
+ * Electrobun 2.0.7 keeps build-time Cottontail at 0.7.3 here while raising the
+ * app runtime pin (`COTTONTAIL_VERSION`) to 0.7.8, and defaults build scripts
+ * plus config loading to Bun. Our `mainProcess: "bun"` config is unaffected.
  *
  * `packageManager: "bun"` selects Bun as the external package manager for
  * Hutch's resolver (its built-in resolver does not support workspaces yet).
@@ -23,6 +27,6 @@
 export default {
   packageManager: "bun",
   electrobun: {
-    version: "2.0.6",
+    version: "2.0.7",
   },
 };

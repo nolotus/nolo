@@ -433,7 +433,7 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
     [managedApps, t],
   );
   
-  const [previewImage, setPreviewImage] = useState<{ contentKey: string; title: string } | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ contentKey: string; title: string; serverOrigin?: string; spaceId?: string | null } | null>(null);
 
   const sourceItems = isAppsManageView ? appManageItems : allItems;
 
@@ -898,6 +898,8 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
                 setPreviewImage({
                   contentKey: item.contentKey,
                   title: item.title || "",
+                  serverOrigin: item.serverOrigin,
+                  spaceId: item.spaceId,
                 });
                 return;
               }
@@ -1155,6 +1157,8 @@ const MyContentCollection: React.FC<MyContentCollectionProps> = ({
       {previewImage && (
         <ImagePreviewFetcher
           contentKey={previewImage.contentKey}
+          serverOrigin={previewImage.serverOrigin}
+          spaceId={previewImage.spaceId}
           alt={previewImage.title}
           onClose={() => setPreviewImage(null)}
         />

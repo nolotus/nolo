@@ -492,7 +492,7 @@ export const SUBSCRIPTION_OAUTH_PROVIDERS: OAuthProviderConfig[] = [
     kind: "oauth",
     id: "devin-oauth",
     label: "Devin Pro",
-    description: "Devin Pro $20/月：日/周 quota 覆盖 sessions/CLI/Desktop，超额按 API 价购 credits；SWE-2 限时免费至 2026-10-10",
+    description: "Devin Pro $20/月：日/周 quota 覆盖 sessions/CLI/Desktop，超额按 API 价购 credits",
     apiKeyRef: "devin",
     provider: "devin",
     defaultModel: "swe-2-max",

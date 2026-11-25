@@ -3,7 +3,7 @@ import { callToolApi } from "./toolApiClient";
 
 export const exaSearchSchema = {
     name: "exa_search",
-    description: "使用 Exa 智能搜索引擎查找信息。可选地按检索意图、内容类目、时间范围与域名做收窄。",
+    description: "用 Exa 智能搜索查找信息，可选按意图、类目、时间范围与域名收窄。",
     parameters: {
         type: "object",
         properties: {
@@ -13,24 +13,24 @@ export const exaSearchSchema = {
             },
             numResults: {
                 type: "number",
-                description: "返回的结果数量；不填则按服务端定档取值。",
+                description: "返回结果数量；不填按服务端定档取值。",
             },
             intent: {
                 type: "string",
                 enum: ["quick", "research", "exhaustive"],
                 description:
-                    "检索意图档位：quick＝快速扫一眼（默认档，够用即可）；research＝深入调研，需要更完整的结果与更长的摘要；exhaustive＝穷尽式检索，结果最多、开销也最大。绝大多数情况请省略本项——省略即由服务端按场景自动定档，不要为了填它而猜测。",
+                    "检索意图：quick=快速扫一眼（默认档）；research=深入调研；exhaustive=穷尽检索，结果最多、开销最大。多数情况请省略——省略即由服务端自动定档，不要猜测填。",
             },
             category: {
                 type: "string",
                 description:
-                    "内容类目筛选。常见取值：publication（论文/出版物）、company（公司信息）、people（人物）、news（新闻资讯）。不确定类目就别填，留空即可。",
+                    "内容类目：publication（论文/出版物）、company（公司）、people（人物）、news（新闻）。不确定就留空。",
             },
             timeRange: {
                 type: "string",
                 enum: ["day", "week", "month", "year"],
                 description:
-                    "只保留该时间范围内发布的结果（day＝24 小时内，week＝一周内，month＝一月内，year＝一年内）。不填则不限时间。",
+                    "只保留该时间范围内发布的结果（day=24h，week=一周，month=一月，year=一年）。不填不限。",
             },
             includeDomains: {
                 type: "array",

@@ -1,11 +1,12 @@
-import { resolveDefaultReasoningEffort } from "../defaultReasoningEffort";
+import { resolveNewAgentThinkingSelection } from "../modelReasoningCapability";
+import type { ThinkingSelection } from "./ThinkingControlField";
+import { useThinkingControl } from "./useModelReasoningCapability";
 // 路径: ai/agent/web/useAgentCreateSourceState.ts
 // AgentCreateSourceStep 的状态与 draft 编排（与 UI 渲染分离）。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { PLATFORM_HOSTED_DEEPSEEK_FLASH_MODEL } from "ai/llm/platformHosted";
-import { PLATFORM_HOSTED_KIMI_K3_MODEL } from "ai/llm/kimi";
 import { getModelsByProvider } from "ai/llm/providers";
 import {
   CLI_CAPABILITY_BY_PROVIDER,
@@ -22,12 +23,10 @@ import {
   listSubscriptionPresetOptions,
   resolveProviderPresetFields,
 } from "../providerPresetApply";
-import { DEFAULT_REASONING_EFFORT } from "../createAgentSchema";
-import type { ReasoningEffort } from "../createAgentSchema";
 import { normalizeServerOrigin } from "core/serverOrigin";
 import { selectCurrentServer } from "app/settings/settingSlice";
 import { useAppSelector } from "app/store";
-import { useToken, useIsLoggedIn } from "identity";
+import { useToken, useIsLoggedIn, useUserId } from "identity";
 import { useSubscriptionOAuthConnection } from "./useSubscriptionOAuthConnection";
 import { getLocalProviderSecret, getServerProviderSecret, providerCredentialRef, saveProviderSecret } from "../providerSecrets";
 import { mergeModelOptionsWithDiscovery } from "./providerModelDiscoveryClient";
@@ -35,6 +34,8 @@ import { useProviderModelDiscovery } from "./useProviderModelDiscovery";
 
 /** High-level run-mode choices (not apiSource enum values). */
 export type CreateRunMode = "platform" | "api" | "subscription" | "cli";
+
+export type QuickCreateAttempt = { providerCopyUploaded: boolean };
 
 /** Draft collected on the quick-create panel before create / advanced edit. */
 export type AgentCreateQuickDraft = {
@@ -57,12 +58,8 @@ export type AgentCreateQuickDraft = {
   oauthConnected: boolean;
   /** User opted into cross-device key use (server-side encrypted store). */
   credentialSynced: boolean;
-  /**
-   * 推理强度（reasoning_effort）。
-   * 订阅走 preset 的差异化默认；API/平台走 schema 默认 medium。
-   * 提交时映射到 agent 记录的 reasoning_effort 字段。
-   */
-  reasoningEffort: ReasoningEffort;
+  reasoningEffort?: ThinkingSelection["reasoningEffort"];
+  enableThinking?: ThinkingSelection["enableThinking"];
   /** CLI provider selected on the cli panel (empty for non-cli modes). */
   cliProvider: string;
   /** Bound machine id for cli mode (empty = server/local CLI runtime). */
@@ -119,7 +116,7 @@ function resolveModelHasVision(
 export type UseAgentCreateSourceStateArgs = {
   selected: CreateRunMode | null;
   onAdvancedEdit: (draft: AgentCreateQuickDraft) => void;
-  onQuickCreate: (draft: AgentCreateQuickDraft) => void | Promise<void>;
+  onQuickCreate: (draft: AgentCreateQuickDraft, attempt?: QuickCreateAttempt) => boolean | void | Promise<boolean | void>;
   isSubmitting?: boolean;
   disabled?: boolean;
 };
@@ -172,10 +169,11 @@ export function useAgentCreateSourceState({
     meteredPresets.find((p) => p.id === "openai-api")?.id ??
     meteredPresets[0]?.id ??
     MANUAL_PROVIDER_PRESET_ID;
+  // MiMo Token Plan 的旧默认与按量 API 的现役目录不共用；快速创建使用已有现役目录的千问方案。
   const defaultSubPresetId =
-    subscriptionPresets.find((p) => p.id === "token-plan")?.id ??
+    subscriptionPresets.find((p) => p.id === "qwen-token-plan")?.id ??
     subscriptionPresets[0]?.id ??
-    "token-plan";
+    "qwen-token-plan";
 
   const [prompt, setPrompt] = useState("");
   const [platformModel, setPlatformModel] = useState<string>(
@@ -197,52 +195,19 @@ export function useAgentCreateSourceState({
     return f.customProviderUrl;
   });
   const [subApiKey, setSubApiKey] = useState("");
-  // Web 页面/登录状态下默认开启跨设备密钥同步（因为浏览器受 CORS 限制必须走 server-proxy 转发；
-  // 若未同步，Web 端发起的远程 API 调用将因缺少服务端凭据而报 401）。
-  const [credentialSynced, setCredentialSynced] = useState(() => {
-    return typeof window !== "undefined";
-  });
-  const [providerKeyRemembered, setProviderKeyRemembered] = useState(false);
-  // Track whether the user has manually toggled the "remember provider key"
-  // checkbox. Once touched, auto-check (from detected existing key) is
-  // suppressed — prevents a preset round-trip from silently re-checking and
-  // overwriting the shared key with a personal key the user typed.
-  const providerKeyTouchedRef = useRef(false);
-  const handleProviderKeyRememberedChange = (next: boolean) => {
-    providerKeyTouchedRef.current = true;
-    setProviderKeyRemembered(next);
+  // Scoped to this selection: an explicit empty value is still a user edit.
+  const subKeyEdit = useRef({ edited: false });
+  const changeSubApiKey = (value: string) => {
+    subKeyEdit.current.edited = true;
+    setSubApiKey(value);
   };
+  const [crossDeviceKey, setCrossDeviceKey] = useState(true);
+  const [sharedLocalKey, setSharedLocalKey] = useState<{ presetId: string; value: string } | null>(null);
+  const [providerKeyRemembered, setProviderKeyRemembered] = useState(true);
   const [subModel, setSubModel] = useState(() => {
     const f = resolveProviderPresetFields(defaultSubPresetId);
     return f.model;
   });
-  // 订阅面板推理强度：初始值取订阅 preset 的差异化默认；切换方案时重置。
-  const [subReasoningEffort, setSubReasoningEffort] = useState<ReasoningEffort>(
-    () => {
-      const f = resolveProviderPresetFields(defaultSubPresetId);
-      return resolveDefaultReasoningEffort({ provider: f.provider, model: f.model, fallback: f.defaultReasoningEffort });
-    },
-  );
-  // API 面板推理强度：按量计费，统一 schema 默认 medium，用户可手动调。
-  const [apiReasoningEffort, setApiReasoningEffort] =
-    useState<ReasoningEffort>(() => {
-      const f = resolveProviderPresetFields(defaultApiPresetId);
-      return resolveDefaultReasoningEffort({ provider: f.provider, model: f.model, fallback: DEFAULT_REASONING_EFFORT });
-    });
-  const apiEffortTouched = useRef(false);
-  const subEffortTouched = useRef(false);
-  const selectApiEffort = (value: ReasoningEffort) => { apiEffortTouched.current = true; setApiReasoningEffort(value); };
-  const selectSubEffort = (value: ReasoningEffort) => { subEffortTouched.current = true; setSubReasoningEffort(value); };
-  const changeApiModel = (value: string) => {
-    setModel(value);
-    if (!apiEffortTouched.current) setApiReasoningEffort(resolveDefaultReasoningEffort({ provider: resolveProviderPresetFields(apiPresetId).provider, model: value, fallback: DEFAULT_REASONING_EFFORT }));
-  };
-  const changeSubModel = (value: string) => {
-    setSubModel(value);
-    const f = resolveProviderPresetFields(subPresetId);
-    if (!subEffortTouched.current) setSubReasoningEffort(resolveDefaultReasoningEffort({ provider: f.provider, model: value, fallback: f.defaultReasoningEffort }));
-  };
-
   // ── CLI 面板状态 ──
   const [cliProvider, setCliProvider] = useState<CliProvider>(
     () => CLI_PROVIDER_VALUES[0] as CliProvider,
@@ -253,32 +218,45 @@ export function useAgentCreateSourceState({
   const currentServer = useAppSelector(selectCurrentServer);
   const cliAuthToken = useToken() ?? "";
   const cliLoggedIn = useIsLoggedIn();
+  const userId = useUserId();
+  const showCredentialSync = cliLoggedIn && !!userId && userId !== "local";
   const providerKeyServerBase = useMemo(() => normalizeServerOrigin(currentServer) || (typeof window !== "undefined" ? window.location.origin : ""), [currentServer]);
+  const [accountPrefill, setAccountPrefill] = useState<{ presetId: string; server: string; token: string } | null>(null);
   useEffect(() => {
     if (!subPresetId || resolveProviderPresetFields(subPresetId).kind !== "api_key_template") return;
     let cancelled = false;
-    void (async () => {
-      let found = false;
-      if (cliAuthToken) {
-        const shared = await getServerProviderSecret({ serverOrigin: providerKeyServerBase, token: cliAuthToken, presetId: subPresetId });
-        if (shared && !cancelled) {
-          setSubApiKey((current) => current || shared);
-          found = true;
-        }
+    const edit = subKeyEdit.current;
+    const fillIfUntouched = (value: string) => {
+      if (edit === subKeyEdit.current && !edit.edited) {
+        setSubApiKey((current) => current || value);
       }
-      const local = getLocalProviderSecret(subPresetId);
-      if (local && !cancelled) {
-        setSubApiKey((current) => current || local);
-        found = true;
-      }
-      // 检测到已有 key 时自动勾选「记住此服务商密钥」，
-      // 这样 apiKeyRef 指向 provider-key:xxx（共享），而非每次新建都独立存一份。
-      // 但如果用户已手动操作过 checkbox（取消或勾选），不再自动覆盖——
-      // 防止 preset 切换往返后用个人 key 覆盖共享 key。
-      if (found && !cancelled && !providerKeyTouchedRef.current) setProviderKeyRemembered(true);
-    })();
+    };
+    // Prefer the device's remembered key over an older account copy.
+    const local = getLocalProviderSecret(subPresetId);
+    setAccountPrefill(null);
+    if (local) {
+      fillIfUntouched(local);
+    } else if (cliAuthToken) {
+      void getServerProviderSecret({ serverOrigin: providerKeyServerBase, token: cliAuthToken, presetId: subPresetId })
+        .then((shared) => {
+          if (!shared || cancelled || edit !== subKeyEdit.current || edit.edited) return;
+          fillIfUntouched(shared);
+          setAccountPrefill({ presetId: subPresetId, server: providerKeyServerBase, token: cliAuthToken });
+        });
+    }
     return () => { cancelled = true; };
   }, [subPresetId, cliAuthToken, providerKeyServerBase]);
+  // Values read from the local-only store retain that provenance on remount.
+  // Opting in for one value does not authorize a different key or preset.
+  const localOnly = selected === "subscription" && !!subApiKey &&
+    subApiKey.trim() === getLocalProviderSecret(subPresetId);
+  const crossDeviceChecked = crossDeviceKey && (!localOnly ||
+    (sharedLocalKey?.presetId === subPresetId && sharedLocalKey.value === subApiKey.trim()));
+  const setCredentialSynced = (checked: boolean) => {
+    setCrossDeviceKey(checked);
+    setSharedLocalKey(checked && localOnly ? { presetId: subPresetId, value: subApiKey.trim() } : null);
+  };
+  const credentialSynced = crossDeviceChecked && showCredentialSync && Boolean(cliAuthToken);
   const cliServerBase = useMemo(() => {
     const configured = normalizeServerOrigin(currentServer);
     if (configured) return configured;
@@ -336,13 +314,13 @@ export function useAgentCreateSourceState({
         ? apiPresetId
         : MANUAL_PROVIDER_PRESET_ID;
   // ── Provider 动态模型发现（best-effort）──────────────────────────
-  // 白名单 API preset + 有效 key / OAuth preset 无 key，向服务端发现模型；
-  // 失败/不支持/static 回退 → 保留静态 modelOptions，透出回退元数据。
   const discovery = useProviderModelDiscovery({
     serverOrigin: providerKeyServerBase,
     token: cliAuthToken,
     presetId: activePresetId,
-    apiKey: selected === "subscription" ? subApiKey : apiKey,
+    hasSharedProviderKey: selected === "subscription" && credentialSynced &&
+      !subKeyEdit.current.edited && accountPrefill?.presetId === activePresetId &&
+      accountPrefill.server === providerKeyServerBase && accountPrefill.token === cliAuthToken,
   });
   const activePresetFieldsRaw = useMemo(
     () => resolveProviderPresetFields(activePresetId),
@@ -351,8 +329,6 @@ export function useAgentCreateSourceState({
   const activePresetFields = useMemo(
     () => ({
       ...activePresetFieldsRaw,
-      discoverySource: discovery?.source,
-      discoveryFallbackReason: discovery?.fallbackReason,
       modelOptions: mergeModelOptionsWithDiscovery(
         activePresetFieldsRaw.modelOptions,
         discovery,
@@ -366,6 +342,18 @@ export function useAgentCreateSourceState({
       : null;
   const oauth = useSubscriptionOAuthConnection(oauthProvider);
   const oauthConnected = oauth.connection.kind === "connected";
+
+  const thinkingSource = selected === "platform"
+    ? { provider: PLATFORM_QUICK_CREATE_MODEL.provider, model: platformModel }
+    : selected === "subscription"
+      ? { provider: activePresetFields.provider, model: subModel, customProviderUrl: subCustomProviderUrl }
+      : selected === "api" ? { provider: activePresetFields.provider, model, customProviderUrl } : {};
+  const thinkingControl = useThinkingControl(thinkingSource);
+  const thinkingKey = JSON.stringify([selected, apiPresetId, subPresetId, thinkingSource]);
+  const [thinkingOverride, setThinkingOverride] = useState<{ key: string; value: ThinkingSelection }>();
+  const selection = thinkingOverride?.key === thinkingKey ? thinkingOverride.value : undefined;
+  const { reasoningEffort, enableThinking } = resolveNewAgentThinkingSelection(thinkingControl, selection ?? {});
+  const setThinking = (value: ThinkingSelection) => setThinkingOverride({ key: thinkingKey, value });
 
   const draft: AgentCreateQuickDraft = useMemo(() => {
     const defaultName = t("createAgent.quickCreate.defaultName", "新 AI");
@@ -387,9 +375,8 @@ export function useAgentCreateSourceState({
         oauthConnected: false,
         credentialSynced: false,
         presetId: "",
-        // Kimi K3 (baseten upstream) defaults to high reasoning for stronger output;
-        // other platform models keep the schema default (medium).
-        reasoningEffort: resolveDefaultReasoningEffort({ provider: "nolo", model: platformModel, fallback: platformModel === PLATFORM_HOSTED_KIMI_K3_MODEL ? "high" : DEFAULT_REASONING_EFFORT }),
+        reasoningEffort,
+        enableThinking,
         cliProvider: "",
         machineId: "",
         machineName: "",
@@ -409,7 +396,7 @@ export function useAgentCreateSourceState({
         hasVision: resolveModelHasVision(modelId, fields.modelOptions),
         customProviderUrl: subCustomProviderUrl,
         apiKey: subApiKey,
-        apiKeyRef: fields.kind === "api_key_template" && providerKeyRemembered && !credentialSynced
+        apiKeyRef: fields.kind === "api_key_template" && providerKeyRemembered
           ? providerCredentialRef(subPresetId)
           : fields.apiKeyRef,
         apiKeyHeader: fields.apiKeyHeader,
@@ -417,7 +404,8 @@ export function useAgentCreateSourceState({
         requiresDesktopOAuth: fields.requiresDesktopOAuth,
         oauthConnected,
         credentialSynced,
-        reasoningEffort: subReasoningEffort,
+        reasoningEffort,
+        enableThinking,
         cliProvider: "",
         machineId: "",
         machineName: "",
@@ -441,7 +429,6 @@ export function useAgentCreateSourceState({
         requiresDesktopOAuth: false,
         oauthConnected: false,
         credentialSynced: false,
-        reasoningEffort: DEFAULT_REASONING_EFFORT,
         cliProvider,
         machineId: cliMachineId,
         machineName: machine?.name ?? "",
@@ -467,7 +454,8 @@ export function useAgentCreateSourceState({
       requiresDesktopOAuth: false,
       oauthConnected: false,
       credentialSynced,
-      reasoningEffort: apiReasoningEffort,
+      reasoningEffort,
+      enableThinking,
       cliProvider: "",
       machineId: "",
       machineName: "",
@@ -486,10 +474,11 @@ export function useAgentCreateSourceState({
     subCustomProviderUrl,
     subApiKey,
     subModel,
-    subReasoningEffort,
-    apiReasoningEffort,
+    reasoningEffort,
+    enableThinking,
     oauthConnected,
     credentialSynced,
+    providerKeyRemembered,
     cliProvider,
     cliMachineId,
     cliMachineOptions,
@@ -504,7 +493,7 @@ export function useAgentCreateSourceState({
     selected === "subscription" &&
     (draft.requiresDesktopOAuth
       ? oauthConnected
-      : subCustomProviderUrl.trim().length > 0);
+      : subCustomProviderUrl.trim().length > 0 && subApiKey.trim().length > 0);
   const canCreateCli = selected === "cli";
   const canCreate =
     canCreatePlatform || canCreateApi || canCreateSubscription || canCreateCli;
@@ -520,9 +509,6 @@ export function useAgentCreateSourceState({
     const fields = resolveProviderPresetFields(id);
     setCustomProviderUrl(fields.customProviderUrl);
     setModel(fields.model || model);
-    // metered API 统一 schema 默认；切换 preset 不强行覆盖用户手动改过的值，
-    // 但首切到 manual 时回退到 medium（manual 无 registry 默认）。
-    if (!apiEffortTouched.current) setApiReasoningEffort(resolveDefaultReasoningEffort({ provider: fields.provider, model: fields.model || model, fallback: DEFAULT_REASONING_EFFORT }));
     if (fields.clearApiKey) setApiKey("");
   };
 
@@ -532,10 +518,9 @@ export function useAgentCreateSourceState({
     const fields = resolveProviderPresetFields(id);
     setSubCustomProviderUrl(fields.customProviderUrl);
     setSubModel(fields.model);
-    // 跨方案切换时重置推理强度为新方案的默认值；
-    // 同方案内不改（用户手动改过的值保持不变）。
-    if (changed && !subEffortTouched.current) setSubReasoningEffort(resolveDefaultReasoningEffort({ provider: fields.provider, model: fields.model, fallback: fields.defaultReasoningEffort }));
-    if (fields.clearApiKey) setSubApiKey("");
+    // A key belongs to its plan; the lookup effect can refill a saved key for the new plan.
+    if (changed) subKeyEdit.current = { edited: false };
+    if (changed || fields.clearApiKey) setSubApiKey("");
   };
 
   // 切换 CLI provider 时重置 machineId：不同 provider 的 capability 不同，
@@ -545,21 +530,36 @@ export function useAgentCreateSourceState({
     setCliMachineId("");
   };
 
+  const pendingCreate = useRef<{ owner?: string; server: string; attempt: QuickCreateAttempt;
+    uploaded?: { presetId: string; value: string } } | null>(null);
   const handleCreate = async () => {
     if (!selected || !canCreate) return;
-    if (selected === "subscription" && activePresetFields.kind === "api_key_template" && subApiKey.trim() && providerKeyRemembered) {
-      const saved = await saveProviderSecret({ serverOrigin: providerKeyServerBase, token: cliAuthToken, presetId: subPresetId, value: subApiKey.trim(), shared: Boolean(cliAuthToken) });
-      if (!saved) {
-        console.error("[provider-secret] 保存服务商密钥失败");
-        toast.error("服务商密钥保存失败，请重试");
-      }
+    if (!pendingCreate.current || pendingCreate.current.owner !== userId || pendingCreate.current.server !== providerKeyServerBase) {
+      pendingCreate.current = { owner: userId, server: providerKeyServerBase, attempt: { providerCopyUploaded: false } };
     }
-    await onQuickCreate(draft);
+    const pending = pendingCreate.current;
+    pending.attempt.providerCopyUploaded = false;
+    if (selected === "subscription" && activePresetFields.kind === "api_key_template" && subApiKey.trim() && providerKeyRemembered) {
+      const secret = { presetId: subPresetId, value: subApiKey.trim() };
+      const alreadyUploaded = credentialSynced && pending.uploaded?.presetId === secret.presetId && pending.uploaded.value === secret.value;
+      const saved = alreadyUploaded || await saveProviderSecret(credentialSynced
+        ? { ...secret, shared: true, serverOrigin: providerKeyServerBase, token: cliAuthToken }
+        : secret);
+      if (!saved) {
+        toast.error(t("form.rememberProviderKeyFailed", "服务商密钥保存失败，未创建 AI，请重试。"));
+        return;
+      }
+      if (credentialSynced) pending.uploaded = secret;
+      pending.attempt.providerCopyUploaded = credentialSynced;
+    }
+    const created = await onQuickCreate(draft, pending.attempt);
+    if (created === true) pendingCreate.current = null;
   };
 
   const handleAdvanced = () => {
     if (!selected || !canAdvanced) return;
-    onAdvancedEdit(draft);
+    // The advanced form derives its own default from its current model.
+    onAdvancedEdit({ ...draft, reasoningEffort: selection?.reasoningEffort });
   };
 
   return {
@@ -578,28 +578,34 @@ export function useAgentCreateSourceState({
     apiKey,
     setApiKey,
     model,
-    setModel: changeApiModel,
+    setModel,
     activePresetFields,
     subPresetId,
     applySubPreset,
     subscriptionPresetOptions,
+    // 订阅脚注只列品牌名（不带 · OAuth / 限制标注这类后缀）；riskNotice 由
+    // `subscriptionFootnoteProviders` 用于把这些通道排除出「无条件支持」名单。
+    subscriptionPlans: subscriptionPresets.map((p) => ({
+      label: p.label,
+      riskNotice: p.riskNotice,
+      requiresDesktopOAuth: p.requiresDesktopOAuth,
+      oauthConnected: p.id === subPresetId && oauthProvider !== null &&
+        oauth.connection.kind === "connected" && oauth.connection.provider === oauthProvider,
+    })),
     subCustomProviderUrl,
-    setSubCustomProviderUrl,
     subApiKey,
-    setSubApiKey,
-    credentialSynced,
+    setSubApiKey: changeSubApiKey,
+    credentialSynced: crossDeviceChecked,
     setCredentialSynced,
+    showCredentialSync,
     providerKeyRemembered,
-    setProviderKeyRemembered: handleProviderKeyRememberedChange,
+    setProviderKeyRemembered,
     providerKeyRef: activePresetFields.kind === "api_key_template" ? providerCredentialRef(subPresetId) : "",
     subModel,
-    setSubModel: changeSubModel,
-    subReasoningEffort,
-    setSubReasoningEffort,
-    selectSubEffort,
-    apiReasoningEffort,
-    setApiReasoningEffort,
-    selectApiEffort,
+    setSubModel,
+    thinkingControl,
+    thinkingSelection: { reasoningEffort, enableThinking },
+    setThinking,
     canCreatePlatform,
     canCreateApi,
     canCreateSubscription,

@@ -987,6 +987,34 @@ export function createCliLocalRuntimeAdapter(
       return typeof model === "string" ? model : undefined;
     } catch { return undefined; }
   };
+  // 推理档自动联动的输入：真实 `provider` 与**已显式设置**的 `reasoning_effort`
+  // 从同一份生产 agent 记录一起读（与 resolveAgentModel 同源同 store），避免
+  // provider 与档位分头解析出互相矛盾的真值。读不到 / 抛错 = 未能确认 → undefined，
+  // 派发侧据此 fail-closed（不追加 `--reasoning-effort`，也不覆盖用户固定档位）。
+  const resolveAgentReasoningProfile = async (
+    agentRef: string,
+  ): Promise<{ provider?: string; reasoningEffort?: string } | undefined> => {
+    try {
+      const record = await readAgentFromStore({
+        agentRef,
+        store: await getOrCreateSharedStore(deps),
+        userId,
+      });
+      if (!record) return undefined;
+      const provider =
+        typeof record.provider === "string" ? record.provider.trim() : "";
+      const reasoningEffort =
+        typeof record.reasoning_effort === "string"
+          ? record.reasoning_effort.trim()
+          : "";
+      return {
+        ...(provider ? { provider } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
+      };
+    } catch {
+      return undefined;
+    }
+  };
   const resolveAgentDisplayName = async (
     agentRef: string,
   ): Promise<string | undefined> => {
@@ -1405,6 +1433,7 @@ export function createCliLocalRuntimeAdapter(
         return !!record && resolveAgentImageInputSupport(await resolveLiveImageSupport({ ...(record as any), hasVision: (record as any).hasVision ?? false }));
       },
       resolveAgentModel,
+      resolveAgentReasoningProfile,
       dialogExistsForCurrentUser: async (dialogId: string) => {
         const store = await getOrCreateSharedStore(deps);
         const record = await store.read(`dialog-${userId}-${dialogId}`);

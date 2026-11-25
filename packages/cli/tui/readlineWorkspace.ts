@@ -48,6 +48,7 @@ import {
   runWithInputRequiredAttention,
 } from "./terminalNotification";
 import {
+  ACTIVITY_FRAMES,
   createActivityIndicator,
 } from "./activityIndicator";
 import { createRunRegistryPoller, createHttpRemoteTaskSource } from "./runRegistryPoller";
@@ -87,7 +88,6 @@ import {
 } from "./pasteFlow";
 import { readClipboardText, writeClipboard as writeClipboardEnhanced } from "./clipboard";
 import { detectGitStatusAsync } from "./gitStatus";
-import { fetchCiStatus, summarizeLatest } from "./ciStatus";
 import { getProcessRegistry } from "../../agent-runtime/processRegistry";
 import {
   applyTuiInputKey,
@@ -121,7 +121,7 @@ import {
   resetWorkspaceThemeState,
   applyDetectedBackground,
 } from "./theme";
-import { detectTerminalBackground, isTerminalDevice, OSC11_QUERY } from "./detectBackground";
+import { detectTerminalBackground, isPtyxisTerminal, isTerminalDevice, OSC11_QUERY, resetPtyxisCanvasCache } from "./detectBackground";
 import {
   clearCollapsedPasteStore,
   createCollapsedPasteStore,
@@ -225,6 +225,7 @@ import {
   appendToCurrentTurn,
   appendLocalTurn,
   createHistoryOutputStream,
+  formatToolDetails,
   createTurnHistory,
   finalizeCurrentTurn,
   getAllTurnEntries,
@@ -238,6 +239,9 @@ import {
   type ScrollAction,
   WHEEL_SCROLL_LINES,
   autoScrollStepForTicks,
+  computeScrollbarGeometry,
+  isScrollbarColumnHit,
+  scrollTopFromScrollbarDrag,
 } from "./tuiScrollbar";
 import {
   parseSgrMouseEvent,
@@ -554,16 +558,6 @@ export function isClipboardImageFallbackEligible(error: unknown): boolean {
   return isTextFallbackEligibleCode(code);
 }
 
-export function shouldRefreshCiStatusOnStartup(
-  env: Record<string, string | undefined>,
-): boolean {
-  if (env.NOLO_CLI_CI_STATUS === "0") return false;
-  return (
-    env.NOLO_CLI_CI_STATUS === "1" ||
-    Boolean(env.NOLO_CI_SSH_HOST?.trim() || env.NOLO_CI_RAW_HOST?.trim())
-  );
-}
-
 async function runTuiWorkspace(options: WorkspaceOptions) {
   const startupThemeMode = resolveTuiThemeMode(
     options.env ?? process.env,
@@ -571,6 +565,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   );
   setActiveThemeMode(startupThemeMode);
   const accountSessionRuntime = createTuiAccountSessionRuntime(options.env ?? process.env);
+  let cleanupTitle: (() => void) | null = null;
   try {
   // Locale detection at module load only sees process.env; the workspace env
   // merges the profile config (NOLO_LANG from /lang) on top.
@@ -669,6 +664,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
     allowSystemFallback: startupThemeMode !== "terminal",
     preserveInput: true,
+    trustHostCanvas: true,
   });
   if (detected) applyDetectedBackground(detected);
   let sawOsc11Reply = Boolean(detected?.hex);
@@ -754,8 +750,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   const titleEnv = options.env ?? process.env;
   const titleEnabled = (output as { isTTY?: boolean }).isTTY === true
     && !["0", "false"].includes((titleEnv.NOLO_TUI_TITLE ?? "").trim().toLowerCase());
+  const TITLE_SPINNER_INTERVAL_MS = 200;
+  let titleFrameIndex = 0;
+  let titleAnimTimer: ReturnType<typeof setInterval> | null = null;
+  const stopTitleAnimation = () => {
+    if (titleAnimTimer !== null) {
+      clearInterval(titleAnimTimer);
+      titleAnimTimer = null;
+    }
+  };
   let titleRestored = false;
   const restoreTitle = () => {
+    stopTitleAnimation();
     if (titleRestored) return;
     titleRestored = true;
     if (titleEnabled) {
@@ -763,6 +769,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
     if (restoreWindowTitle === restoreTitle) restoreWindowTitle = null;
   };
+  cleanupTitle = restoreTitle;
   if (titleEnabled) {
     output.write("\x1b[22;0t");
     restoreWindowTitle = restoreTitle;
@@ -779,21 +786,37 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     }
     if (!titleEnabled) return;
     const phase = terminalStatus.state;
+    const isWorking = phase !== "blocked" && phase !== "error" && (phase === "working" || backgroundWorking);
+    if (!isWorking) {
+      stopTitleAnimation();
+      titleFrameIndex = 0;
+    } else if (titleAnimTimer === null) {
+      titleAnimTimer = setInterval(() => {
+        titleFrameIndex = (titleFrameIndex + 1) % ACTIVITY_FRAMES.length;
+        syncWindowTitle();
+      }, TITLE_SPINNER_INTERVAL_MS);
+      titleAnimTimer.unref?.();
+    }
     const rawDialogLabel = state.dialogLabel?.trim();
     const rawLabel =
       !rawDialogLabel || rawDialogLabel === "new"
         ? basename(state.cwd) || "Nolo"
         : rawDialogLabel;
     const label = stripAnsi(rawLabel).replace(/[\x00-\x1f\x7f-\x9f]+/g, " ");
+    const frame = ACTIVITY_FRAMES[titleFrameIndex % ACTIVITY_FRAMES.length]!;
     const suffix = phase === "blocked" ? " · 需接管 — Nolo"
       : phase === "error" ? " · 失败需处理 — Nolo"
-      : phase === "working" || backgroundWorking ? " · 思考中 — Nolo"
+      : isWorking ? ` · ${frame} 思考中 — Nolo`
       : label === "Nolo" ? "" : " — Nolo";
     // Reserve the status suffix before clipping untrusted dialog text.
     const currentTitle = takeDisplayWidth(label, 80 - displayWidth(suffix)).prefix + suffix;
     if (currentTitle === lastSentTitle) return;
     lastSentTitle = currentTitle;
-    output.write(buildWindowTitle(currentTitle));
+    try {
+      output.write(buildWindowTitle(currentTitle));
+    } catch {
+      stopTitleAnimation();
+    }
   };
   const reportTerminalStatus = (report: TerminalProgramStatusReport) => {
     const wasWaiting = terminalStatus.state === "blocked";
@@ -1085,6 +1108,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     scheduleRender,
     flushPendingRender,
     paintImmediate,
+    close: closeRender,
   } = createTuiRender({
       output,
       history,
@@ -1162,21 +1186,6 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     void detectGitStatusAsync(state.cwd).then((gitStatus) => {
       if (sessionEnded) return; // session exited while git ran — skip the stale repaint
       state = { ...state, gitStatus };
-      scheduleRender();
-    });
-  };
-
-  // 部署状态：仅在显式开启时查询（NOLO_CLI_CI_STATUS=1 或配置了自定义 CI SSH 目标）。
-  // 默认不向运维机发起后台 SSH，避免沙盒/测试/普通用户环境触发出向 :22 扫描风控。
-  // 失败静默：fetchCiStatus 已经保证不抛，这里再守一次 sessionEnded，
-  // 避免会话结束后仍用陈旧结果重绘。
-  const refreshCiStatus = (): void => {
-    if (!shouldRefreshCiStatusOnStartup(effectiveEnv)) return;
-    void fetchCiStatus(undefined, undefined, undefined, effectiveEnv).then((jobs) => {
-      if (sessionEnded) return;
-      const ciStatusLine = summarizeLatest(jobs);
-      if (!ciStatusLine) return;
-      state = { ...state, ciStatusLine };
       scheduleRender();
     });
   };
@@ -1461,8 +1470,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // question (fixed by routing through this hook instead).
   let composerDecoderDrain: (() => void) | null = null;
 
-  // 对话内浏览器审批卡（见 ./hostApprovalCard）：连接器动作需要用户批准时，由本宿主在对话流里
-  // 渲染一张卡并按 y/n 决定，决定经 submit_approval_decision 直接发给连接器，不经过模型。
+  // 浏览器和 MCP 共用宿主审批卡，决定直发连接器，不经过模型。
   // 未创建（非交互/旧宿主）时工具执行器拿不到 approver，行为与改动前逐字一致。
   let hostApprovalPrompt: InlineHostApprovalPrompt | null = null;
   let unregisterHostApprovalRenderer: (() => void) | null = null;
@@ -1471,6 +1479,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
   // 读回来时若世代已变（用户已提交、已清空、已退出会话），迟到结果必须丢弃而不
   // 是写进一个新草稿。
   let draftEpoch = 0;
+  /**
+   * 在途剪贴板读取的计数（Ctrl+V、空 bracketed paste、busy 与空闲 `/paste`、slash router 直连）。
+   * 读取期间草稿可能仍是空的，审批卡不能把这段窗口当成「用户可以作答」，否则用户输入的第一个
+   * 字符会被当成审批答案。计数放在共享读取入口内部，任何调用方都自动被覆盖；用计数而非布尔，
+   * 是因为输入处理不串行等待，两次读取重叠时先完成的那次不能替另一次解除保护。
+   */
+  let clipboardReadsInFlight = 0;
   /**
    * 作废在途的异步粘贴。草稿被提交/清空、或换了对话时调用：迟到的剪贴板结果
    * 世代不匹配就被丢弃，不会写进下一个草稿。
@@ -1644,6 +1659,17 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
    * 返回 true 表示结果被应用，false 表示因草稿世代变化/会话结束被丢弃。
    */
   const readAndApplyClipboard = async (
+    source: ClipboardPasteSource,
+  ): Promise<boolean> => {
+    clipboardReadsInFlight += 1;
+    try {
+      return await applyClipboardPaste(source);
+    } finally {
+      clipboardReadsInFlight -= 1;
+    }
+  };
+
+  const applyClipboardPaste = async (
     source: ClipboardPasteSource,
   ): Promise<boolean> => {
     const snapshot = { epoch: draftEpoch, sessionEnded };
@@ -1937,6 +1963,35 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     );
   };
 
+  /** `/images <n>` / `/images copy <n>`：只复制路径、不弹菜单（不含裸 `/images`）。 */
+  const DIRECT_IMAGE_COPY_RE = /^\/images\s+(?:copy\s+)?(\d+)$/;
+
+  /**
+   * 按 artifactIndex 复制对话图片产物路径。空闲提交（runSubmittedLine）与 busy
+   * 收尾窗口（产物行已渲染但 busy 尚未释放）共用同一份查找+复制，只有提示行通道
+   * 由调用方决定：前者 emitCommandOutput，后者 printStreamSafeNotice 的流式安全插入。
+   */
+  const copyConversationImagePathByIndex = async (
+    targetIndex: number,
+    emit: (text: string) => void,
+  ): Promise<void> => {
+    const target = collectConversationImageArtifacts(history.turns).find(
+      (item) => item.artifactIndex === targetIndex,
+    );
+    if (!target) {
+      emit(themeText(`· 未找到图片产物 #${targetIndex}。`, "muted", resolveCliColorEnabled()));
+      return;
+    }
+    const result = await copyImagePath(target.path, writeClipboard);
+    emit(
+      themeText(
+        `${result.ok ? "·" : "!"} ${result.message}`,
+        result.ok ? "muted" : "warning",
+        resolveCliColorEnabled(),
+      ),
+    );
+  };
+
   const manageDraftImages = async (): Promise<void> => {
     while (true) {
       const images = state.attachedImages;
@@ -2014,9 +2069,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     ) => Promise<boolean | { approved: boolean; hostResult?: AgentRuntimeToolResult }>,
     directUserSubmission = false,
   ): Promise<boolean> => {
-    if (line.trim() === "/tools") {
+    const toolsCommand = line.trim().match(/^\/tools(?:\s+(last))?$/i);
+    if (toolsCommand) {
       emitCommandOutput(
-        history.toolDetails?.join("") ||
+        formatToolDetails(history, Boolean(toolsCommand[1])) ||
           themeText(t("noToolDetails"), "muted", resolveCliColorEnabled()),
       );
       return false;
@@ -2063,17 +2119,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       renderHistoryToOutput();
       return false;
     }
-    const directImageMatch = /^\/images\s+(?:copy\s+)?(\d+)$/.exec(line.trim());
+    // 与 busy 收尾窗口共用同一份查找+复制（见 copyConversationImagePathByIndex）。
+    const directImageMatch = DIRECT_IMAGE_COPY_RE.exec(line.trim());
     if (directImageMatch) {
-      const targetIndex = Number(directImageMatch[1]);
-      const target = collectConversationImageArtifacts(history.turns).find(
-        (item) => item.artifactIndex === targetIndex,
-      );
-      if (!target) {
-        emitCommandOutput(themeText(`· 未找到图片产物 #${targetIndex}。`, "muted", resolveCliColorEnabled()));
-      } else {
-        await copyImagePathWithFeedback(target.path);
-      }
+      await copyConversationImagePathByIndex(Number(directImageMatch[1]), emitCommandOutput);
       return false;
     }
     if (line.trim() === "/images") {
@@ -2308,7 +2357,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         output.write("\x1b[?25h\x1b[?2026l");
       }
     };
-    const applyLiveTerminalBackground = (bg: { brightness: TuiBrightness; hex: string }) => {
+    const applyLiveTerminalBackground = (bg: {
+      brightness: TuiBrightness;
+      hex: string;
+      trustedCanvas?: boolean;
+    }) => {
       if (sessionEnded || done) return;
       if (!applyDetectedBackground(bg)) return;
       if (fixedInput.isPaused()) {
@@ -2378,6 +2431,11 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       hostApprovalPrompt = null;
       childShellApprovals.close();
       sessionEnded = true; // signal in-flight async git refresh to drop its repaint
+      // 渲染集群先关门：迟到的 turn 结算会走 onInputLinesChange →
+      // renderHistoryToOutput 整帧直写 output，并可能留下一个 33ms 节流定时器
+      // 在收尾后到点补画。下面的复位序列仍由 fixedInput.disable() 正常发出，
+      // 两者互不影响（closeRender 只取消费用，不碰终端状态）。
+      closeRender();
       scrollAnimator.cancel(); // stop any in-flight wheel animation before teardown
       if (resizeTimer !== null) {
         clearTimeout(resizeTimer);
@@ -2718,6 +2776,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     };
 
     let autoScrollDirection: "up" | "down" = "up";
+    let scrollbarDrag: { grabOffset: number } | null = null;
     // autoScrollTicks 声明在外层，stopAutoScroll（鼠标移开）时重置。
     const autoScrollStep = () => autoScrollStepForTicks(++autoScrollTicks);
     const startAutoScroll = (direction: "up" | "down", mouseX: number) => {
@@ -2980,6 +3039,10 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       const beforeAgentKey = state.agentKey;
       const res = handleTuiInput(submittedText, state, collectConversationTurns(history), {
         env: effectiveEnv,
+        // Same env the busy turn runs with; `effectiveEnv` is the merged
+        // startup snapshot and would over-count MCP/Instabox tool schemas when
+        // options.env is an explicit `{}`.
+        estimateEnv: options.env ?? process.env,
         // Identity only: `effectiveEnv` is the startup snapshot, `options.env`
         // is where a `/login` in this session writes its token.
         authEnv: resolveTuiIdentityEnv(effectiveEnv, options.env ?? process.env),
@@ -2999,10 +3062,13 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       }
       if (res.action?.type === "theme-refresh") {
         state = res.nextState;
+        // A manual refresh must re-read the host canvas, not a cached answer.
+        resetPtyxisCanvasCache();
         const detected = await detectTerminalBackground({
           stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
           stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
           allowSystemFallback: true,
+          trustHostCanvas: true,
         });
         let refreshMsg = "";
         if (detected && applyDetectedBackground(detected)) {
@@ -3135,10 +3201,18 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // The approval owns the DialogHost claim, but only its explicit answers
       // belong to it. Unclaimed tokens must still edit the real composer or
       // stop the turn, not reach a secret reader queued behind this claim.
+      // 「草稿为空」必须包含附件与读剪贴板窗口：附图同样是一轮真正输入的一部分
+      // （提交逻辑只看 buffer 之外的 attachedImages），否则粘贴图片后打下的第一个
+      // 数字会把一次真实动作批准掉。
       const approvalOwnsKeyboard = hostApprovalPrompt?.isActive() ?? false;
       if (approvalOwnsKeyboard && hostApprovalPrompt?.handleKey(sequence, {
-        draftEmpty: buffer.length === 0,
+        draftEmpty: buffer.length === 0
+          && state.attachedImages.length === 0
+          && !preparingImageSubmission
+          && !pendingPasteImagePromise
+          && clipboardReadsInFlight === 0,
         busy,
+        canApproveDuringTurn: activeTurnAbort !== null && !activeTurnAbort.signal.aborted,
       })) return;
       if (!approvalOwnsKeyboard && secretInputCoordinator.isActive()) { secretInputCoordinator.handleToken(sequence); return; }
       // While a modal (any dialogHost.run()/withKeyboard() caller — confirm,
@@ -3271,19 +3345,51 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             getTopReservedRows(output),
           ),
         );
-        const { contentWidth, marginLeft } = resolveHistoryLayoutGeometry(columns);
+        const { contentWidth, marginLeft, marginRight } = resolveHistoryLayoutGeometry(columns);
         const screenRow = mouseEvent.y - 1 - getTopReservedRows(output);
         const screenCol = mouseEvent.x - 1;
         const hitContentCol = screenCol - marginLeft;
         const contentCol = Math.max(0, Math.min(contentWidth, screenCol - marginLeft));
 
         if (mouseEvent.kind === "press" && mouseEvent.button === "left") {
+          scrollbarDrag = null;
           // The task header rejects new selections, not drag/release cleanup.
           if (screenRow < 0) return;
           stopAutoScroll();
           clearSelectionCopyFeedback();
-          // 开始选区时冻结滚轮动画：内容不能在选中锚点底下滑走。
+          // 开始选区或拖动滚动条时冻结滚轮动画：内容不能在锚点底下滑走。
           scrollAnimator.cancel();
+          if (
+            !mouseEvent.ctrl &&
+            screenRow < visibleHeight &&
+            isScrollbarColumnHit(screenCol, columns, marginRight)
+          ) {
+            const { totalLines } = getAllTurnEntries(history, contentWidth);
+            const geom = computeScrollbarGeometry(
+              visibleHeight,
+              totalLines,
+              history.scrollTop,
+            );
+            if (geom) {
+              clearSelection();
+              if (screenRow >= geom.thumbTop && screenRow < geom.thumbBottom) {
+                scrollbarDrag = { grabOffset: screenRow - geom.thumbTop };
+              } else {
+                const grabOffset = Math.floor(geom.thumbSize / 2);
+                scrollbarDrag = { grabOffset };
+                const nextTop = scrollTopFromScrollbarDrag(
+                  screenRow,
+                  grabOffset,
+                  visibleHeight,
+                  totalLines,
+                );
+                history.scrollTop = nextTop;
+                history.followBottom = nextTop >= geom.maxScrollTop;
+              }
+              paintFrame(buffer);
+              return;
+            }
+          }
           // Ctrl+左键：只有坐标精确落在这行**可见**的 http(s) URL 字符区间内才用
           // 系统默认浏览器打开，并消费这次点击（不进入拖选）；未命中原样走下面的
           // 选区逻辑，普通点击/拖选与 Ctrl+C 复制行为不变。
@@ -3337,6 +3443,27 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
         }
 
         if (mouseEvent.kind === "drag" && mouseEvent.button === "left") {
+          if (scrollbarDrag) {
+            const { totalLines } = getAllTurnEntries(history, contentWidth);
+            const geom = computeScrollbarGeometry(
+              visibleHeight,
+              totalLines,
+              history.scrollTop,
+            );
+            if (geom) {
+              const clampedRow = Math.max(0, Math.min(visibleHeight - 1, screenRow));
+              const nextTop = scrollTopFromScrollbarDrag(
+                clampedRow,
+                scrollbarDrag.grabOffset,
+                visibleHeight,
+                totalLines,
+              );
+              history.scrollTop = nextTop;
+              history.followBottom = nextTop >= geom.maxScrollTop;
+              paintFrame(buffer);
+            }
+            return;
+          }
           if (!selectionState.anchor) return;
           selectionState.dragging = true;
           lastDragMouseX = mouseEvent.x;
@@ -3367,6 +3494,28 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
 
         if (mouseEvent.kind === "release") {
           stopAutoScroll();
+          if (scrollbarDrag) {
+            const { totalLines } = getAllTurnEntries(history, contentWidth);
+            const geom = computeScrollbarGeometry(
+              visibleHeight,
+              totalLines,
+              history.scrollTop,
+            );
+            if (geom) {
+              const clampedRow = Math.max(0, Math.min(visibleHeight - 1, screenRow));
+              const nextTop = scrollTopFromScrollbarDrag(
+                clampedRow,
+                scrollbarDrag.grabOffset,
+                visibleHeight,
+                totalLines,
+              );
+              history.scrollTop = nextTop;
+              history.followBottom = nextTop >= geom.maxScrollTop;
+            }
+            scrollbarDrag = null;
+            paintFrame(buffer);
+            return;
+          }
           if (selectionState.dragging && selectionState.anchor) {
             // Some terminals coalesce the last motion report, so the release
             // coordinates are the only reliable final drag endpoint.
@@ -3601,7 +3750,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
           const busySlashCommand = trimmedText.split(/\s+/)[0]?.toLowerCase();
           if (busySlashCommand === "/tools") {
             recordWorkspaceInputHistory(expandedSubmitForHistory);
-            printStreamSafeNotice(history.toolDetails?.join("") || t("noToolDetails"));
+            const last = trimmedText.split(/\s+/)[1]?.toLowerCase() === "last";
+            printStreamSafeNotice(formatToolDetails(history, last) || t("noToolDetails"));
             bumpDraftEpoch();
             buffer = "";
             cursorPos = 0;
@@ -3665,6 +3815,40 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
             // 闭包，此处仅转发（保持原 return 语义：处理完即结束本轮 handleInputToken）。
             recordWorkspaceInputHistory(expandedSubmitForHistory);
             await handleBusyLocalSlash(submittedText, busySlashCommand);
+            return;
+          }
+          // `/images <n>`（含 copy 形式）只做剪贴板路径复制，不弹交互菜单，因此
+          // busy 收尾窗口也必须本地执行：产物行在 turn 定稿时就已渲染出来，用户在
+          // 这几十毫秒内按下 Enter 时，不能被当作聊天文本排进队列发给模型（那样
+          // 复制永远不会发生）。
+          const busyDirectImage = DIRECT_IMAGE_COPY_RE.exec(trimmedText.trim());
+          if (busyDirectImage) {
+            // 剪贴板写入是异步的，而按键分派是 `void handleInputToken(token)` 不等待
+            // 上一次处理完成：必须在首个 await 之前就消费掉已经提交的这一行（记历史 +
+            // 递增草稿世代 + 清屏重绘），否则写入期间用户新输入的下一条草稿会在完成
+            // 后被无条件清空（静默丢字），在途粘贴也仍然有效。复制完成后只发反馈，
+            // 不再碰草稿。
+            const targetIndex = Number(busyDirectImage[1]);
+            recordWorkspaceInputHistory(expandedSubmitForHistory);
+            bumpDraftEpoch();
+            buffer = "";
+            cursorPos = 0;
+            if (fixedInput.active) fixedInput.repaint(buffer, cursorPos);
+            await copyConversationImagePathByIndex(targetIndex, (text) =>
+              printStreamSafeNotice(text, { dim: false }));
+            return;
+          }
+          // 裸 `/images` 是交互菜单，turn 没结束时不能弹，但这一行同样不该作为聊天
+          // 正文排进队列发给模型。保留草稿（本轮结束后按 Enter 即打开菜单），只提示。
+          if (trimmedText.trim() === "/images") {
+            printStreamSafeNotice(
+              themeText(
+                "! 任务仍在执行：`/images` 菜单要等本轮结束后再用；现在可用 `/images <序号>` 复制路径。",
+                "warning",
+                resolveCliColorEnabled(),
+              ),
+              { dim: false },
+            );
             return;
           }
           const { actionGateHandler, confirmDestructiveAction } =
@@ -3874,13 +4058,32 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       },
       {
         onOsc11Background: (bg) => {
+          // Ptyxis' VTE answer is the palette default, not the canvas (see
+          // detectPtyxisCanvasBrightness). Applying it repaints the wrong
+          // palette, and starting its poll would keep re-asserting it.
           sawOsc11Reply = true;
+          if (isPtyxisTerminal()) return;
           startOsc11AutoThemePoll();
           applyLiveTerminalBackground(bg);
         },
         onColorSchemeReport: (scheme) => {
+          if (isPtyxisTerminal()) {
+            // The host appearance changed. Ptyxis re-themes the canvas, but its
+            // VTE answers keep describing the palette, so re-read the host
+            // rather than applying the report or re-sending an OSC 11 query.
+            resetPtyxisCanvasCache();
+            void detectTerminalBackground({
+              stdin: input as NodeJS.ReadStream & { setRawMode?: (mode: boolean) => void },
+              stdout: output as NodeJS.WritableStream & { isTTY?: boolean },
+              allowSystemFallback: true,
+              trustHostCanvas: true,
+            }).then((next) => {
+              if (next) applyLiveTerminalBackground(next);
+            });
+            return;
+          }
           if (!sawOsc11Reply) {
-            applyLiveTerminalBackground({ brightness: scheme, hex: "" });
+            applyLiveTerminalBackground({ brightness: scheme, hex: "", trustedCanvas: true });
           }
           if (!sessionEnded && !done && fixedInput.active && !fixedInput.isPaused()) {
             output.write(OSC11_QUERY);
@@ -3910,6 +4113,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // 决定由本进程直接投递给连接器（模型既看不到也答不了）。
     hostApprovalPrompt = createInlineHostApprovalPrompt({
       dialogHost,
+      output,
+      colorEnabled: resolveCliColorEnabled(),
       write: (text) => {
         emitCommandOutput(text.replace(/\n$/, ""));
       },
@@ -3935,9 +4140,8 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
       // Same admission as the probe's: stdin that merely claims isTTY (pipe,
       // PassThrough double, wrapper stream) never receives the reply, so the
       // query bytes would leak into that stream's input queue instead.
-      if (!sawOsc11Reply && isTerminalDevice(input)) requestTerminalBackgroundQuery();
+      if (!sawOsc11Reply && isTerminalDevice(input) && !isPtyxisTerminal()) requestTerminalBackgroundQuery();
       refreshGitStatus();
-      refreshCiStatus();
       await new Promise<void>((resolve) => {
         resolveDone = resolve;
         if (done) resolve(); // finish() may have run before we started waiting
@@ -4029,6 +4233,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     // ref'd 计时器且非交互路径不走 finish()。缺了这组 dispose，turn 里
     // beginHold()/updateAgentRun() 起的轮询 interval 会一直挂在事件循环上，
     // 让 bun test worker 在文件收尾阶段 98% CPU 空转不退出。
+    closeRender();
     runRegistryPoller.dispose();
     idleHeapReleaser.cancel();
     runCompletionWatcher.dispose();
@@ -4038,6 +4243,7 @@ async function runTuiWorkspace(options: WorkspaceOptions) {
     rl.close();
   }
 } finally {
+  cleanupTitle?.();
   accountSessionRuntime.dispose();
 }
 }

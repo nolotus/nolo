@@ -53,7 +53,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve as resolvePath, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve as resolvePath, sep } from "node:path";
 
 import type { ExecutionPolicy } from "./executionEndpoint";
 import { resolveNoloStateDir } from "./noloStateDir";
@@ -82,7 +82,34 @@ export const SANDBOX_SYSTEM_RO_BINDS = [
 ] as const;
 
 export const SANDBOX_PATH = "/usr/bin:/bin";
+export const SANDBOX_RUNTIME_BIN_DIR = "/opt/nolo-runtime/bin";
 export const SANDBOX_TMP_DIR = "/tmp";
+export const SANDBOX_EGRESS_SOCKET = "/run/nolo-egress.sock";
+
+const SAFE_RUNTIME_BINARY_NAME = /^[A-Za-z0-9._-]+$/;
+
+/** Single host binary exposed read-only inside the sandbox without mounting host home dirs. */
+export type BwrapRuntimeBinary = {
+  name: string;
+  hostPath: string;
+};
+
+/** Optional OS resource limits enforced via `prlimit` inside the sandbox. */
+export type BwrapResourceLimits = {
+  cpuSeconds?: number;
+  maxFileSizeBytes?: number;
+  maxOpenFiles?: number;
+  maxProcesses?: number;
+  maxAddressSpaceBytes?: number;
+};
+
+export const DEFAULT_HOSTED_SANDBOX_RESOURCE_LIMITS: Readonly<BwrapResourceLimits> = {
+  cpuSeconds: 30,
+  maxFileSizeBytes: 64 * 1024 * 1024,
+  maxOpenFiles: 256,
+  maxProcesses: 256,
+  maxAddressSpaceBytes: 1024 * 1024 * 1024,
+};
 
 export type BwrapPrefixArgs = {
   /** Absolute workspace path; also the sandbox cwd and the writable bind target. */
@@ -99,6 +126,18 @@ export type BwrapPrefixArgs = {
    * workspace bind (mount order decides the winner) — see rule 3 in the header.
    */
   shadowTargets?: readonly BwrapShadowTarget[];
+  /** Single-file host runtime binaries (e.g. bun) bound read-only into `/opt/nolo-runtime/bin`. */
+  runtimeBinaries?: readonly BwrapRuntimeBinary[];
+  /** Absolute subdirectories inside `workspaceRoot` that must be mounted read-only (e.g. `input/`). */
+  readonlySubpaths?: readonly string[];
+  /** Optional OS resource limits enforced via `prlimit` inside the sandbox. */
+  resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
+  /** Absolute path to `prlimit` inside the sandbox (e.g. `/usr/bin/prlimit`). */
+  prlimitPath?: string | null;
 };
 
 /** How a sensitive workspace path is hidden from the sandboxed command. */
@@ -137,6 +176,16 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     argv.push("--ro-bind-try", path, path);
   }
 
+  const mountedBinaries = (args.runtimeBinaries ?? []).filter(
+    (bin) => SAFE_RUNTIME_BINARY_NAME.test(bin.name) && isAbsolute(bin.hostPath),
+  );
+  if (mountedBinaries.length > 0) {
+    argv.push("--dir", SANDBOX_RUNTIME_BIN_DIR);
+    for (const bin of mountedBinaries) {
+      argv.push("--ro-bind", bin.hostPath, `${SANDBOX_RUNTIME_BIN_DIR}/${bin.name}`);
+    }
+  }
+
   argv.push(
     "--proc",
     "/proc",
@@ -159,6 +208,13 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     workspaceRoot,
   );
 
+  // Read-only subpaths inside the workspace (e.g. materialized `input/` dir):
+  // emitted after the workspace bind so kernel mount flags enforce read-only.
+  for (const subpath of args.readonlySubpaths ?? []) {
+    if (!subpath || !isAbsolute(subpath)) continue;
+    argv.push("--ro-bind", subpath, subpath);
+  }
+
   // Sensitive paths INSIDE that workspace bind (data/leveldb, .env, .git,
   // NOLO_HOME): mount order decides the winner, so these must follow the bind.
   for (const target of args.shadowTargets ?? []) {
@@ -172,13 +228,20 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     }
   }
 
+  if (args.egressSocketPath) {
+    argv.push("--ro-bind", args.egressSocketPath, SANDBOX_EGRESS_SOCKET);
+  }
+
   // clearenv is the credential boundary: no SECRET_KEY, no provider keys, no
   // NOLO_* host config reaches the command. Baseline env is re-added explicitly.
+  const effectivePath = mountedBinaries.length > 0
+    ? `${SANDBOX_RUNTIME_BIN_DIR}:${SANDBOX_PATH}`
+    : SANDBOX_PATH;
   argv.push(
     "--clearenv",
     "--setenv",
     "PATH",
-    SANDBOX_PATH,
+    effectivePath,
     // HOME/TMPDIR must be writable and ephemeral; without HOME most tooling
     // (git, curl, ssh) refuses to start.
     "--setenv",
@@ -194,8 +257,77 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     argv.push("--setenv", key, value);
   }
 
+  if (args.privateArgsFd !== undefined) argv.push("--args", String(args.privateArgsFd));
   argv.push("--");
+
+  const prlimitFlags = buildPrlimitFlags(args.resourceLimits);
+  if (prlimitFlags.length > 0 && args.prlimitPath && isAbsolute(args.prlimitPath)) {
+    argv.push(args.prlimitPath, ...prlimitFlags, "--");
+  }
+
   return argv;
+}
+
+function buildPrlimitFlags(limits: BwrapResourceLimits | undefined): string[] {
+  if (!limits) return [];
+  const flags: string[] = [];
+  if (typeof limits.cpuSeconds === "number" && Number.isFinite(limits.cpuSeconds) && limits.cpuSeconds > 0) {
+    flags.push(`--cpu=${Math.floor(limits.cpuSeconds)}`);
+  }
+  if (typeof limits.maxFileSizeBytes === "number" && Number.isFinite(limits.maxFileSizeBytes) && limits.maxFileSizeBytes > 0) {
+    flags.push(`--fsize=${Math.floor(limits.maxFileSizeBytes)}`);
+  }
+  if (typeof limits.maxOpenFiles === "number" && Number.isFinite(limits.maxOpenFiles) && limits.maxOpenFiles > 0) {
+    flags.push(`--nofile=${Math.floor(limits.maxOpenFiles)}`);
+  }
+  if (typeof limits.maxProcesses === "number" && Number.isFinite(limits.maxProcesses) && limits.maxProcesses > 0) {
+    flags.push(`--nproc=${Math.floor(limits.maxProcesses)}`);
+  }
+  if (Number.isSafeInteger(limits.maxAddressSpaceBytes) && limits.maxAddressSpaceBytes! > 0) {
+    flags.push(`--as=${limits.maxAddressSpaceBytes}`);
+  }
+  return flags;
+}
+
+/**
+ * Resolve a single host runtime executable (such as `bun`) to its canonical
+ * realpath so bwrap can mount just that file read-only into `/opt/nolo-runtime/bin`.
+ */
+export function resolveHostRuntimeBinary(name: string): BwrapRuntimeBinary | null {
+  if (!SAFE_RUNTIME_BINARY_NAME.test(name)) return null;
+  let candidate: string | null = null;
+  if (name === "bun" && typeof process.execPath === "string" && process.execPath) {
+    const execBase = basename(process.execPath).toLowerCase();
+    if (execBase === "bun" || execBase === "bun.exe") {
+      candidate = process.execPath;
+    }
+  }
+  if (!candidate) {
+    candidate = resolveExecutableOnPath(name);
+  }
+  if (!candidate) return null;
+  try {
+    const hostPath = realpathSync(candidate);
+    const stats = statSync(hostPath);
+    if (!stats.isFile()) return null;
+    return { name, hostPath };
+  } catch {
+    return null;
+  }
+}
+
+export function resolvePrlimitPath(): string | null {
+  const found = resolveExecutableOnPath("prlimit");
+  if (!found) return null;
+  try {
+    const real = realpathSync(found);
+    if (!SANDBOX_SYSTEM_RO_BINDS.some((tree) => real === tree || real.startsWith(`${tree}/`))) {
+      return null;
+    }
+    return real;
+  } catch {
+    return null;
+  }
 }
 
 export type BwrapProbeResult = {
@@ -357,6 +489,18 @@ export type BuildBwrapCommandPrefixArgs = {
    * un-shadowed).
    */
   resolveShadowTargets?: SandboxShadowResolver;
+  /** Single-file host runtime binaries (e.g. bun) mounted read-only inside the sandbox. */
+  runtimeBinaries?: readonly BwrapRuntimeBinary[];
+  /** Subdirectories inside `workspaceRoot` that must be mounted read-only (e.g. `input/`). */
+  readonlySubpaths?: readonly string[];
+  /** Optional OS resource limits enforced via `prlimit`. */
+  resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
+  /** Injectable `prlimit` path resolver for tests. */
+  prlimitPath?: string | null;
 };
 
 export type SandboxShadowPlan =
@@ -503,15 +647,54 @@ function buildBwrapPrefixOutcome(args: BuildBwrapCommandPrefixArgs): BwrapPrefix
     );
     return { ok: false, reason: shadow.reason };
   }
+  const resolvedReadonlySubpaths: string[] = [];
+  for (const rawSubpath of args.readonlySubpaths ?? []) {
+    if (!rawSubpath) continue;
+    let realSubpath: string;
+    try {
+      realSubpath = realpathSync(resolvePath(workspaceRoot, rawSubpath));
+    } catch (error) {
+      if (isMissingPathError(error)) continue;
+      return {
+        ok: false,
+        reason: `cannot resolve readonly subpath (${describeFsErrorCode(error)})`,
+      };
+    }
+    if (!isStrictlyInside(workspaceRoot, realSubpath)) {
+      return {
+        ok: false,
+        reason: "readonly subpath escapes workspace root",
+      };
+    }
+    resolvedReadonlySubpaths.push(realSubpath);
+  }
+  const requestedLimitFlags = buildPrlimitFlags(args.resourceLimits);
+  const effectivePrlimitPath = requestedLimitFlags.length > 0
+    ? (args.prlimitPath !== undefined ? args.prlimitPath : resolvePrlimitPath())
+    : null;
+  if (requestedLimitFlags.length > 0 && !effectivePrlimitPath) {
+    const reason = "resource limits requested but prlimit is unavailable inside sandbox";
+    emitSandboxWarning(
+      args.warn,
+      `[shell-sandbox] ${reason}; refusing to run without limits (fail-closed)`,
+      "prlimit-unavailable",
+    );
+    return { ok: false, reason };
+  }
   return {
     ok: true,
     prefix: buildBwrapArgs({
       workspaceRoot,
       workspaceWritable: args.workspaceWritable,
+      egressSocketPath: args.egressSocketPath,
+      privateArgsFd: args.privateArgsFd,
       bwrapPath: probe.bwrapPath,
       shadowTargets: shadow.targets,
       ...(args.tmpfsSizeBytes !== undefined ? { tmpfsSizeBytes: args.tmpfsSizeBytes } : {}),
       ...(args.env ? { env: args.env } : {}),
+      ...(args.runtimeBinaries?.length ? { runtimeBinaries: args.runtimeBinaries } : {}),
+      ...(resolvedReadonlySubpaths.length ? { readonlySubpaths: resolvedReadonlySubpaths } : {}),
+      ...(requestedLimitFlags.length > 0 ? { resourceLimits: args.resourceLimits, prlimitPath: effectivePrlimitPath } : {}),
     }),
   };
 }
@@ -567,6 +750,14 @@ export type ResolveShellSandboxPrefixArgs = {
   tmpfsSizeBytes?: number;
   envVars?: Record<string, string>;
   resolveShadowTargets?: SandboxShadowResolver;
+  runtimeBinaries?: readonly BwrapRuntimeBinary[];
+  readonlySubpaths?: readonly string[];
+  resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
+  prlimitPath?: string | null;
   /**
    * Which execution policy asks for this shell.
    *
@@ -637,11 +828,17 @@ export function resolveShellSandboxPlan(args: ResolveShellSandboxPrefixArgs): Sh
   const outcome = buildBwrapPrefixOutcome({
     workspaceRoot: args.workspaceRoot,
     workspaceWritable: args.workspaceWritable ?? true,
+    egressSocketPath: args.egressSocketPath,
+    privateArgsFd: args.privateArgsFd,
     ...(args.probe ? { probe: args.probe } : {}),
     ...(args.warn ? { warn: args.warn } : {}),
     ...(args.tmpfsSizeBytes !== undefined ? { tmpfsSizeBytes: args.tmpfsSizeBytes } : {}),
     ...(args.envVars ? { env: args.envVars } : {}),
     ...(args.resolveShadowTargets ? { resolveShadowTargets: args.resolveShadowTargets } : {}),
+    ...(args.runtimeBinaries ? { runtimeBinaries: args.runtimeBinaries } : {}),
+    ...(args.readonlySubpaths ? { readonlySubpaths: args.readonlySubpaths } : {}),
+    ...(args.resourceLimits ? { resourceLimits: args.resourceLimits } : {}),
+    ...(args.prlimitPath !== undefined ? { prlimitPath: args.prlimitPath } : {}),
   });
   if (!outcome.ok) {
     // Model-visible boundary: scrub absolute host paths from both fields. The

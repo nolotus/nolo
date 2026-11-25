@@ -109,6 +109,11 @@ const saveRemoteDataToClientDb = async (
   }
 };
 
+// A rejected response is neither a cache candidate nor evidence of absence.
+const REJECTED_RECORD = Symbol("rejected read record");
+const hasRejectedRecord = (results: PromiseSettledResult<unknown>[]) =>
+  results.some((result) => result.status === "fulfilled" && result.value === REJECTED_RECORD);
+
 const processRemoteDataInBackground = async (
   clientDb: any,
   dbKey: string,
@@ -150,6 +155,7 @@ const processRemoteDataInBackground = async (
       );
     }
     if (
+      !hasRejectedRecord(settledResults) &&
       shouldReplicateLocalRecord({
         localData,
         remoteData: validRemoteData,
@@ -169,6 +175,8 @@ export const readAction = async (
   payload: {
     dbKey: string;
     signal?: AbortSignal;
+    /** Validate raw records before cache writes or injecting the request key. */
+    validateRecord?: (record: unknown, source: "local" | "remote") => boolean;
     preferredServerOrigin?: string | null;
     /** Record-level origin evidence only; user authority registry entries are hints. */
     authoritativeServerOrigin?: string | null;
@@ -206,11 +214,16 @@ export const readAction = async (
       userAuthorityRegistry,
     } = getRuntimeServerContext(state, preferredServerOrigin);
     const allServers = resolveAgentReadServers({ dbKey, configuredServers });
-    const fetchScopedFromServer = (server: string, key: string, token?: string, signal?: AbortSignal) =>
-      fetchFromServer(server, key, googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(key)), signal);
+    const { validateRecord } = payload;
+    const fetchScopedFromServer = async (server: string, key: string, token?: string, signal?: AbortSignal) => {
+      const record = await fetchFromServer(server, key, googleSessionRequestToken(token, server, isPublicBuiltinPlatformAgentKey(key)), signal);
+      return record && validateRecord && !validateRecord(record, "remote") ? REJECTED_RECORD : record;
+    };
     const isLoggedIn = !!currentToken;
     const now = Date.now();
-    const localData = await fetchFromClientDb(clientDb, dbKey);
+    const rawLocalData = await fetchFromClientDb(clientDb, dbKey);
+    const localRejected = !!rawLocalData && !!validateRecord && !validateRecord(rawLocalData, "local");
+    const localData = localRejected ? null : rawLocalData;
     if (isDialogKey) {
       console.info("[readAction-perf] dialog local-read", {
         dbKey,
@@ -283,6 +296,7 @@ export const readAction = async (
         }
         return normalizeReadRecord(dbKey, localData);
       }
+      if (localRejected) return null;
       readRequestManager.markMiss(dbKey, now);
       throw new Error(
         `Failed to fetch data for key "${dbKey}" because network is offline and no local data is available.`,
@@ -339,6 +353,7 @@ export const readAction = async (
       fallbackServers = [];
     }
 
+    let preferredRejected = false;
     if (preferredServer) {
       try {
         const preferredRemoteData = await fetchScopedFromServer(
@@ -348,7 +363,8 @@ export const readAction = async (
           signal,
         );
 
-        if (preferredRemoteData) {
+        preferredRejected = preferredRemoteData === REJECTED_RECORD;
+        if (preferredRemoteData && !preferredRejected) {
           await saveRemoteDataToClientDb(
             clientDb,
             dbKey,
@@ -427,13 +443,14 @@ export const readAction = async (
       return normalizeReadRecord(dbKey, remoteData);
     }
 
+    if (localRejected || preferredRejected || hasRejectedRecord(settledResults)) return null;
     readRequestManager.markMiss(dbKey, Date.now());
     throw new Error(
       `Failed to fetch data for key "${dbKey}" from all sources.`,
     );
   };
 
-  const canDedup = !signal;
+  const canDedup = !signal && !payload.validateRecord;
   if (canDedup) {
     const existing = readRequestManager.getInFlight(dbKey);
     if (existing) return existing;

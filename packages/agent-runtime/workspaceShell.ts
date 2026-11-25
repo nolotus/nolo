@@ -1,4 +1,14 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+const confidentialShell = new AsyncLocalStorage<{
+  bwrapArgs: Buffer;
+  redact: (text: string) => string;
+}>();
+
+/** Bind a confidential bwrap argument descriptor and output retention policy to one spawn. */
+export function withConfidentialBwrapShell<T>(options: NonNullable<ReturnType<typeof confidentialShell.getStore>>, run: () => T): T {
+  return confidentialShell.run(options, run);
+}
+
 const shellChildEnvironment = new AsyncLocalStorage<Record<string, string>>();
 /** Host-only per-call child environment; never mutates process.env. */
 export function withShellChildEnvironment<T>(env: Record<string, string>, run: () => T): T {
@@ -587,6 +597,8 @@ function removeSpillFile(path: string): void {
 }
 
 export interface ReadNodeStreamOptions {
+  /** Never expose a truncated fragment from a confidential stream. */
+  suppressIncomplete?: boolean;
   /** Source-level line threshold; enabled for command output capture. */
   maxLines?: number;
   /** In-memory retention cap (default DEFAULT_MAX_STREAM_BUFFER_BYTES). */
@@ -833,6 +845,10 @@ export function readNodeStream(
         if (captureResolved) return;
         await settleSpillRetention();
         if (captureResolved) return;
+        if (options.suppressIncomplete && (!sourceEnded || truncatedNow)) {
+          resolveCapture("[incomplete confidential output withheld]");
+          return;
+        }
         let text = baseText;
         if (truncatedNow && spillRetainedPath && sourceEnded && options.maxLines !== undefined) {
           resolveCapture(formatSpilledToolOutput({
@@ -911,7 +927,11 @@ export function readNodeStream(
         markSpillFailed(new Error(reason));
         void settleSpillRetention();
       }
-      resolveCapture(`${snapshot}\n\n[${reason}]`);
+      resolveCapture(
+        options.suppressIncomplete
+          ? "[incomplete confidential output withheld]"
+          : `${snapshot}\n\n[${reason}]`,
+      );
     };
     capture?.stopSignal.addEventListener("abort", stopCapture, { once: true });
     if (capture?.stopSignal.aborted) stopCapture();
@@ -1115,6 +1135,7 @@ export async function runWorkspaceCommand(args: {
     ...args.command,
   ];
   const spawnedAt = Date.now();
+  const confidential = confidentialShell.getStore();
   const proc = spawnChildProcess(command[0] ?? "", command.slice(1), {
     cwd: resolve(args.workspaceRoot),
     env: workspaceChildEnv({ ...process.env, ...shellChildEnvironment.getStore() }),
@@ -1122,6 +1143,7 @@ export async function runWorkspaceCommand(args: {
       args.stdin === undefined ? "ignore" : "pipe",
       "pipe",
       "pipe",
+      ...(confidential ? ["pipe" as const] : []),
     ],
     detached,
     // Windows: a child spawned from a console-less parent (e.g. a detached run) would
@@ -1131,6 +1153,11 @@ export async function runWorkspaceCommand(args: {
   if (args.stdin !== undefined && proc.stdin) {
     proc.stdin.write(args.stdin);
     proc.stdin.end();
+  }
+  if (confidential) {
+    const fd = proc.stdio[3] as import("node:stream").Writable;
+    fd.on("error", () => { proc.kill(); });
+    fd.end(confidential.bwrapArgs);
   }
   // Envelope pre-registration (Phase 0, §12.1 item 2): the moment the spawn
   // succeeded we already hold a stable taskId for this command. If the command
@@ -1184,32 +1211,29 @@ export async function runWorkspaceCommand(args: {
   // dropped when it is incomplete — the system temp dir must not accumulate
   // one file per command.
   const captureCutoff = new AbortController();
+  const captureOptions = (suffix: string) => ({
+    maxBytes: TOOL_OUTPUT_SPILL_BYTES,
+    maxLines: TOOL_OUTPUT_SPILL_LINES,
+    ...(confidential ? { suppressIncomplete: true } : {
+      spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}${suffix}.log`),
+      spillRetention: "promote" as const,
+      spillWorkspaceRoot: args.workspaceRoot,
+    }),
+  });
   let stdoutIncomplete: string | undefined;
   let stderrIncomplete: string | undefined;
   const stdoutCapture = stdoutPromiseResult(
-    readNodeStream(proc.stdout, {
-      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
-      maxLines: TOOL_OUTPUT_SPILL_LINES,
-      spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}.log`),
-      spillRetention: "promote",
-      spillWorkspaceRoot: args.workspaceRoot,
-    }, {
+    readNodeStream(proc.stdout, captureOptions(""), {
       stopSignal: captureCutoff.signal,
       onIncomplete: (reason) => { stdoutIncomplete = reason; },
     }),
-  ).then((result) => ({ ...result, error: result.error || stdoutIncomplete }));
+  ).then((result) => ({ ...result, value: confidential ? confidential.redact(result.value) : result.value, error: result.error || stdoutIncomplete }));
   const stderrCapture = stdoutPromiseResult(
-    readNodeStream(proc.stderr, {
-      maxBytes: TOOL_OUTPUT_SPILL_BYTES,
-      maxLines: TOOL_OUTPUT_SPILL_LINES,
-      spillPath: join(tmpdir(), `nolo-stream-${randomUUID()}-stderr.log`),
-      spillRetention: "promote",
-      spillWorkspaceRoot: args.workspaceRoot,
-    }, {
+    readNodeStream(proc.stderr, captureOptions("-stderr"), {
       stopSignal: captureCutoff.signal,
       onIncomplete: (reason) => { stderrIncomplete = reason; },
     }),
-  ).then((result) => ({ ...result, error: result.error || stderrIncomplete }));
+  ).then((result) => ({ ...result, value: confidential ? confidential.redact(result.value) : result.value, error: result.error || stderrIncomplete }));
   // A fixed post-exit grace preserves short inherited-pipe drains (including
   // the 600ms regression) without imposing a runtime limit on a live process.
   // This is the single completion gate for foreground and detached results.
@@ -1433,6 +1457,11 @@ export async function runWorkspaceCommand(args: {
         taskId,
         status: "running",
         ...(immediate ? { reason: "long-running-command" } : {}),
+        // 近场行动约束：这条回执正好出现在模型决定「继续还是收尾」的位置。
+        // 同类规则在静态提示词里已重复 5 处（并行块/工具描述/工具指引/回复准则），
+        // 但都沉在数万 token 之前，容易被「回执已收到、先汇报」的局部惯性盖过。
+        turnAction:
+          "This task is tracked. Do NOT end this turn to wait if any other independent authorized work remains — invoke tools for it now. End the turn only when no independent work is left.",
       }),
     };
   }

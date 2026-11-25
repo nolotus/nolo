@@ -56,15 +56,38 @@ export function groupWorkDialogsBySpace(
     });
   }
   return [...groups.values()].sort((a, b) =>
-    Number(a.spaceId === null) - Number(b.spaceId === null) ||
+    Number(b.spaceId === null) - Number(a.spaceId === null) ||
     Number(a.spaceId === OTHER_SPACES_GROUP) - Number(b.spaceId === OTHER_SPACES_GROUP) ||
     Number(Boolean(current) && b.spaceId === current) - Number(Boolean(current) && a.spaceId === current) ||
     b.updatedAt - a.updatedAt || (a.spaceId ?? "").localeCompare(b.spaceId ?? ""));
 }
 
-/** Saved choices override defaults, including a manually opened unassociated group. */
-export function isWorkDialogSpaceGroupExpanded(spaceId: string | null, index: number, saved?: boolean): boolean {
-  return saved ?? (spaceId !== null && spaceId !== OTHER_SPACES_GROUP && index < 3);
+/** 默认展开的具名真实空间个数。 */
+export const DEFAULT_EXPANDED_REAL_SPACE_COUNT = 3;
+
+/** 「空间外」(null) 与「其他空间」不是具名真实空间；它们不占用默认展开名额。 */
+export function isRealWorkDialogSpaceId(spaceId: string | null): spaceId is string {
+  return spaceId !== null && spaceId !== OTHER_SPACES_GROUP;
+}
+
+/**
+ * 某个分组在所有分组中的位置对应的「具名真实空间序号」。
+ * 「空间外」置顶后不能让它挤掉前 3 个具名空间的默认展开，所以默认展开按
+ * 具名空间自己的序号计算，而不是分组数组下标。
+ */
+export function realSpaceOrdinalAt(groups: readonly Pick<WorkDialogSpaceGroup, "spaceId">[], index: number): number {
+  let ordinal = 0;
+  for (let i = 0; i < index; i++) if (isRealWorkDialogSpaceId(groups[i].spaceId)) ordinal++;
+  return ordinal;
+}
+
+/**
+ * Saved choices override defaults, including a manually opened unassociated group.
+ * 默认：仅前 3 个具名真实空间展开；`realSpaceOrdinal` 是该空间在具名真实空间中的序号
+ * （见 `realSpaceOrdinalAt`），「空间外」与「其他空间」默认折叠。
+ */
+export function isWorkDialogSpaceGroupExpanded(spaceId: string | null, realSpaceOrdinal: number, saved?: boolean): boolean {
+  return saved ?? (isRealWorkDialogSpaceId(spaceId) && realSpaceOrdinal < DEFAULT_EXPANDED_REAL_SPACE_COUNT);
 }
 
 /** Accept only explicit choices for currently loaded groups, never inherited/default values. */
@@ -97,6 +120,7 @@ export type WorkSpaceRecord = {
   name?: string;
   userId?: string;
   ownerId?: string;
+  members?: readonly string[];
   categories?: Record<string, { name: string; order: number } | null>;
   contents?: Record<string, { contentKey: string; categoryId?: string | null; order?: number; title?: string; type?: string; updatedAt?: number | string; fileCategory?: string; deleted?: boolean; deletedAt?: number | string } | null>;
 };
@@ -155,6 +179,10 @@ export function areWorkSpaceRecordsEquivalent(
   if (a.name !== b.name || a.userId !== b.userId || a.ownerId !== b.ownerId) {
     return false;
   }
+  if (a.members !== b.members && (
+    !a.members || !b.members || a.members.length !== b.members.length ||
+    a.members.some((member, index) => member !== b.members?.[index])
+  )) return false;
   const catsA = a.categories ?? {};
   const catsB = b.categories ?? {};
   const catKeysA = Object.keys(catsA);
@@ -370,7 +398,7 @@ export function projectWorkSpaceDirectories(
       loadedCount: loaded
     });
   }
-  return result.sort((a,b) => Number(a.spaceId===null)-Number(b.spaceId===null) || Number(a.spaceId===OTHER_SPACES_GROUP)-Number(b.spaceId===OTHER_SPACES_GROUP) || b.updatedAt-a.updatedAt);
+  return result.sort((a,b) => Number(b.spaceId===null)-Number(a.spaceId===null) || Number(a.spaceId===OTHER_SPACES_GROUP)-Number(b.spaceId===OTHER_SPACES_GROUP) || b.updatedAt-a.updatedAt);
 }
 
 /**
@@ -517,7 +545,7 @@ export function canManageSpaceCategories({
   if (member.userId && member.userId !== userId) return false;
   if (member.role === "guest") return false;
 
-  const recordMembers = (record as { members?: string[] } | undefined)?.members;
+  const recordMembers = record?.members;
   if (Array.isArray(recordMembers) && !recordMembers.includes(userId)) {
     return false;
   }

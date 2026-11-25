@@ -30,6 +30,8 @@ export interface CapabilityExecutionContext {
   restrictToWorkspace?: boolean;
   abortSignal?: AbortSignal;
   detachMs?: number;
+  /** Disable background/smart detach (required for ephemeral web-hosted sandboxes so timeout/abort always kills the process group). */
+  disableBackgroundDetach?: boolean;
   /** Whether the destructive action was already approved/confirmed by the caller */
   confirmed?: boolean;
   /** Whether the destructive shell guard is enabled (defaults to true) */

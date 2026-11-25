@@ -12,6 +12,10 @@ import {
   type RemoteTaskCard,
   applyAgentRunEvent,
 } from "./agentRunStore";
+import {
+  isAttachedExecutionSseFrame,
+  type AttachedExecutionSseFrame,
+} from "shared/contracts/attachedExecutionClient";
 
 /** §7.2-b：回前台 / 可见性恢复重拉的最小节流（≥2s，禁止假设缓存新鲜）。 */
 export const AGENT_RUN_HYDRATE_THROTTLE_MS = 2_000;
@@ -249,6 +253,8 @@ export type InstallAgentRunEventStreamOptions = {
   subscribe: AgentRunStreamSubscriber;
   /** 观测缝：仅在测试/诊断时注入，不参与状态。 */
   onFrame?: (event: Record<string, unknown>, applied: boolean) => void;
+  /** 可选：接收同对话域 (`dialog-${userId}-${dialogId}`) 的跨设备附着执行唤醒帧。 */
+  onAttachedExecutionFrame?: (frame: AttachedExecutionSseFrame) => void;
   onTerminalStatus?: (status: number) => void;
 };
 
@@ -278,6 +284,13 @@ export function installAgentRunEventStream(
     headers: { Authorization: `Bearer ${token}` },
     onEvent: (event) => {
       if (disposed) return;
+      if (
+        options.onAttachedExecutionFrame &&
+        isAttachedExecutionSseFrame(event) &&
+        event.dialogKey === `dialog-${scope.userId}-${dialogId}`
+      ) {
+        options.onAttachedExecutionFrame(event);
+      }
       const applied = routeAgentRunStreamEvent(event, scope);
       options.onFrame?.(event, applied);
     },

@@ -19,6 +19,11 @@ export function applyAgentSwitchState(
   state: TuiState,
   target: { name: string; key: string; model?: string },
   messages?: readonly { role?: string; content?: unknown }[],
+  /**
+   * 宿主 env（可选）：估算器要按同一份 env 判断工具面（`NOLO_EXPOSE_MCP_TOOLS`
+   * / `NOLO_EXPOSE_INSTABOX_PARAMS`），不传就退回 `process.env`。
+   */
+  env?: Record<string, string | undefined>,
 ): TuiState {
   return {
     ...state,
@@ -30,6 +35,7 @@ export function applyAgentSwitchState(
       model: target.model, userLanguage: state.userLanguage,
       responseViewport: TUI_RESPONSE_VIEWPORT,
       messages,
+      env: env ?? process.env,
     }),
     turnTokens: undefined,
     lastAuthorityTurnCount: undefined,
@@ -102,6 +108,14 @@ export function handleTuiInput(
     /** Live env for identity resolution (the post-`/login` token lives here). */
     authEnv?: Record<string, string | undefined>;
     /**
+     * Context-estimate env: must be the same env the agent turn actually runs
+     * with (`options.env ?? process.env`). It is separate from `env` because
+     * `env` is the merged startup/task snapshot: an explicit `{}` host env must
+     * not be backfilled with `process.env`, or the estimate counts MCP/Instabox
+     * tool schemas (≈612 tokens) the real turn never sends.
+     */
+    estimateEnv?: Record<string, string | undefined>;
+    /**
      * Output channel for `/links`' copy hint: "history" when the caller renders
      * it as a transcript turn (Ctrl+left-click and selection copy work there),
      * "pipe" when the text is written straight to the stream. Forwarded as-is
@@ -158,7 +172,7 @@ export function handleTuiInput(
       nextState: {
         ...applyAgentSwitchState(state, {
           key: result.nextState.agentKey, name: result.nextState.agentName,
-        }),
+        }, historyTurns, deps?.estimateEnv ?? deps?.env),
         // The synchronous platform resolver already has the model identity.
         contextWindow: result.nextState.contextWindow,
         estimatedContextTokens: result.nextState.estimatedContextTokens,

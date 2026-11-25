@@ -16,7 +16,9 @@
  * 通过 builtinSkillRegistry 暴露给运行时，不落库。
  */
 
+import type { ReferenceItem } from "app/types";
 import { nolotusId } from "core/init";
+import { CAPABILITY_PACK_BY_ID, expandEnabledPacks } from "ai/tools/toolPacks";
 import {
   buildSkillDocMarkdown,
   type SkillDocConfig,
@@ -66,6 +68,33 @@ export function buildSpecialistSkillPageKey(
   slug: SpecialistSkillSlug,
 ): string {
   return `page-${userId}-${buildSpecialistSkillId(slug)}`;
+}
+
+/**
+ * 构造指向某个专职内置 skill 的对话级引用（与
+ * `buildBuiltinObjectSkillReference` 同构）。
+ *
+ * 用途：对象侧边栏助手把「对象编辑技能」作为 `dialog.extraReferences` 挂载，
+ * 这样用户切换到任意自有/收藏 Agent 后，技能正文与工具授权仍然随对话生效，
+ * 不再依赖某个专用预置 Agent 的 `references`。
+ *
+ * `type: "instruction"` 与内置对象技能一致：引用解析时
+ * `extractRuntimePageCapabilities` 会把它升级成 instruction 并把
+ * `skillConfig.toolNames` 计入工具面。
+ */
+export function buildSpecialistSkillReference(
+  slug: SpecialistSkillSlug,
+  userId: string,
+): ReferenceItem {
+  const trimmedUserId = userId.trim();
+  if (!trimmedUserId) {
+    throw new Error("buildSpecialistSkillReference requires userId");
+  }
+  return {
+    dbKey: buildSpecialistSkillPageKey(trimmedUserId, slug),
+    title: seedBySlug(slug).title,
+    type: "instruction",
+  };
 }
 
 /**
@@ -245,6 +274,68 @@ export function buildSpecialistSkillConfig(
     description: seed.description,
     ...(seed.toolNames?.length ? { toolNames: [...seed.toolNames] } : {}),
   };
+}
+
+/**
+ * 一个专职技能「真正需要」的工具面 = skill 自身的 `toolNames` + 同名能力包的工具。
+ *
+ * 为什么需要这一步：`app-builder` 是 `CAPABILITY_SLUG_COLLISIONS` 里的一个能力
+ * 拆成两半——能力包持工具（`CAPABILITY_PACK_BY_ID["app-builder"].tools`），
+ * skill 持协议（`toolNames: []`，见 builtinSkillRegistry.test.ts 的钉子）。
+ * 所以只把 skill 作为 `dialog.extraReferences` 挂上，通用 Agent 拿到的是「说明书
+ * 没有工具」；本函数把两侧合成一份清单，供入口把它作为
+ * `runtimeOptions.extraTools` 注入，保证说明书与工具成套。
+ *
+ * 与 `buildObjectAssistantRuntimeOptions` 的 app 分支同源（同一能力包），
+ * 不另抄一份工具名。
+ */
+export function buildSpecialistRuntimeToolGrants(
+  slug: SpecialistSkillSlug,
+): string[] {
+  const seed = seedBySlug(slug);
+  // 同名能力包存在时走 expandEnabledPacks：它会展开 `includes`（app-builder
+  // 通过 app-deploy 才拿到 appPreflight / appDeploy），与 agent.enabledPacks
+  // 的展开规则逐字节一致，不在这里另抄一份组合关系。
+  const packTools = CAPABILITY_PACK_BY_ID[slug]
+    ? expandEnabledPacks([slug])
+    : [];
+  return Array.from(new Set<string>([...(seed.toolNames ?? []), ...packTools]));
+}
+
+/**
+ * 页面身份 → 内置专职技能 slug（不是内置专职技能则 null）。
+ *
+ * 为什么按 skillConfig.id 判定而不是按名字：id 是由 slug 经同一 FNV-1a 确定性
+ * 生成的，正是 `dialog.extraReferences` 解析到「这就是那个内置专职技能」的
+ * 唯一稳定依据；名字只是可读标签。同时接受 slug 本身，便于静态调用方。
+ *
+ * 用途：续轮工具面补齐——`app-builder` / `agent-creator` 的能力包工具不在
+ * `skillConfig.toolNames` 里，只靠持久化的 extraReferences 会在第 2 轮丢工具。
+ */
+export function resolveSpecialistSkillSlugByIdentity(
+  identity: string | null | undefined,
+): SpecialistSkillSlug | null {
+  const raw = typeof identity === "string" ? identity.trim() : "";
+  if (!raw) return null;
+  return (
+    SPECIALIST_SKILL_SLUGS.find(
+      (slug) => slug === raw || buildSpecialistSkillId(slug) === raw,
+    ) ?? null
+  );
+}
+
+/**
+ * 被作为 instruction 挂载的内置专职技能要补齐的工具（无则空数组）。
+ * 参数取 `skillConfig.id` / `skillConfig.name` / 引用 dbKey 均可。
+ */
+export function resolveSpecialistReferenceToolGrants(
+  ...identities: Array<string | null | undefined>
+): string[] {
+  for (const identity of identities) {
+    const slug = resolveSpecialistSkillSlugByIdentity(identity);
+    if (slug) return buildSpecialistRuntimeToolGrants(slug);
+  }
+  return [];
 }
 
 /**

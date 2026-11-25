@@ -180,7 +180,7 @@ document.documentElement.lang = chrome?.i18n?.getUILanguage?.() || "en";
 document.title = t("approveTitle", "Nolo needs your approval");
 
 const ACTION_LABELS = new Map([
-  ["click", t("approveClick", "Click a control")],
+  ["click", t("approveClick", "Allow Nolo to click this control?")],
   ["type", t("approveType", "Enter text")],
   ["press", t("approvePress", "Press a key")],
   ["set_select_value", t("approveSelect", "Select an option")],

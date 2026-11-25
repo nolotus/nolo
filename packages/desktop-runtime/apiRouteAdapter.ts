@@ -3,8 +3,10 @@ import { toErrorMessage } from "core/errorMessage";
 import { safeParse } from "valibot";
 import {
   createApiError,
+  extractApiAuthToken,
   isApiError,
   serializeApiError,
+  type ApiAuthMode,
   type ApiContext,
   type ApiMethod,
   type ApiProcedure,
@@ -34,7 +36,7 @@ const nextRequestId = () =>
   `api-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 async function parseInput(req: Request, method: ApiMethod): Promise<unknown> {
-  if (method === "GET") {
+  if (method === "GET" || method === "HEAD") {
     return Object.fromEntries(new URL(req.url).searchParams);
   }
 
@@ -49,14 +51,96 @@ async function parseInput(req: Request, method: ApiMethod): Promise<unknown> {
   }
 }
 
-function contextFromRequest(req: Request): ApiContext {
-  const authHeader = req.headers.get("authorization") || undefined;
-  const token = authHeader?.startsWith("Bearer ")
-    ? authHeader.slice("Bearer ".length)
-    : authHeader;
+export type ApiTokenAuthenticator = (
+  token: string,
+  req: Request,
+) => Promise<{ userId: string } | null> | { userId: string } | null;
+
+async function resolveContextFromRequest(
+  req: Request,
+  authMode: ApiAuthMode,
+  authenticateToken?: ApiTokenAuthenticator,
+): Promise<ApiContext> {
+  const requestId = req.headers.get("x-request-id") || nextRequestId();
+  const token = extractApiAuthToken(req.headers);
+
+  if (authMode === "none") {
+    return {
+      requestId,
+      ...(token ? { token } : {}),
+    };
+  }
+
+  if (!token) {
+    if (authMode === "required") {
+      throw createApiError({
+        code: "unauthorized",
+        message: "Authentication required",
+        status: 401,
+      });
+    }
+    return { requestId };
+  }
+
+  if (!authenticateToken) {
+    if (authMode === "required") {
+      throw createApiError({
+        code: "internal",
+        message: "Route requires authentication but no token authenticator was configured",
+        status: 500,
+      });
+    }
+    return { requestId, token };
+  }
+
+  let resolved: { userId: string } | null = null;
+  try {
+    resolved = await authenticateToken(token, req);
+  } catch (error) {
+    const authorityResponse = authorityRequestErrorResponse(error);
+    if (authorityResponse) throw error;
+    if (isApiError(error)) {
+      if (authMode === "optional" && error.code === "unauthorized") {
+        return { requestId };
+      }
+      throw error;
+    }
+    const errCode = typeof (error as { code?: unknown })?.code === "string"
+      ? (error as { code: string }).code
+      : "";
+    if (errCode === "unauthorized") {
+      if (authMode === "required") {
+        throw createApiError({
+          code: "unauthorized",
+          message: "Invalid or expired authentication token",
+          status: 401,
+        });
+      }
+      return { requestId };
+    }
+    // Non-unauthorized failures (e.g. AuthStoreFailureError / disk I/O) must propagate as 5xx, never 401.
+    throw createApiError({
+      code: "internal",
+      message: "Authentication service unavailable",
+      status: 500,
+    });
+  }
+
+  if (!resolved?.userId) {
+    if (authMode === "required") {
+      throw createApiError({
+        code: "unauthorized",
+        message: "Invalid or expired authentication token",
+        status: 401,
+      });
+    }
+    return { requestId };
+  }
+
   return {
-    requestId: req.headers.get("x-request-id") || nextRequestId(),
-    ...(token ? { token } : {}),
+    requestId,
+    token,
+    userId: resolved.userId,
   };
 }
 
@@ -73,13 +157,28 @@ export type ApiRouteEntry = Partial<Record<ApiMethod, ApiLegacyRouteHandler>> & 
   OPTIONS?: () => Response;
 };
 
+export interface CreateApiRouteOptions {
+  enableCors?: boolean;
+  authenticateToken?: ApiTokenAuthenticator;
+}
+
 export function createApiRoute<TInput, TOutput>(
   procedure: ApiProcedure<TInput, TOutput>,
-  options: { enableCors?: boolean } = {}
+  options: CreateApiRouteOptions = {}
 ): ApiRouteEntry {
   const enableCors = options.enableCors ?? true;
+  const authMode: ApiAuthMode = procedure.auth ?? "none";
+
   const handler = async (req: Request): Promise<Response> => {
     try {
+      // Authenticate BEFORE parsing/validating input when auth is required so
+      // unauthenticated callers never probe input schemas or business state.
+      const context = await resolveContextFromRequest(
+        req,
+        authMode,
+        options.authenticateToken,
+      );
+
       const rawInput = await parseInput(req, procedure.method);
       const input = safeParse(procedure.input, rawInput);
       if (!input.success) {
@@ -98,7 +197,7 @@ export function createApiRoute<TInput, TOutput>(
 
       const result = await procedure.handler({
         input: input.output,
-        context: contextFromRequest(req),
+        context,
         request: req,
       });
 

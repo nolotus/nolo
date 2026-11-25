@@ -288,11 +288,14 @@ export {
 } from "./localWorkspaceTools";
 export {
   BWRAP_PROBE_TTL_MS,
+  DEFAULT_HOSTED_SANDBOX_RESOURCE_LIMITS,
   DEFAULT_SANDBOX_TMPFS_SIZE_BYTES,
   SANDBOX_PATH,
+  SANDBOX_RUNTIME_BIN_DIR,
   SANDBOX_SYSTEM_RO_BINDS,
   SANDBOX_TMP_DIR,
   SHELL_SANDBOX_ENV,
+  SANDBOX_EGRESS_SOCKET,
   buildBwrapArgs,
   buildBwrapCommandPrefix,
   invalidateBwrapProbeCache,
@@ -304,6 +307,8 @@ export {
   redactHostPaths,
   resetBwrapProbeCacheForTests,
   resetSandboxWarningsForTests,
+  resolveHostRuntimeBinary,
+  resolvePrlimitPath,
   resolveSandboxShadowTargets,
   resolveShellSandboxCommandPrefix,
   resolveShellSandboxPlan,
@@ -311,6 +316,8 @@ export {
 export type {
   BwrapPrefixArgs,
   BwrapProbeResult,
+  BwrapResourceLimits,
+  BwrapRuntimeBinary,
   BwrapShadowTarget,
   BuildBwrapCommandPrefixArgs,
   ResolveShellSandboxPrefixArgs,
@@ -524,3 +531,5 @@ export {
   type SubtaskSoftBudgetConfig,
   type SubtaskSoftBudgetMilestoneLevel,
 } from "./subtaskBudget";
+
+export { withConfidentialBwrapShell } from "./workspaceShell";

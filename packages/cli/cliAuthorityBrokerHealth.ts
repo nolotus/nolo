@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 
 import { toErrorMessage } from "core/errorMessage";
+import { loadCliAuthorityBrokerTls } from "./cliAuthorityBrokerTls";
 import {
   createCliAuthorityBrokerClient,
   createCliAuthorityBrokerSocketInvoker,
@@ -15,7 +16,7 @@ type BrokerHealthRecord = {
 type CliAuthorityBrokerHealthDeps = {
   readJson: (filePath: string) => Promise<unknown>;
   isPidAlive: (pid: number) => boolean;
-  openEndpoint: (endpoint: string) => Promise<void>;
+  openEndpoint: (endpoint: string, metadataPath: string) => Promise<void>;
 };
 
 const defaultCliAuthorityBrokerHealthDeps: CliAuthorityBrokerHealthDeps = {
@@ -30,10 +31,10 @@ const defaultCliAuthorityBrokerHealthDeps: CliAuthorityBrokerHealthDeps = {
       return (error as { code?: unknown }).code === "EPERM";
     }
   },
-  async openEndpoint(endpoint) {
+  async openEndpoint(endpoint, metadataPath) {
     const client = createCliAuthorityBrokerClient({
       endpoint,
-      invoke: createCliAuthorityBrokerSocketInvoker({ endpoint }),
+      invoke: createCliAuthorityBrokerSocketInvoker({ endpoint, tls: await loadCliAuthorityBrokerTls(metadataPath) }),
     });
     await client.open();
   },
@@ -96,7 +97,7 @@ export async function probeCliAuthorityBrokerHealth(args: {
   }
 
   try {
-    await deps.openEndpoint(args.endpoint);
+    await deps.openEndpoint(args.endpoint, args.metadataPath);
   } catch (error) {
     return {
       ok: false,

@@ -12,6 +12,7 @@ import {
 } from "render/table/tableStore";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
+import { useEpubAssistantContext } from "create/space/epub/epubAssistantStore";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { readAppServerOrigin } from "app/constants/appEditor";
@@ -23,11 +24,28 @@ import "./dialogStylexEscapeHatch.css";
 import {
   buildObjectAssistantRuntimeOptions,
   getObjectAssistantUiConfig,
-  getPreferredObjectAssistantKey,
   OBJECT_ASSISTANT_TO_SKILL,
   type ObjectAssistantKind,
 } from "./objectAssistantRegistry";
 import { buildBuiltinObjectSkillReference } from "ai/skills/builtinObjectSkills";
+import { buildSpecialistSkillReference } from "ai/skills/specialistSkills";
+
+export const EPUB_QUICK_PROMPTS = [
+  {
+    label: "提炼本章要点",
+    prompt: "请提炼当前这一章的核心论点、关键案例和可跳读部分。",
+  },
+  {
+    label: "核查本章争议说法",
+    prompt:
+      "请核查当前这一章里有哪些缺乏可靠出处、容易引起争议或把推测说成定论的说法，并给出反方视角或原始出处线索。",
+  },
+  {
+    label: "整理成空间笔记",
+    prompt:
+      "请把当前这一章的核心观点和关键结论整理成一篇结构化的读书笔记（适合直接保存到当前空间）。",
+  },
+] as const;
 
 interface ObjectAssistantPanelProps {
   kind: ObjectAssistantKind;
@@ -70,6 +88,8 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
   const appSelectedNode = useAppSelectedNode();
   const tableFocusContext = useTableFocusContext();
   const tableRows = useTableRows();
+  // 主区域正在阅读 EPUB 时，阅读器把「书名 + 目录 + 当前章节正文」发布到这里（仅 kind=file 使用）。
+  const epubContext = useEpubAssistantContext(kind === "file" ? contentKey : null);
   const entity = useAppSelector((state) =>
     contentKey ? selectById(state, contentKey) : null
   );
@@ -86,16 +106,20 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     }
   );
 
-  // app 分支保持原有预置 agent 逻辑不变；page/table/image/file 改用用户自己的
-  // agent（收藏 / 默认逻辑），不再现场创建 objectAssistant-<kind> 预置记录。
-  const preferredAgentKeys =
-    kind === "app" ? getPreferredObjectAssistantKey(kind, currentUser?.userId) : [];
+  // 五类对象助手统一走「用户当前选中的 Agent（收藏 / 默认）」：不再绑专用预置 agent，
+  // 空数组即交给 ArtifactAssistantPanel 的收藏/默认逻辑，也不在现场创建
+  // objectAssistant-<kind> 预置记录。
+  const preferredAgentKeys: string[] = [];
   const ui = getObjectAssistantUiConfig(kind);
 
-  // page/table/image/file 的对象技能作为对话级引用挂载：composer 切换到用户自己的 agent 后，
+  // 对象技能作为对话级引用挂载：composer 切换到用户自己的 agent 后，
   // 工具与操作指南（dialog.extraReferences）仍然生效。
+  // app 用专职内置 skill（app-builder）承载应用编辑能力，与其余四类的内置对象技能同构。
   const skillExtraReferences = useMemo(() => {
-    if (!currentUser?.userId || kind === "app") return undefined;
+    if (!currentUser?.userId) return undefined;
+    if (kind === "app") {
+      return [buildSpecialistSkillReference("app-builder", currentUser.userId)];
+    }
     return [buildBuiltinObjectSkillReference(OBJECT_ASSISTANT_TO_SKILL[kind], currentUser.userId)];
   }, [kind, currentUser?.userId]);
 
@@ -181,6 +205,7 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
           type: entity?.type ?? "file",
           url: entity?.url,
           size: entity?.size,
+          ...(epubContext ? { epub: epubContext } : {}),
         },
       });
     }
@@ -198,6 +223,7 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     tableFocusContext,
     tableRows,
     appSelectedNode,
+    epubContext,
   ]);
 
   if (kind === "app" && appLoading) {
@@ -244,11 +270,14 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
       key={effectiveContentKey}
       panelTitle={t(`chat:${kind}AssistantPanelTitle`, ui.panelTitle)}
       activePanelTitle={t(`chat:${kind}AssistantTitle`, ui.activePanelTitle)}
+      skillBadge={t(`chat:${kind}AssistantSkillBadge`, ui.skillBadge)}
       emptyMessage={t(`chat:${kind}AssistantEmpty`, ui.emptyMessage)}
       loginMessage={t(`chat:${kind}AssistantLogin`, ui.loginMessage)}
       preferredAgentKeys={preferredAgentKeys}
       extraReferences={skillExtraReferences}
       runtimeOptions={runtimeOptions}
+      epubContentKey={kind === "file" ? contentKey : undefined}
+      quickPrompts={kind === "file" && epubContext ? EPUB_QUICK_PROMPTS : undefined}
     />
   );
 };

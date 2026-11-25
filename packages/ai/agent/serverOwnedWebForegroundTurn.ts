@@ -2,8 +2,16 @@ import type { RootState } from "app/store";
 import type { Agent, DialogConfig } from "app/types";
 import { selectCurrentServer } from "app/settings/serverSelectors";
 import { getIsDesktopApp } from "app/utils/env";
+import {
+  clearGateTurn,
+  getSnapshot as getActionGateSnapshot,
+  pushGate,
+  targetForRunKind,
+} from "app/utils/desktopActionGateChannel";
 import { selectIdentityToken, selectIdentityUserId } from "identity/selectors";
 import { extractCustomId } from "core/prefix";
+import { BUILTIN_NOLO_AGENT_KEY } from "core/builtinAgents";
+import { MCP_TOOL_NAMES } from "../../agent-runtime/mcpConnectionSpecs";
 import { createDialogMessageKeyAndId } from "database/keys";
 import {
   addActiveController,
@@ -212,6 +220,16 @@ export async function runServerOwnedWebForegroundTurn(
   const { key: transientKey, messageId: transientId } = createDialogMessageKeyAndId(dialogId);
   const controller = new AbortController();
   const loopKey = `server-owned:${dialogId}:${transientId}`;
+  // The existing Web dialog submits via this in-memory target, not the active
+  // account/server at click time. Scope cleanup to this client turn, not the dialog.
+  const actionGateTarget = targetForRunKind("server-run", { server: currentServer, token });
+  const receivedGateIds = new Set<string>();
+  let actionGatesClosed = false;
+  const closeActionGates = () => {
+    if (actionGatesClosed) return;
+    actionGatesClosed = true;
+    if (receivedGateIds.size) clearGateTurn(loopKey);
+  };
   let assistantStream = EMPTY_SERVER_OWNED_ASSISTANT_STREAM;
   let sawDone = false;
   let clientControllerReleased = false;
@@ -359,6 +377,10 @@ export async function runServerOwnedWebForegroundTurn(
   const allowedToolNames = resolveServerOwnedWebAllowedToolNames(
     Array.isArray(args.agentConfig.tools) ? args.agentConfig.tools : [],
   );
+  // This advertises client support, not permission. The server alone
+  // admits the fixed read-only demo scope for the authenticated turn.
+  const supportsMcpConfirmation = args.dialogConfig.agentMode === "auto" &&
+    args.agentKey === BUILTIN_NOLO_AGENT_KEY;
   const body = JSON.stringify({
     agentKey: args.agentKey,
     userInput,
@@ -379,12 +401,15 @@ export async function runServerOwnedWebForegroundTurn(
         "client-user-prepersisted",
         "durable-user-batch",
         "durable-tool-cards",
+        ...(supportsMcpConfirmation ? ["mcp-confirmation"] : []),
       ],
       // This is the exact post-filter surface produced during admission, not a
       // global durable superset. Server-private defaults and machine tools are
       // injected before this constraint, then intersected back to this turn's
       // admitted names. Direct run() callers are sanitized again above.
-      allowedToolNames,
+      allowedToolNames: supportsMcpConfirmation
+        ? [...new Set([...allowedToolNames, ...MCP_TOOL_NAMES])]
+        : allowedToolNames,
       ...(args.dialogConfig.agentMode === "auto"
         ? { dialogAgentMode: "auto" as const }
         : { dialogAgentMode: "fixed" as const }),
@@ -408,6 +433,7 @@ export async function runServerOwnedWebForegroundTurn(
     "run-fetch-start",
     `endpoint=${currentServer}/api/agent/run agentKey=${args.agentKey}`,
   );
+  controller.signal.addEventListener("abort", closeActionGates, { once: true });
   try {
     let response: Response;
     try {
@@ -457,6 +483,31 @@ export async function runServerOwnedWebForegroundTurn(
         if (payload?.type === "error") {
           return { reject: payload.message || "Agent execution failed" };
         }
+
+        if (payload?.type === "action_gate") {
+          const gate = payload.gate;
+          // Gates never reach message or tool projection, even if unrecognized.
+          if (
+            actionGatesClosed || controller.signal.aborted ||
+            gate?.kind !== "confirm" || gate.payload?.action !== "mcp_confirmation" ||
+            typeof gate.id !== "string" || !gate.id.trim() || typeof gate.title !== "string" ||
+            (gate.body !== undefined && typeof gate.body !== "string")
+          ) return;
+          // The shared channel is keyed by gate id; never replace a pending
+          // gate owned by another turn or reopen one already seen in this turn.
+          if (receivedGateIds.has(gate.id) || getActionGateSnapshot().gates.some(
+            (pending) => pending.id === gate.id,
+          )) return;
+          receivedGateIds.add(gate.id);
+          pushGate(
+            { id: gate.id, kind: "confirm", title: gate.title, body: gate.body,
+              payload: { action: "mcp_confirmation" } },
+            actionGateTarget,
+            { dialogId, turnId: loopKey, messageId: transientId },
+          );
+          return;
+        }
+        if (payload?.type === "done") closeActionGates();
 
         toolProjection.handlePayload(payload);
 
@@ -558,6 +609,8 @@ export async function runServerOwnedWebForegroundTurn(
 
     return { serverOwned: true };
   } finally {
+    controller.signal.removeEventListener("abort", closeActionGates);
+    closeActionGates();
     releaseClientController();
     // A turn whose visible projection already settled at `done` keeps its
     // finished transient: the authoritative answer was received, so deleting it

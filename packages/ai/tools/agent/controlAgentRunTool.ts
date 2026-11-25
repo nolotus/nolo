@@ -39,13 +39,13 @@ export type ControlAgentRunAction = (typeof CONTROL_AGENT_RUN_ACTIONS)[number] |
 
 /** 每个 action 在 `action` 参数描述里的那一句（顺序由调用方给的 actions 决定）。 */
 const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
-    recoverPreparedWriter: "recoverPreparedWriter=仅本地：显式撤销同一 attemptId 的 fenced-launch-v1 prepared writer 并释放 claim；granted、legacy、unknown 或 attempt 不匹配均拒绝；不终止进程、不提供 force",
-    list: "list=列出 run（省略 runId）",
-    status: "status=查单条 run 状态 + 可选日志；终态 run 的完整结论在返回的 resultFile（用 readFile 读原文；lastAssistantText 只是 2000 字摘要，不存在时读 resultFile）；resultFile 缺失可能是 run 被用户中断，按「无结论」处理，不据此判工具故障",
-    stop: "stop=取消 run",
-    append: "append=向任务追加指令（运行中入队，终态 continuation）",
-    wait: "wait=终态阻塞等待：订阅该 dialog 的 SSE 事件流等 done/failed，已终态立即返回，不是轮询",
-    todo: "todo=列出 runtime todo（由 startAgentRun 的 batchId/trackTodo 产生）",
+    recoverPreparedWriter: "recoverPreparedWriter=仅本地按精确 attemptId 释放 prepared writer（granted/legacy/unknown 或不匹配拒；不杀进程、不提供 force）",
+    list: "list=列 run",
+    status: "status=查单条 run 状态 + 可选日志；终态看 resultFile（readFile lines:\"1-60\"，按需续读），缺失=无结论",
+    stop: "stop=取消",
+    append: "append=追加指令（运行中入队/终态续跑）",
+    wait: "wait=阻塞等终态（SSE）",
+    todo: "todo=列 runtime todo",
 };
 
 /**
@@ -54,7 +54,7 @@ const ACTION_DESCRIPTIONS: Record<ControlAgentRunAction, string> = {
  * 失败详情是什么」，不承担等待完成或常规进度跟踪。
  */
 const WAKE_STATUS_ACTION_DESCRIPTION =
-    "status=按需诊断单条 run：仅在怀疑卡死、失败后看详情/日志（tailLines>0）、或用户明确询问执行细节时调用；终态 run 的完整结论在返回的 resultFile（readFile 读原文，lastAssistantText 只是 2000 字摘要）；resultFile 缺失也可能是 run 被用户中断（正文只留在 dialog/.log），按「无结论」处理而不是判定工具故障；正常运行的进度由宿主观察，禁止连续 status 查询等待完成";
+    "status=诊断（怀疑卡死/失败后看详情/日志）：终态看 resultFile（lines:\"1-60\"，按需续读），缺失=无结论；禁止连续 status 查询等待完成";
 
 /**
  * 按环境裁剪后的 controlAgentRun schema。
@@ -77,23 +77,15 @@ export function buildControlAgentRunFunctionSchema(opts?: {
     const actions = opts?.actions ?? CONTROL_AGENT_RUN_ACTIONS;
     const hasWait = actions.includes("wait");
     const wake = opts?.wakeEnabled === true;
-    const actionList = actions.filter((a) => a !== "todo").join("/");
     return {
         name: "controlAgentRun",
         description:
-            `观察和控制后台 agent run（action：${actionList}，另有 todo 查询）。` +
+            "控制后台 run。" +
             (wake
-                ? "本环境有终态唤醒（terminal wake）：正常后台 run 派发后直接收尾，宿主会持续观察生命周期并在 run 到终态时自动把父对话接回来。"
+                ? "有终态唤醒（terminal wake），派发后直接收尾，不用于等待完成或持续跟踪进度，不要用连续查状态代替等待；仅控管与诊断。"
                 : hasWait
-                    ? "用 startAgentRun 拿到 runId 后跟进度、等结果、追加指令或叫停。"
-                    : "用 startAgentRun 拿到 runId 后跟进度、追加指令或叫停。") +
-            "盯梢/轮询纪律见 system prompt「多 Agent 编排」段：异步派发后等终态通知、不要轮询；" +
-            (hasWait
-                ? "阻塞等待（wait action）会冻结对话，仅限 ① 预计 <100s 且马上要用结果 ② 用户明确要求同步等待或正在与该子任务对话 ③ 无并行工作可做。"
-                : wake
-                    ? "本工具没有阻塞等待动作，只用于控制、异常诊断和必要的一次性状态检查，不用于等待完成或持续跟踪进度，不要用连续查状态代替等待。"
-                    : "") +
-            "本工具供你自己做决策用：用户界面已实时显示每条 run 的状态，不必为「让用户看到状态」而调用，返回值也不要复述给用户。",
+                    ? "跟进度、等结果、追加指令或叫停；阻塞等待（wait action）冻结对话，仅限 <100s 且急用/用户要求同步/无并行。"
+                    : "追进度、追加指令或叫停。"),
         parameters: {
             type: "object",
             properties: {
@@ -110,80 +102,65 @@ export function buildControlAgentRunFunctionSchema(opts?: {
                 },
                 runId: {
                     type: "string",
-                    description:
-                        "目标 run 的 ID（startAgentRun 返回的 runId）。action=list 时省略。",
+                    description: "目标 runId（list 省略）。",
                 },
                 ...(actions.includes("recoverPreparedWriter") ? { attemptId: {
                     type: "string",
-                    description: "recoverPreparedWriter 必填：status 返回的 writerLaunch.attemptId；必须与目标 prepared attempt 完全相同。环境变量仅 locator，不授予恢复权限。",
+                    description: "recoverPreparedWriter 必填，精确匹配 writerLaunch.attemptId。",
                 } } : {}),
                 dialogKey: {
                     type: "string",
-                    description:
-                        "可选。action=append 时目标 dialog 的 dbKey（如 dialog-user-xxx）。给了 runId 时由 runId 推导；本地 CLI 宿主上只给 dialogKey = 向同用户活着的普通 CLI dialog 投递一条通知（进它现有队列排队，不启动 run/模型，等待确认或 stop 时只 defer；目标离线或无接收器时明确返回 unsupported/offline，不静默落库）。",
+                    description: "append 用（有 runId 自动推导）；CLI 仅传此项=向在线 CLI dialog 投递通知（不启 run）。",
                 },
                 userInput: {
                     type: "string",
-                    description:
-                        "action=append 时追加给该任务的新指令或纠偏文本。",
+                    description: "append 指令/纠偏文本。",
                 },
                 mode: {
                     type: "string",
                     enum: ["enqueue", "continue"],
-                    description:
-                        "可选。action=append 时的追加模式：enqueue=加入队列供下一轮消费；continue=终态续跑（需要 runId；本地 CLI 宿主上只给 dialogKey 时仅支持 enqueue）。缺省时自动根据 run 状态适配。",
+                    description: "append：enqueue=入队；continue=终态续跑（需 runId）；缺省自动适配。",
                 },
                 ...(hasWait
                     ? {
                           timeoutMs: {
                               type: "number",
-                              description:
-                                  "可选。action=wait 的等待上限（毫秒），默认 100000。超时返回 status=\"timeout\"（不是失败），可稍后再 wait 或改用 status/stop。",
+                              description: "wait 上限 ms，默认 100000；超时返回 timeout（非失败）。",
                               default: 100000,
                           },
                       }
                     : {}),
                 includeCheckpoint: {
                     type: "boolean",
-                    description: "可选。仅 action=status 且显式 true 时返回脱敏、有界的阶段 checkpoint；默认不返回。checkpoint 不是最终结论，不改变 run 终态。",
+                    description: "status 为 true 时返回脱敏 checkpoint；默认 false。",
                 },
                 tailLines: {
                     type: "number",
                     description:
-                        "可选。action=status 时：0=只返回状态摘要，>0=同时返回最近 N 行日志（默认 0）。" +
-                        "摘要里的 resultFile 是终态 run 的完整结论正文（readFile 读它），lastAssistantText 只是 2000 字摘要——长结果不要去啃带 ANSI 的日志。" +
-                        "resultFile 缺失也可能是 run 被用户中断（正文只留在 dialog/.log），不要据此判定工具故障。" +
-                        (wake
-                            ? "状态摘要含 progress（inFlight=此刻在执行什么、idleMs），用于一次性判断「它是不是卡住了」；正常运行的进度由宿主观察，不要反复调用 status 盯 progress。"
-                            : "状态摘要已含 progress（工具调用/LLM 调用/inFlight=此刻在执行什么、idleMs），先看它判断「在干活」还是「卡住」，确实可疑或已失败才拉日志。"),
+                        "status：0=摘要，>0=最近 N 行日志；结论看 resultFile（lines:\"1-60\"，按需续读）；含 progress " +
+                        (wake ? "供一次性判断是否卡住，不要反复调用。" : "供诊断。"),
                     default: 0,
                 },
                 batchId: {
                     type: "string",
-                    description:
-                        "可选。action=list 时只返回该批次的 run（startAgentRun 返回值或入参中的 batchId）。",
+                    description: "list 按 batchId 过滤。",
                 },
                 status: {
                     type: "string",
-                    description:
-                        "可选。action=list 时按状态过滤，单值或逗号分隔多值（如 'running,orphaned'）。" +
-                        "与 statusFilter 同义，status 优先；orphaned=pid 已死但记录仍 running 的孤儿 run。默认 all。",
+                    description: "list 过滤（逗号分隔，如 running,orphaned），优先于 statusFilter；orphaned=死 pid。",
                 },
                 statusFilter: {
                     type: "string",
                     enum: ["running", "done", "failed", "cancelled", "orphaned", "all"],
-                    description:
-                        "可选。action=list 时按状态过滤，默认 all。与 status 同义（status 优先，且 status 支持多值）。",
+                    description: "同 status（status 优先），默认 all。",
                 },
                 limit: {
                     type: "number",
-                    description:
-                        "可选。local CLI 的 action=list/todo 时限制返回数量，默认 10，上限 50；输出最多 8 KiB，按完整条目分页。server 行为不由此限制。",
+                    description: "local list/todo 上限（默认 10，最大 50，≤8KiB 分页）。",
                 },
                 offset: {
                     type: "number",
-                    description:
-                        "可选。action=list/todo 时跳过前 N 条，配合 limit 翻页。默认 0；local CLI 会将非有限或负数规整为 0。",
+                    description: "list/todo 偏移，默认 0。",
                 },
             },
             required: ["action"],

@@ -238,15 +238,6 @@ html[data-nolo-desktop="1"] .DialogPage__messages::-webkit-scrollbar {
   display: none;
 }
 
-/* .page-assistant-panel__chat-messages .msg-body.robot */
-.page-assistant-panel__chat-messages .msg-body.robot {
-  box-sizing: border-box;
-  background: var(--backgroundSecondary);
-  border-radius: var(--radius-xs);
-  padding: 12px 14px;
-  border: 1px solid var(--borderSubtle);
-}
-
 /* .page-assistant-panel__chat-messages .msg-body.self */
 .page-assistant-panel__chat-messages .msg-body.self {
   max-width: 92%;

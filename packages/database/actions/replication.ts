@@ -11,6 +11,7 @@ import {
   noloWriteRequest,
   syncWithServers,
   type UploadProgressHandler,
+  type UploadRequestConfig,
 } from "../requests";
 import { planServersForTenant } from "../tenantPlacement";
 import {
@@ -18,6 +19,7 @@ import {
   isDeviceLocalOwnerId,
 } from "../authority/deviceLocal";
 import { resolveRecordAuthority } from "../authority/recordAuthority";
+import { isTokenStatsKey } from "../keys";
 import {
   replicationTargetKey,
   type WriteReplicationAckHandle,
@@ -53,6 +55,16 @@ export const resolveAuthorityReplicationServers = ({
   record?: any;
   state: any;
 }): string[] => {
+  // `token-stats-*` 统计是服务端独占权威数据：服务端 write/patch/delete 三处都会
+  // 以 400 (`token_stats_write_rejected`) 拒绝客户端请求。客户端仍保留本地
+  // stats 读写（离线/local 展示契约），但绝不该把它们复制到远端——否则每次本地
+  // 统计更新都会换回一次必然失败的 HTTP 往返。此处统一返回空列表，写入、
+  // 补丁、删除与既有记录重放四条路径都跳过网络。普通 `token-*` 明细记录
+  // （isTokenStatsKey 为 false）照常复制。
+  if (isTokenStatsKey(dbKey)) {
+    return [];
+  }
+
   const allServers = resolveReplicationServers(
     currentServer,
     syncServers,
@@ -213,11 +225,7 @@ export const resolveUploadReplicationServers = ({
   currentServer: string | undefined;
   syncServers: string[] | undefined;
   tenantId: string | null | undefined;
-  uploadConfig: {
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: Omit<UploadRequestConfig, "file">;
   state: any;
 }): string[] => {
   const allServers = resolveReplicationServers(currentServer, syncServers);
@@ -406,12 +414,7 @@ export const scheduleUploadReplication = ({
   currentServer: string | undefined;
   syncServers: string[] | undefined;
   tenantId: string | null | undefined;
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: UploadRequestConfig;
   state: any;
   excludeServers?: string[];
 }): string[] => {
@@ -456,12 +459,7 @@ export const uploadToCurrentServer = async ({
   onProgress,
 }: {
   currentServer: string | undefined;
-  uploadConfig: {
-    file: File;
-    metadata: any;
-    customKey: string;
-    userId?: string;
-  };
+  uploadConfig: UploadRequestConfig;
   state: any;
   signal?: AbortSignal;
   onProgress?: UploadProgressHandler;

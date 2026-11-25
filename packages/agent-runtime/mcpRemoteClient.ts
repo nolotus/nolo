@@ -23,6 +23,11 @@ export type McpRemoteClientDependencies = {
   resolveCredential?(context: McpExecutionContext): Promise<{ accessToken: string } | undefined>;
   /** Optional trusted resolver for the pinned network policy, not an arbitrary fetch. */
   resolveDns?: McpNetworkPolicyOptions["resolve"];
+  /** Operator-controlled loopback opt-in forwarded to mcpNetworkPolicy. Never set for user connections. */
+  allowOperatorLoopback?: boolean;
+  /** Authenticated management discovery mode only: lists remote tools without read-policy filtering
+   * and skips calling. Never enable in runtime execution bridges. */
+  discoverUnfiltered?: boolean;
   limits?: { timeoutMs?: number; maxPages?: number; maxTools?: number; maxCatalogBytes?: number; maxResponseBytes?: number };
 };
 const knownCodes: McpErrorCode[] = ["network_denied", "limit_exceeded", "untrusted_schema", "cancelled", "timeout", "credential_unavailable", "authentication_required", "catalog_stale", "invalid_tool_arguments", "forbidden", "disabled", "revision_conflict", "placement_unavailable"];
@@ -102,7 +107,7 @@ export function createMcpRemoteClient(deps: McpRemoteClientDependencies): McpCli
     if (c.schemaVersion !== 1) return fail("unsupported_version");
     if (!sameMcpPlacement(c.placement, deps.placement)) return fail("placement_unavailable");
     if (c.transport.kind !== "streamable-http") return fail("placement_unavailable");
-    if (!c.enabled) return fail("disabled");
+    if (!c.enabled && !deps.discoverUnfiltered) return fail("disabled");
     if (c.ownerUserId !== context.authenticatedUserId) return fail("forbidden");
     if (context.signal.aborted) return fail("cancelled");
     const timeout = AbortSignal.timeout(limits.timeoutMs);
@@ -133,7 +138,7 @@ export function createMcpRemoteClient(deps: McpRemoteClientDependencies): McpCli
         if (!live.enabled) throw new Error("disabled");
         if (live.revision !== c.revision) throw new Error("revision_conflict");
         if (!permitsMcpRead(live, message.params?.name, message.params?.arguments ?? {})) throw new Error("forbidden");
-      }, placement: deps.placement, savedEndpoint: endpoint, resolve: deps.resolveDns, timeoutMs: limits.timeoutMs, maxResponseBytes: limits.maxResponseBytes });
+      }, placement: deps.placement, savedEndpoint: endpoint, resolve: deps.resolveDns, allowOperatorLoopback: deps.allowOperatorLoopback, timeoutMs: limits.timeoutMs, maxResponseBytes: limits.maxResponseBytes });
       let networkError: McpErrorCode | undefined;
       const fetch = async (input: string | URL | Request, init?: RequestInit) => {
         try {
@@ -186,9 +191,11 @@ export function createMcpRemoteClient(deps: McpRemoteClientDependencies): McpCli
       for (const tool of result.tools) {
         if (!tool.name || tool.name.length > 256 || names.has(tool.name)) throw new Error("untrusted_schema");
         names.add(tool.name);
-        if (!permitsMcpRead(context.connection, tool.name)) continue;
-        validator.getValidator(tool.inputSchema);
-        if (tool.outputSchema) validator.getValidator(tool.outputSchema);
+        if (!deps.discoverUnfiltered) {
+          if (!permitsMcpRead(context.connection, tool.name)) continue;
+          validator.getValidator(tool.inputSchema);
+          if (tool.outputSchema) validator.getValidator(tool.outputSchema);
+        }
         tools.push({ name: tool.name, ...(tool.description !== undefined ? { description: tool.description } : {}), inputSchema: tool.inputSchema, ...(tool.outputSchema !== undefined ? { outputSchema: tool.outputSchema } : {}), ...(tool.annotations !== undefined ? { annotations: tool.annotations } : {}) });
         if (tools.length > limits.maxTools) throw new Error("limit_exceeded");
       }
@@ -224,6 +231,7 @@ export function createMcpRemoteClient(deps: McpRemoteClientDependencies): McpCli
       });
     },
     async callTool(context, input) {
+      if (deps.discoverUnfiltered) return fail("forbidden");
       const parsed = parseMcpCallToolInput(input); if (!parsed.ok) return parsed;
       input = parsed.value;
       const checked = check(context, input.connectionId, input.expectedRevision); if (!checked.ok) return checked;

@@ -16,7 +16,7 @@ import { summarizeEndpoint } from "core/summarizeEndpoint";
 import type { ProviderResolver } from "./providerResolutionContext";
 
 export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (ctx) => {
-  const { agentConfig, deps, fetchImpl, loopbackRequest, additionalToolNames, buildProviderOpenAiTools, recordLocalAvailability, apiKeyRefResolver, credentialBroker, syncFetcher, serverUrl, authToken } = ctx;
+  const { agentConfig, deps, fetchImpl, loopbackRequest, additionalToolNames, buildProviderOpenAiTools, recordLocalAvailability, apiKeyRefResolver, credentialBroker, syncFetcher, serverUrl } = ctx;
 
   const providerConfig = await resolveCliOpenAiProviderConfig({
     agentConfig,
@@ -66,30 +66,9 @@ export const resolveDirectOpenAiCompatibleTransport: ProviderResolver = async (c
           { messages },
           {
             shouldInline: true,
-            isAllowedImageUrl: (url) => {
-              try {
-                return new URL(url).origin === new URL(serverUrl).origin;
-              } catch {
-                return false;
-              }
-            },
-            fetchImage: async (url) => {
-              const response = await fetchImpl(url, {
-                headers: authToken
-                  ? { Authorization: `Bearer ${authToken}` }
-                  : undefined,
-              });
-              if (!response.ok) {
-                return { ok: false, error: `HTTP ${response.status}` };
-              }
-              return {
-                ok: true,
-                mimeType:
-                  response.headers.get("content-type") ??
-                  "application/octet-stream",
-                bytes: new Uint8Array(await response.arrayBuffer()),
-              };
-            },
+            serverUrl,
+            request: fetchImpl,
+            signal: options?.signal,
           },
         ) as { messages: typeof messages }
       ).messages;

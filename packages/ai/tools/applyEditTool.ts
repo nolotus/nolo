@@ -36,34 +36,11 @@ export type ApplyEditArgs = {
 export const applyEditFunctionSchema = {
     name: "applyEdit",
     description: [
-        "推荐默认使用的代码编辑工具：基于“精确文本片段”而不是行号进行局部修改。",
-        "",
-        "适用场景：",
-        "- 替换一个已知的唯一代码片段。",
-        "- 在某个唯一锚点片段之前或之后插入代码。",
-        "- 删除一个精确可定位的片段。",
-        "",
-        "推荐工作流：",
-        "- 先用 codeSearch 找文件或搜索代码；",
-        "- 再用 readFile 读取最新内容；",
-        "- 如果这次修改依赖用户给的 URL / 文档页，先用 fetchWebpage 或其它网页工具抓取真值，再编辑；",
-        "- 直接把 readFile 中复制出的精确片段作为 oldText / anchor 传入。",
-        "- 对从网页提取出的价格、上下文窗口、能力字段，按抓到的原值写入，不要凭记忆改写。",
-        "",
-        "准确率约定：",
-        "- 默认要求片段在文件中只匹配 1 次；",
-        "- 若匹配多次，会直接报错，要求你补更多上下文、设置 occurrence，或显式 replaceAll；",
-        "- replaceAll 只会在你显式传 replaceAll=true 时执行；",
-        "- 可用 expectedMatches 断言匹配数量，进一步防止误改。",
-        "",
-        "返回数据约定（rawData.response 中）：",
-        "- newContent：编辑后的完整文件内容（统一使用 \\n）。",
-        "- diff：基于原始内容与 newContent 的行级 diff。",
-        "- appliedEdits：每个 edit 的匹配次数与实际应用次数。",
-        "",
-        "注意：",
-        "- filePath 必须是相对项目根目录（bun-nolo）的路径。",
-        "- 优先用 applyEdit 做最小局部修改；只有确实无法用精确片段表达时，再考虑 applyLineEdits 或整文件覆盖。",
+        "推荐默认的代码编辑工具：按“精确文本片段”（不是行号）做局部修改——替换唯一片段、在唯一锚点前后插入、删除可精确定位的片段。",
+        "工作流：codeSearch 找文件 → readFile 读最新内容（改动依赖用户给的 URL/文档页时先抓真值）→ 把读到的精确片段作为 oldText / anchor；网页取到的价格、上下文窗口等字段按原值写，不凭记忆改写。",
+        "准确率：默认要求片段在文件中唯一匹配；匹配多次直接报错，需补上下文、传 occurrence，或显式 replaceAll=true；可用 expectedMatches 断言匹配次数。",
+        "返回 rawData.response：newContent（编辑后完整内容，统一 \\n）、diff（行级 diff）、appliedEdits（每项匹配次数与实际应用次数）。",
+        "filePath 必须是相对项目根（bun-nolo）的路径；优先用 applyEdit 做最小修改，无法用精确片段表达时才用 applyLineEdits 或整文件覆盖。",
     ].join("\n"),
     parameters: {
         type: "object",
@@ -71,12 +48,12 @@ export const applyEditFunctionSchema = {
             filePath: {
                 type: "string",
                 description:
-                    "要修改的文件相对项目根目录（bun-nolo）的路径，例如: packages/server/routes.ts",
+                    "要修改的文件路径（相对项目根 bun-nolo），如 packages/server/routes.ts",
             },
             edits: {
                 type: "array",
                 description:
-                    "要按顺序应用的一组精确片段编辑。后一个 edit 会基于前一个 edit 应用后的最新文本继续执行。",
+                    "按顺序应用的精确片段编辑；后一个基于前一个的结果。",
                 items: {
                     type: "object",
                     oneOf: [
@@ -93,15 +70,15 @@ export const applyEditFunctionSchema = {
                                 },
                                 occurrence: {
                                     type: "number",
-                                    description: "可选：当 oldText 匹配多次时，替换第几次匹配（1-based）。",
+                                    description: "可选：匹配多次时用第几次（1-based）。",
                                 },
                                 expectedMatches: {
                                     type: "number",
-                                    description: "可选：断言 oldText 总共应匹配多少次。",
+                                    description: "可选：断言匹配次数。",
                                 },
                                 replaceAll: {
                                     type: "boolean",
-                                    description: "可选：为 true 时替换所有匹配项。",
+                                    description: "可选：true 时替换全部匹配项。",
                                 },
                             },
                             required: ["type", "oldText", "newText"],
@@ -111,23 +88,23 @@ export const applyEditFunctionSchema = {
                                 type: { const: "insertBefore" },
                                 anchor: {
                                     type: "string",
-                                    description: "作为插入锚点的精确原始片段。",
+                                    description: "插入锚点的精确原始片段。",
                                 },
                                 content: {
                                     type: "string",
-                                    description: "要插入到锚点之前的文本。",
+                                    description: "插入到锚点之前的文本。",
                                 },
                                 occurrence: {
                                     type: "number",
-                                    description: "可选：当 anchor 匹配多次时，插入到第几次匹配之前（1-based）。",
+                                    description: "可选：匹配多次时用第几次（1-based）。",
                                 },
                                 expectedMatches: {
                                     type: "number",
-                                    description: "可选：断言 anchor 总共应匹配多少次。",
+                                    description: "可选：断言匹配次数。",
                                 },
                                 replaceAll: {
                                     type: "boolean",
-                                    description: "可选：为 true 时，对所有匹配锚点都执行插入。",
+                                    description: "可选：true 时对所有匹配锚点插入。",
                                 },
                             },
                             required: ["type", "anchor", "content"],
@@ -137,7 +114,7 @@ export const applyEditFunctionSchema = {
                                 type: { const: "insertAfter" },
                                 anchor: {
                                     type: "string",
-                                    description: "作为插入锚点的精确原始片段。",
+                                    description: "插入锚点的精确原始片段。",
                                 },
                                 content: {
                                     type: "string",
@@ -145,15 +122,15 @@ export const applyEditFunctionSchema = {
                                 },
                                 occurrence: {
                                     type: "number",
-                                    description: "可选：当 anchor 匹配多次时，插入到第几次匹配之后（1-based）。",
+                                    description: "可选：匹配多次时用第几次（1-based）。",
                                 },
                                 expectedMatches: {
                                     type: "number",
-                                    description: "可选：断言 anchor 总共应匹配多少次。",
+                                    description: "可选：断言匹配次数。",
                                 },
                                 replaceAll: {
                                     type: "boolean",
-                                    description: "可选：为 true 时，对所有匹配锚点都执行插入。",
+                                    description: "可选：true 时对所有匹配锚点插入。",
                                 },
                             },
                             required: ["type", "anchor", "content"],
@@ -167,15 +144,15 @@ export const applyEditFunctionSchema = {
                                 },
                                 occurrence: {
                                     type: "number",
-                                    description: "可选：当 oldText 匹配多次时，删除第几次匹配（1-based）。",
+                                    description: "可选：匹配多次时删第几次（1-based）。",
                                 },
                                 expectedMatches: {
                                     type: "number",
-                                    description: "可选：断言 oldText 总共应匹配多少次。",
+                                    description: "可选：断言匹配次数。",
                                 },
                                 replaceAll: {
                                     type: "boolean",
-                                    description: "可选：为 true 时删除所有匹配项。",
+                                    description: "可选：true 时删除全部匹配项。",
                                 },
                             },
                             required: ["type", "oldText"],

@@ -92,6 +92,7 @@ import {
     withRequestContextBlocks,
     hasImageInMessages,
     mergeAgentToolsWithRuntime,
+    canProxyToExplicitServerBase as canProxyToExplicitServerBaseForTurn,
     resolveImageGenerationStreamingState,
     validateAccessAndBalance,
 } from "./streamAgentChatTurnUtils";
@@ -2000,11 +2001,22 @@ export const streamAgentChatTurnHandler = async (
         const normalizedCurrentServer = normalizeServerOrigin(
             currentServer,
         );
-        const canProxyToExplicitServerBase =
-            !Array.isArray(userInput) &&
-            !runtimeOptions?.extraTools?.length &&
-            !runtimeOptions?.editingTarget &&
-            !runtimeOptions?.imageConfigOverride;
+        // 对话已持久化的引用（loadSkill / 内置专职技能挂载）：异源裸代理读不到它们，
+        // 会静默丢掉工具面与技能提示词，因此必须留在客户端循环执行。
+        const turnDialogConfig =
+            selectDialogConfigByKey(state, explicitDialogKey) ??
+            selectCurrentDialogConfig(state);
+        const turnDialogExtraReferences = Array.isArray(
+            (turnDialogConfig as { extraReferences?: unknown } | null | undefined)
+                ?.extraReferences,
+        )
+            ? (turnDialogConfig as { extraReferences: ReferenceItem[] }).extraReferences
+            : [];
+        const canProxyToExplicitServerBase = canProxyToExplicitServerBaseForTurn({
+            userInput,
+            runtimeOptions,
+            dialogExtraReferences: turnDialogExtraReferences,
+        });
         if (explicitServerBase && canProxyToExplicitServerBase) {
             if (
                 normalizedRequestedServerBase &&
@@ -2910,7 +2922,8 @@ export const streamAgentChatTurnHandler = async (
                     const finalBody = await inlineImageUrlsForCustomProvider(
                         buildFinalCompletionsRequestBody(bodyData, agentConfigForCall,
                             shouldDisableQuickChatToolsForDirectAnswer(quickChatPerfStartedAt, userInput, runtimeOptions, currentDialog)),
-                        { shouldInline: shouldInlineImageUrlsForAgent(agentConfigForCall), signal: loopController.signal },
+                        { shouldInline: shouldInlineImageUrlsForAgent(agentConfigForCall),
+                            serverUrl: selectCurrentServer(getState() as RootState), signal: loopController.signal },
                     );
                     return { value: { bodyData: finalBody, dynamicMessages, stableMessages }, wireBodies: [buildEmptyCompletionRepairBody(finalBody)] };
                 },

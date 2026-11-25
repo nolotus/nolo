@@ -176,7 +176,7 @@ export function resolveThinkingSpec(input: ThinkingSpecInput): ThinkingSpec {
   if (isAdaptiveThinkingModelId(model)) {
     // adaptive：官方 effort 在 output_config.effort；summarized 让思考可见；
     // 5 代默认 thinking-on，显式 none/off 必须发 disabled 才能关。
-    if (effortDisabled) {
+    if (effortDisabled || (normalizedEffort === undefined && input.enableThinking === false)) {
       thinkingBlock = { type: "disabled" };
     } else {
       thinkingBlock = { type: "adaptive", display: "summarized" };
@@ -195,7 +195,7 @@ export function resolveThinkingSpec(input: ThinkingSpecInput): ThinkingSpec {
     // effort 缺失（未显式关闭）时，回退到调用方注入的 thinking / enableThinking
     // / 默认 medium；effort 显式为 none/off 时不注入。
     const fallbackBudget =
-      input.reasoningEffort === undefined
+      input.reasoningEffort === undefined && input.enableThinking !== false
         ? injectedBudget ??
           (input.enableThinking === true
             ? (typeof input.thinkingBudget === "number"
@@ -608,8 +608,8 @@ export function buildAnthropicMessagesBody(args: {
         ? args.openAiBody.temperature
         : args.agentConfig.temperature,
     injectedThinking: args.openAiBody.thinking,
-    enableThinking: (args.agentConfig as { enableThinking?: unknown }).enableThinking,
-    thinkingBudget: (args.agentConfig as { thinkingBudget?: unknown }).thinkingBudget,
+    enableThinking: args.agentConfig.enableThinking,
+    thinkingBudget: args.agentConfig.thinkingBudget,
   });
   const { thinkingBlock, outputConfig } = spec;
   const finalMaxTokens = spec.maxTokens;

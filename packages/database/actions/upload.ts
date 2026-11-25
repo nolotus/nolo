@@ -5,6 +5,7 @@ import { ulid } from "../utils/ulid";
 import { normalizeTimeFields, logger } from "./common";
 import { saveFileToIndexedDb } from "../fileStorage";
 import { fileKey } from "../keys";
+import { recordWebSpaceUploadFileId as recordSpaceUploadFileId } from "../spaceUploadFileMapping";
 import {
   resolveUploadReplicationServers,
   scheduleUploadReplication,
@@ -12,7 +13,7 @@ import {
 } from "./replication";
 import { DataType } from "create/types";
 import { isMediaFile, resolveFileCategory } from "app/utils/fileUtils";
-import type { UploadProgressHandler } from "../requests";
+import type { UploadOwnershipClaim, UploadProgressHandler } from "../requests";
 
 /**
  * 辅助函数：保存文件元数据到客户端数据库
@@ -57,7 +58,7 @@ const saveToClientDb = async (
  * - 无需修改业务调用代码。
  */
 export const uploadFileAction = async (
-  uploadConfig: {
+  uploadConfig: UploadOwnershipClaim & {
     file: File;
     customKey?: string;
     userId?: string;
@@ -73,7 +74,7 @@ export const uploadFileAction = async (
   const { currentServer, syncServers, currentUserId } =
     getRuntimeServerContext(state);
 
-  const { file, customKey, onProgress, signal } = uploadConfig;
+  const { file, customKey, onProgress, signal, ownerType, spaceId } = uploadConfig;
   const userId = uploadConfig.userId || currentUserId;
   // 1. 验证参数
   if (!file) {
@@ -150,6 +151,10 @@ export const uploadFileAction = async (
       metadata: fileMetadata,
       customKey: finalDbKey,
       userId,
+      // 归属声明一律由调用方显式给出（例如 Space 上传传 ownerType:"space"）；
+      // 服务端 uploadOwnership.ts 会重新校验，声明本身不构成授权。
+      ...(ownerType ? { ownerType } : {}),
+      ...(spaceId ? { spaceId } : {}),
     };
 
     const uploadServers = resolveUploadReplicationServers({
@@ -171,7 +176,24 @@ export const uploadFileAction = async (
       await localCachePromise;
     }
     if (primaryUploadServer && !primaryUploadSucceeded) {
+      if (ownerType === "space") {
+        // 归属声明失败绝不降级成 user 归属：静默退回个人归属正是本阶段要消灭的问题
+        // （成员随后读不到原件、且没有任何错误提示）。这里保持失败，但给出可操作信息：
+        // 主副本服务器由 authority 规划决定（可能是用户自建服务器），其上可能还没有
+        // 该 Space 投影，或调用者不是该 Space 的成员。
+        throw new Error(
+          `Upload into Space "${spaceId}" failed on ${primaryUploadServer}: ` +
+            `the Space may not be synced to that server, or you are not allowed to upload into it there. ` +
+            `Sync the Space to ${primaryUploadServer} (or use another upload server) and retry. ` +
+            `Ownership is server-decided and is never downgraded to a personal file.`,
+        );
+      }
       throw new Error(`Primary upload failed on authority server ${primaryUploadServer}`);
+    }
+
+    // Record only a successful Space upload, never metadata copied from a replica.
+    if (ownerType === "space" && userId && finalDbKey === customKey) {
+      await recordSpaceUploadFileId(clientDb, userId, finalDbKey, fileId);
     }
 
     const serversToUse = scheduleUploadReplication({

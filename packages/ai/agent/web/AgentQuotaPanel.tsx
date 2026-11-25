@@ -8,9 +8,10 @@
 // devin/codex/kimi/glm/mistral，两份名单一旦分叉就静默出错。
 // 于是：拿得到窗口就渲染，拿不到就整块不渲染。
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as stylex from "@stylexjs/stylex";
 import { LuGauge } from "react-icons/lu";
-import { selectQuotaWindowsForModel, type AgentQuota, type QuotaWindow } from "ai/agent/quotaSnapshot";
+import { parseQuotaWindowScope, selectQuotaWindowsForModel, type AgentQuota, type QuotaWindow } from "ai/agent/quotaSnapshot";
 import { agentPageStyles as styles } from "./agentPageStyles";
 // 口径来源标签：面板显示的是「我们探测到的上游接口」，不是官方用量页面的镜像。
 // 两者刷新时机/统计窗口/是否含子功能额度都可能不同，直接对比会误判成"显示错误"。
@@ -29,9 +30,12 @@ type Props = {
   snapshotOnly?: boolean;
 };
 
-const WINDOW_LABELS: Array<{ match: (scope: string) => boolean; label: string }> = [
-  { match: (s) => s === "5h" || s.endsWith("-5h"), label: "5 小时" },
-  { match: (s) => s === "7d" || s.endsWith("-7d"), label: "每周" },
+const WINDOW_LABELS = [
+  { period: "5h", key: "quota.period.fiveHours", label: "5 小时" },
+  { period: "daily", key: "quota.period.daily", label: "每日" },
+  { period: "7d", key: "quota.period.weekly", label: "每周" },
+  { period: "weekly", key: "quota.period.weekly", label: "每周" },
+  { period: "monthly", key: "quota.period.monthly", label: "每月" },
 ];
 
 // 口径来源标签的再导出（import 已在文件顶部）。
@@ -41,17 +45,18 @@ export function pickDisplayWindows(
   quota: AgentQuota | undefined,
   now = Date.now(),
   model?: string | null,
+  translate: (key: string, fallback: string) => string = (_key, fallback) => fallback,
 ): Array<{ label: string; window: QuotaWindow }> {
   // 与徽章/TUI/RN 共用同一个窗口选择（剔过期 + 按模型族），避免同一份快照
   // 在面板里显示另一个端已经不再显示的历史读数。
   const windows = selectQuotaWindowsForModel(quota, now, model);
   if (windows.length === 0) return [];
   const out: Array<{ label: string; window: QuotaWindow }> = [];
-  for (const { match, label } of WINDOW_LABELS) {
+  for (const { period, key, label } of WINDOW_LABELS) {
     const window = windows.find(
-      (w) => match(w.scope) && typeof w.utilization === "number",
+      (w) => parseQuotaWindowScope(w.scope).period.trim().toLowerCase() === period && typeof w.utilization === "number",
     );
-    if (window) out.push({ label, window });
+    if (window) out.push({ label: translate(key, label), window });
   }
   return out;
 }
@@ -64,6 +69,7 @@ export function AgentQuotaPanel({
   model,
   snapshotOnly = false,
 }: Props) {
+  const { t } = useTranslation("ai");
   const [quota, setQuota] = useState<AgentQuota | undefined>(initialQuota);
   const [now, setNow] = useState(() => Date.now());
 
@@ -102,7 +108,7 @@ export function AgentQuotaPanel({
     return () => ctrl.abort();
   }, [agentKey, serverOrigin, authToken, snapshotOnly]);
 
-  const rows = pickDisplayWindows(quota, now, model);
+  const rows = pickDisplayWindows(quota, now, model, t);
   // 只有「尚未到期」的复位时刻才需要走表：已过期的 resetAt 不该让定时器一直空转
   // 重渲染（review MEDIUM，2026-10-09）。
   const hasActiveResetClock = rows.some(
@@ -125,7 +131,7 @@ export function AgentQuotaPanel({
     <section {...stylex.props(styles.section)}>
       <div {...stylex.props(styles.abilityProofHeading)}>
         <LuGauge size={15} aria-hidden="true" />
-        <span>订阅额度</span>
+        <span>{t("quota.title", "订阅额度")}</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {rows.map(({ label, window }) => {
@@ -139,14 +145,15 @@ export function AgentQuotaPanel({
               : remaining <= 30
                 ? "var(--warning, #f5a524)"
                 : "var(--primary, #3b82f6)";
-          const reset = formatResetLine(window.resetAt, now);
+          const reset = formatResetLine(window.resetAt, now, t);
+          const remainingLabel = t("quota.remaining", "剩余 {{percent}}%", { percent: remaining });
           return (
-            <div key={window.scope} aria-label={`${label}额度剩余 ${remaining}%`}>
+            <div key={window.scope} aria-label={t("quota.windowAriaLabel", "{{label}}额度{{remaining}}", { label, remaining: remainingLabel })}>
               <div
                 style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}
               >
                 <span>{label}</span>
-                <strong>剩余 {remaining}%</strong>
+                <strong>{remainingLabel}</strong>
               </div>
               <div
                 style={{
@@ -177,12 +184,15 @@ export function AgentQuotaPanel({
                   统计窗口、是否含子功能额度都可能不同）。 */}
               <div
                 style={{ fontSize: 11, color: "var(--textTertiary)", marginTop: 2 }}
-                title="数据来自平台对上游额度接口的主动探测，与官方用量页面的口径和刷新时机可能不同"
+                title={t(
+                  "quota.snapshotTooltip",
+                  "时间表示整份快照的探测时刻，不是各窗口的独立观测时刻。数据来自平台对上游额度接口的主动探测，与官方用量页面的口径和刷新时机可能不同。",
+                )}
               >
-                {describeQuotaProvenance(window.source)} ·{" "}
+                {describeQuotaProvenance(window.source, t)} ·{" "}
                 {/* 窗口自身没有观测时刻，所有窗口共用快照的 observedAt：
-                    显式标成「整份快照」，别让混合龄窗口读成各自刚刚探测（LOW-4）。 */}
-                {`整份快照 · ${formatProbeAge(quota?.observedAt, now)}`}
+                    明确标为「快照」，完整口径见 title，别让混合龄窗口读成各自刚刚探测（LOW-4）。 */}
+                {t("quota.snapshotAge", "快照 · {{age}}", { age: formatProbeAge(quota?.observedAt, now, t) })}
               </div>
             </div>
           );

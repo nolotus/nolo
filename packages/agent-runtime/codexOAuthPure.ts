@@ -10,6 +10,9 @@
 // web 图里（packages/ai/context/contextOccupancy.ts → chat UI）。
 // codexResponsesProvider 仍 re-export 本函数，公开 API 不变。
 
+import { asTrimmedLowercaseString } from "core/trimmedLowercaseString";
+import { isGpt62DeveloperPrefixModel } from "../integrations/openai/responsesPromptLayout";
+
 /** 判定 agent 是否走 ChatGPT Codex OAuth 通道（apiKeyRef 归一为 "chatgpt"）。 */
 export function isCodexOAuthAgent(
   agent:
@@ -18,6 +21,24 @@ export function isCodexOAuthAgent(
     | undefined,
 ): boolean {
   if (!agent) return false;
-  const ref = agent.apiKeyRef?.trim().toLowerCase();
+  const ref = asTrimmedLowercaseString(agent.apiKeyRef);
   return ref === "chatgpt";
+}
+
+/**
+ * Call only after the caller has already selected the Codex OAuth route.
+ *
+ * Deliberately keyed on the route plus "no custom base URL" only: real ChatGPT
+ * OAuth agent records are created with `apiSource: "custom"`, so excluding that
+ * value silently disabled this layout for every agent it was meant to help.
+ * A custom endpoint is still excluded by `customProviderUrl`.
+ */
+export function usesCodexDeveloperPrefix(
+  // `apiSource` is accepted for call-site compatibility and deliberately never
+  // read: real ChatGPT OAuth agent records carry `apiSource: "custom"`.
+  agent: { customProviderUrl?: string | null; apiSource?: string | null },
+  model: unknown,
+): boolean {
+  return !agent.customProviderUrl &&
+    isGpt62DeveloperPrefixModel(asTrimmedLowercaseString(model).replace(/^openai\//, ""));
 }

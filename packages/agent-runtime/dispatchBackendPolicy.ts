@@ -23,10 +23,10 @@
  */
 export const DISPATCH_BACKEND_POLICY = [
   "【派发落点 · 执行后端】",
-  "派发子 run 先看**能力条件**，别一律加 `local`：",
-  '① 有宿主执行器（CLI / desktop）且要按给定 `cwd` 改指定 worktree / 目录 → `runtimeKey: "local"` + `allowHostWrites: true`（缺一即拒）。',
-  "② 要访问线上服务器或宿主凭据 → 选**有该能力**的执行面：有宿主执行器时用 `local`，没有时用已连接的机器 `machine:<machineId>`。",
-  "服务端的 run 没有宿主执行器，兑现不了调用方的本地 `cwd`：`local` 绕不过去（`local_target_unsupported`），要么走 `machine:<machineId>`，要么省略落点。",
-  "沙盒的稳定边界：不兑现宿主绝对 `cwd`、不自动继承宿主凭据；工具与网络能力以就绪环境为准。",
-  "CLI 本地派发通道：未点名的写型派发默认宿主，必须 allowHostWrites: true，未确认即拒绝，不回落 docker；只读未点名仍在宿主。docker 沙盒保留，但须显式指定 runtimeKey: docker / docker:<id>，不默认派入。",
+  "派发子 run 看**能力条件**，勿一律加 `local`：",
+  '① 有宿主执行器（CLI/desktop）且按给定 `cwd` 改目录 → `runtimeKey: "local"` + `allowHostWrites: true`（缺一即拒）。',
+  "② 访线上或宿主凭据 → 选**有该能力**的执行面（有宿主执行器用 `local`，无则用已连接 `machine:<machineId>`）。",
+  "服务端 run 没有宿主执行器，兑现不了调用方的本地 `cwd`：`local` 绕不过去（`local_target_unsupported`），改走 `machine:<machineId>` 或省落点。",
+  "沙盒边界：不兑现宿主绝对 `cwd`、不自动继承宿主凭据，工具与网络以就绪环境为准。",
+  "CLI 本地派发通道：未点名写型默认宿主（须 allowHostWrites: true，未确认拒绝，不回落 docker），只读仍在宿主；docker 沙盒须显式指定 runtimeKey: docker / docker:<id>。",
 ].join("\n");

@@ -42,19 +42,19 @@ export async function getServerProviderSecret(args: {
 }
 
 export async function saveProviderSecret(args: {
-  serverOrigin: string;
-  token?: string;
   presetId: string;
   value: string;
-  shared: boolean;
-}): Promise<boolean> {
+} & ({ shared: true; serverOrigin: string; token: string } | { shared?: never })): Promise<boolean> {
   const value = args.value.trim();
   if (!isValidProviderSecret(value)) return false;
-  if (!args.shared || !args.token) {
+  if (!args.shared) {
     // Accepted trade-off: localStorage is plaintext; the browser's origin storage is
     // used only as a convenience fallback, while shared secrets use server encryption.
-    saveLocalProviderSecret(args.presetId, value);
-    return true;
+    try {
+      return saveLocalProviderSecret(args.presetId, value);
+    } catch {
+      return false;
+    }
   }
   try {
     const response = await fetch(`${args.serverOrigin}/api/user-secrets/set`, {
@@ -68,9 +68,10 @@ export async function saveProviderSecret(args: {
   }
 }
 
-function saveLocalProviderSecret(presetId: string, value: string): void {
-  if (typeof localStorage === "undefined") return;
+function saveLocalProviderSecret(presetId: string, value: string): boolean {
+  if (typeof localStorage === "undefined") return false;
   const secrets = readLocalSecrets();
   secrets[providerSecretKey(presetId)] = value;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(secrets));
+  return true;
 }

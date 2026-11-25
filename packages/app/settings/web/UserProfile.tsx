@@ -1,3 +1,4 @@
+import { useWebMediaSrc } from "render/web/ui/useWebMediaSrc";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 // 直接引用 auth/hooks 实现而非 identity re-export：
 // identity/useDeleteOwnAccountFlow 的 re-export 层在 esbuild splitting+minify 下
@@ -257,6 +258,7 @@ const UserProfile: React.FC = () => {
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const avatarObjectUrlRef = useRef<string | null>(null);
+  const avatarMediaSrc = useWebMediaSrc(avatarPreview);
 
   const cleanupObjectUrl = () => {
     if (avatarObjectUrlRef.current?.startsWith("blob:")) {
@@ -276,14 +278,14 @@ const UserProfile: React.FC = () => {
           setAvatarPreview(fileId);
           return;
         }
-        const result = await dispatch(readFileContent({ fileId, useServerFallback: true }) as any).unwrap();
+        const result = await dispatch(readFileContent({ fileId, useServerFallback: false }) as any).unwrap();
         if (cancelled) return;
         const url = URL.createObjectURL(result.blob);
         cleanupObjectUrl();
         avatarObjectUrlRef.current = url;
         setAvatarPreview(url);
       } catch {
-        if (!fileId.includes("/")) {
+        if (!cancelled && !fileId.includes("/")) {
           const remoteUrl = buildDatabaseFileContentUrl(currentServer, fileId);
           if (remoteUrl) {
             setAvatarPreview(remoteUrl);
@@ -348,7 +350,7 @@ const UserProfile: React.FC = () => {
 
         <section className="avatar-section">
           <div className="avatar-preview">
-            {avatarPreview ? <img src={avatarPreview} alt="Avatar" /> : <LuUser size={40} aria-hidden="true" />}
+            {avatarMediaSrc ? <img src={avatarMediaSrc} alt="Avatar" /> : <LuUser size={40} aria-hidden="true" />}
           </div>
           <div className="avatar-upload">
             <div className="avatar-upload-label">{t("userProfile.avatar.title", "个人头像")}</div>

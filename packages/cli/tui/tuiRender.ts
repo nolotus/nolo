@@ -47,11 +47,30 @@ export function createTuiRender(host: TuiRenderHost) {
   // 防重入卫兵：onInputLinesChange → renderHistoryToOutput → 若 composer 重绘
   // 又触发 onInputLinesChange → 无限递归把 CPU 打满。重入时直接 return。
   let syncingLayout = false;
+  // 会话收尾（close）之后本渲染集群不再拥有终端。只闸 composer 的写入不够：
+  // 迟到的 turn 结算会经 onInputLinesChange / renderHistoryToOutput 整帧直写
+  // output（BSU/ESU 包裹的历史帧不经 fixedInput），那是「把整屏画进已经还给
+  // shell 的主屏」。33ms 节流定时器也必须在这里一并取消，否则收尾之后它仍会
+  // 到点补画一帧。close 之后所有渲染入口（含 paintImmediate）一律不写。
+  let closed = false;
+
+  const close = () => {
+    closed = true;
+    if (renderTimer !== null) {
+      clearTimeout(renderTimer);
+      renderTimer = null;
+    }
+    renderScheduled = false;
+  };
 
   const flushPendingRender = () => {
     if (renderTimer !== null) {
       clearTimeout(renderTimer);
       renderTimer = null;
+    }
+    if (closed) {
+      renderScheduled = false;
+      return;
     }
     if (!renderScheduled) return;
     renderScheduled = false;
@@ -59,6 +78,7 @@ export function createTuiRender(host: TuiRenderHost) {
   };
 
   const paintSyncedFrame = () => {
+    if (closed) return;
     if (host.fixedInput.isPaused()) {
       host.imageRenderer?.suspend();
       return;
@@ -80,7 +100,7 @@ export function createTuiRender(host: TuiRenderHost) {
   };
 
   const scheduleRender = () => {
-    if (renderScheduled) return;
+    if (closed || renderScheduled) return;
     renderScheduled = true;
     renderTimer = setTimeout(() => {
       renderScheduled = false;
@@ -90,7 +110,7 @@ export function createTuiRender(host: TuiRenderHost) {
   };
 
   const renderHistoryCore = (withImages: boolean) => {
-    if (syncingLayout) return;
+    if (closed || syncingLayout) return;
     syncingLayout = true;
     try {
       const reservedRows = host.getReservedRows?.() ?? 0;
@@ -114,6 +134,7 @@ export function createTuiRender(host: TuiRenderHost) {
   };
 
   const renderHistoryToOutput = () => {
+    if (closed) return;
     // A dialog (picker / confirm) owns the screen while paused. Repainting the
     // transcript underneath it erases the frame — mid-turn confirms streamed
     // tokens over the prompt, so it flashed and vanished while still holding
@@ -133,6 +154,7 @@ export function createTuiRender(host: TuiRenderHost) {
    * Images stay hidden: the dialog must not be covered by a kitty placement.
    */
   const renderHistoryUnderDialog = () => {
+    if (closed) return;
     host.imageRenderer?.suspend();
     renderHistoryCore(false);
   };
@@ -142,6 +164,9 @@ export function createTuiRender(host: TuiRenderHost) {
     renderHistoryUnderDialog,
     scheduleRender,
     flushPendingRender,
+    // 会话收尾：取消防抖定时器并关死全部渲染入口。幂等，交给 workspace 的
+    // 唯一退出汇聚点调用；调用之后本集群不再向 output 写任何字节。
+    close,
     // 立即绘制一帧同步帧（BSU/ESU + 光标隐藏）。流式路径走 33ms 节流的
     // scheduleRender；平滑滚动推进器按 16ms 自己的节奏调用这里，避免被节流
     // 抹平成"每 33ms 一跳"。

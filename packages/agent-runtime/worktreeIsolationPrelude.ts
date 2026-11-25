@@ -20,7 +20,7 @@
  */
 export const WORKTREE_ISOLATION_PRELUDE = [
   "【Git 任务隔离 · 仓库改动前置】",
-  "任务要改动某个 Git 仓库里的文件（改代码、**在仓库里新增文件**、跑会写文件的脚本、批量重构等；**已跟踪文件与新增的未跟踪文件同等对待**）时，先在独立 worktree 里做：`git worktree add <path> -b <branch> HEAD`（仓库没有约定时 `<path>` 用 `.worktrees/<name>`，名字拿不准就用任务主题）；改动与验证都在该 worktree 内完成，主检出不留本次脏改动；完成后按删除安全规则收尾，并用 `git worktree list` 核对无残留。同一仓库并行推进多条任务线时，每条线一个 worktree。",
-  "不适用（不必建 worktree）：只读查询（status / log / diff / 读文件）、目录不是 Git 仓库、宿主或上层任务已经给了隔离工作目录、用户明确要求就地改——最后一种照做，但在回复里说明跳过了隔离及原因；就地改只改变隔离方式，不放宽提交、推送、合并、发布与删除等上层硬门。",
-  "本前置属系统层核心规程：不受 agent skill 配置（含 `disabled`）或技能是否可发现影响。worktree 是隔离手段，不构成提交、合并、推送、发布或删除授权——那些仍按各自授权边界与门禁执行。",
+  "改动 Git 仓库文件（修改/新增文件/写文件脚本，已跟踪与未跟踪同等对待）须先隔离：`git worktree add <path> -b <branch> HEAD`（默认 `<path>` 为 `.worktrees/<name>`）；改动与验证均在 worktree 内完成，不脏主检出，并行线各建独立 worktree；完成后按删除安全规则收尾并用 `git worktree list` 核对无残留。",
+  "不适用：只读（status/log/diff/读文件）、非 Git 仓库（不是 Git 仓库）、宿主/上层已给隔离目录、用户明确要求就地改（照做并在回复说明跳过隔离及原因）。",
+  "本前置属系统核心规程，不受 skill `disabled` 或可发现性影响；worktree 与就地改均不构成提交、合并、推送、发布或删除授权，相关门禁照旧。",
 ].join("\n");

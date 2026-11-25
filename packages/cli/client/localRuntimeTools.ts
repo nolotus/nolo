@@ -212,6 +212,7 @@ function buildOrchestrationOpenAiTools(args: {
   const startSchema = buildStartAgentRunFunctionSchema({
     supportsWait: false,
     wakeEnabled: wakeChannel,
+    includeInstabox: hostExposesInstaboxParams(args.env),
   });
   // prepareTools 的返回值与其内部缓存共享对象，只能替换不能就地改写。
   return [
@@ -230,7 +231,10 @@ function buildOrchestrationOpenAiTools(args: {
 const CLI_DEFAULT_TOOLS = [
   "exa_search",
   "fetchWebpage",
-  "ask_user",
+  // ask_user 不在默认面：它只在 agent 显式声明（direct tool 或 enabledPacks
+  // 展开）时才暴露。默认常驻白占 schema/菜单指令上下文，而多轮里真正需要向
+  // 用户提问的比例很低；TUI 的 AskChoice dialog、headless 的编号菜单降级、
+  // executor 与 policy 通道全部照旧，只是不再「未声明也可见」。
   // 凭据请求面板（Block 1a）：抬 kind:"input" gate，宿主面板输入后在宿主进程内写 store。
   "secret-request",
   // 非阻塞展示型交互（与 ask_user 的阻塞提问区分）
@@ -242,11 +246,12 @@ function addDefaultCliCoreTools(
   env?: EnvLike,
   args?: { skipHostDefaults?: boolean },
 ): string[] {
-  // FORCED_TOOLS 当前为空。ask_user 走 CLI_DEFAULT_TOOLS 默认注入（TUI 有
-  // AskChoice dialog 交互通道）；headless/declared-only 模式仍不注入
-  // （ask_user 需要交互，headless 无 requestUserChoice 通道）。
-  // subtask（skipHostDefaults）同样跳过——exa_search/fetchWebpage/ask_user 是
-  // 交互便利默认，叶子任务只保留显式声明（见 agentRunIsolation.ts 裁剪契约）。
+  // FORCED_TOOLS 当前为空。CLI 默认只注入 LIGHT_WEB（exa_search/fetchWebpage）
+  // 与 secret-request/show_interaction；ask_user 需 agent 显式声明才注入（TUI 有
+  // AskChoice dialog 交互通道，但不再默认常驻）。headless/declared-only 模式
+  // 既不注入 ask_user，也没有 requestUserChoice 通道（调用时走编号菜单降级）。
+  // subtask（skipHostDefaults）同样跳过——exa_search/fetchWebpage 是交互便利
+  // 默认，叶子任务只保留显式声明（见 agentRunIsolation.ts 裁剪契约）。
   const declaredOnly =
     args?.skipHostDefaults === true ||
     (env ? shouldUseDeclaredOnlyLocalWorkspaceTools(env) : false);
@@ -300,6 +305,32 @@ export function withRuntimeEnabledPacksAndPrompt(
   };
 }
 
+/**
+ * MCP 三工具（`listMcpConnections` / `listMcpTools` / `callMcpTool`，约 385 token）
+ * 的**按需暴露**开关。
+ *
+ * 默认不常驻：CLI/TUI 默认会话里根本没配 MCP 连接时，这三个 schema 只会白占
+ * 上下文——执行器存在不等于模型该看到它们。暴露只有两条来路：
+ *  1. **Agent 显式声明**（`agent.tools` 里写了名字）：声明即意图，且只有声明过的
+ *     名字才会进到这一层的候选列表里；
+ *  2. **宿主显式开启** `NOLO_EXPOSE_MCP_TOOLS=1`：宿主已经知道这个账号/这台机器
+ *     上有可用连接（它才拿得到异步的 LevelDB 连接仓库），替模型把三个 schema 补上。
+ *
+ * 两者都在**会话开始时**按 env + agent 记录算一次，落到 tool-NAME 层，于是
+ * prepareTools 的缓存键在同一会话内保持稳定——按需暴露不会击穿 provider 前缀缓存。
+ */
+export const MCP_EXPOSURE_ENV = "NOLO_EXPOSE_MCP_TOOLS";
+
+function hostExposesMcpTools(env: EnvLike): boolean {
+  return String(env[MCP_EXPOSURE_ENV] ?? "").trim() === "1";
+}
+
+export const INSTABOX_SCHEMA_EXPOSURE_ENV = "NOLO_EXPOSE_INSTABOX_PARAMS";
+
+function hostExposesInstaboxParams(env: EnvLike): boolean {
+  return String(env[INSTABOX_SCHEMA_EXPOSURE_ENV] ?? "").trim() === "1";
+}
+
 export function resolveCliRequestedToolNames(
   agentConfig: AgentRuntimeAgentConfig,
   env: EnvLike,
@@ -309,7 +340,7 @@ export function resolveCliRequestedToolNames(
   const isSubtask = isSubtaskRun(env);
   // Subtask capability-surface trimming（契约见 agentRunIsolation.ts）：
   // 子任务跳过隐式交互便利默认——ALWAYS_ON memory/skills 包、CLI 默认
-  // web/ask_user 工具、默认挂载的系统能力（agent-orchestration，反正最后
+  // web 工具（ask_user 本就只在显式声明时出现）、默认挂载的系统能力（agent-orchestration，反正最后
   // 也会被 run-kind 过滤剥掉，源头跳过避免先加后减）、LIGHT_WEB 同包伴随注入。
   // 显式 enabledPacks/direct tools、host-required 的 code 兜底、disabledTools
   // 最终优先、declared-only 语义、末尾的 run-kind 隔离过滤全部不变。
@@ -351,9 +382,18 @@ export function resolveCliRequestedToolNames(
   // Interactive runs unchanged. Applied at the tool-NAME layer so the
   // prepareTools cache key (built from this final list) stays coherent across
   // run kinds.
-  return filterToolNamesForRunKind(afterDisabled.filter(name =>
-    !(MCP_TOOL_NAMES as readonly string[]).includes(name) ||
-    (agentConfig.key === "agent-0e95801d90-gpt-6-1-sol" && Array.isArray(agentConfig.toolNames) && agentConfig.toolNames.includes(name))), isSubtask);
+  //
+  // MCP 三工具按需暴露（见上方 `MCP_EXPOSURE_ENV`）：声明过的名字本来就在
+  // `afterDisabled` 里，原样放行；没声明就不补——除非宿主显式开启，此时才把
+  // 三个名字补进最终面。`disabledTools` 在补齐之后重放一遍，保证「用户禁用」
+  // 永远压过「宿主开启」。
+  const mcpSurface = hostExposesMcpTools(env)
+    ? applyDisabledTools(
+      [...new Set([...afterDisabled, ...MCP_TOOL_NAMES])],
+      (agentConfig as any)?.disabledTools,
+    )
+    : afterDisabled;
+  return filterToolNamesForRunKind(mcpSurface, isSubtask);
 }
 
 export function resolveProviderOpenAiToolBundle(
