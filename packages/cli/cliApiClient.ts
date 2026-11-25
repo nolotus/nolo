@@ -1,3 +1,7 @@
+import {
+  callApiProcedure,
+  type ApiProcedureContract,
+} from "desktop-runtime/apiContract";
 import { resolveServerUrl } from "./cliEnvHelpers";
 import { requireTokenUser } from "./docCommandShared";
 import type { EnvLike } from "./cliEnvHelpers";
@@ -5,8 +9,8 @@ import { t } from "./tui/i18n";
 
 /**
  * 通用 CLI→server JSON API 请求工具。
- * 封装 fetch + Bearer 鉴权 + JSON body + success 校验 + 错误抛出。
- * 可被任意 CLI 命令复用，不限于 app 命令组。
+ * 兼容旧 `{ success: true }` 与标准 `ApiProcedure` `{ ok: true, data }` 双信封；
+ * 新接口推荐直接调用强类型的 `cliCallProcedure`。
  */
 
 export class CliApiError extends Error {
@@ -26,11 +30,12 @@ export interface CliApiRequestArgs {
   method?: string;
   body?: Record<string, unknown> | null;
   query?: Record<string, string>;
+  fetchImpl?: typeof fetch;
 }
 
 /**
- * 发起一个带鉴权的 JSON API 请求，返回 success=true 的响应体。
- * 非 success 或网络错误时抛 CliApiError。
+ * 发起一个带鉴权的 JSON API 请求，兼容 `{ success: true }` 与 `{ ok: true, data }`。
+ * 失败或网络错误时抛 CliApiError。
  */
 export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<string, unknown>> {
   const method = args.method ?? "POST";
@@ -50,9 +55,10 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
     init.body = JSON.stringify(args.body);
   }
 
+  const fetchFn = args.fetchImpl ?? fetch;
   let response: Response;
   try {
-    response = await fetch(url, init);
+    response = await fetchFn(url, init);
   } catch (error) {
     throw new CliApiError(t("api.requestFailed", (error as Error).message), "NETWORK_ERROR", 0);
   }
@@ -68,10 +74,15 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
     );
   }
 
-  if (!response.ok || data.success !== true) {
-    const errorObj = (data.error ?? {}) as Record<string, unknown>;
+  const isSuccessEnvelope = data.success === true || data.ok === true;
+  if (!response.ok || !isSuccessEnvelope) {
+    const errorObj =
+      typeof data.error === "object" && data.error !== null
+        ? (data.error as Record<string, unknown>)
+        : {};
     const message =
       (errorObj.message as string) ||
+      (typeof data.error === "string" ? data.error : "") ||
       (data.message as string) ||
       t("api.requestFailedHttp", String(response.status));
     const code = (errorObj.code as string) || `HTTP_${response.status}`;
@@ -79,6 +90,32 @@ export async function cliApiRequest(args: CliApiRequestArgs): Promise<Record<str
   }
 
   return data;
+}
+
+/**
+ * 强类型调用标准 `ApiProcedureContract`，直接返回经 Valibot 校验后的 `TOutput`，
+ * 失败时统一抛出 `CliApiError`。
+ */
+export async function cliCallProcedure<TInput, TOutput>(
+  contract: ApiProcedureContract<TInput, TOutput>,
+  input: TInput,
+  args: {
+    serverUrl: string;
+    authToken?: string;
+    signal?: AbortSignal;
+    fetchImpl?: typeof fetch;
+  },
+): Promise<TOutput> {
+  const result = await callApiProcedure(contract, input, {
+    baseUrl: args.serverUrl,
+    ...(args.authToken ? { authToken: args.authToken } : {}),
+    ...(args.signal ? { signal: args.signal } : {}),
+    ...(args.fetchImpl ? { fetchImpl: args.fetchImpl } : {}),
+  });
+  if (!result.ok) {
+    throw new CliApiError(result.error.message, result.error.code, result.error.status);
+  }
+  return result.data;
 }
 
 /**

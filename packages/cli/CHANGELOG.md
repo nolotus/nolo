@@ -1,4 +1,11 @@
 
+## 0.257.0-alpha.1 (2026-11-25)
+
+### Features
+
+* **agent-run:** unify ApiContract auth/client and wire cross-device execution control bridge ([0dce2f3](https://github.com/nolotus/bun-nolo/commit/0dce2f3d72bffe15be2e21ec8049593b2a298fa7))
+
+
 ## 0.256.0-alpha.1 (2026-11-24)
 
 ### Features
