@@ -373,6 +373,41 @@
           transform: translateY(-1px);
         }
 
+        /* EPUB 主区域阅读页：阅读器自己铺满并管理滚动；顶栏右侧放对象动作与下载入口。 */
+        .FilePage--reader {
+          flex-direction: column;
+          position: relative;
+        }
+
+        .FilePage__reader-actions {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          flex-shrink: 0;
+        }
+
+        .FilePage__reader-actions .page-object-actions {
+          flex-wrap: nowrap;
+          align-self: center;
+          padding-block: 0;
+        }
+
+        .FilePage__reader-download .FilePage__download-fab {
+          position: static;
+          width: 28px;
+          height: 28px;
+          box-shadow: none;
+          background: transparent;
+        }
+
+        .FilePage__reader-error {
+          position: absolute;
+          left: 16px;
+          bottom: 56px;
+          margin: 0;
+          color: var(--error, #d14343);
+        }
+
         @media (max-width: 600px) {
           .FilePage__content {
             padding: 16px;

@@ -478,6 +478,10 @@ export const COMMAND_DESCRIPTIONS: Record<string, Record<CliLocale, string>> = {
     en: "Create or update the Marxists.org offline book agent",
     zh: "创建或更新 Marxists.org 离线图书智能体",
   },
+  "agent setup-ebook-downloader": {
+    en: "Create or update the ebook downloader agent",
+    zh: "创建或更新电子书下载智能体",
+  },
   "agent update": {
     en: "Update agent fields",
     zh: "更新智能体字段",

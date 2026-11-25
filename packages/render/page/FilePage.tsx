@@ -1,7 +1,7 @@
 // 文件: render/page/FilePage.tsx
 
 import "../page.css";
-import React, { useEffect, useRef, useState } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
 
 import { useAppDispatch, useAppSelector, type AppExtra } from "app/store";
 import {
@@ -26,6 +26,9 @@ import GlbModelPreview from "render/web/three/GlbModelPreview";
 import { isGlbViewerCandidate } from "render/web/three/glbViewerModel";
 import { LuDownload, LuInfo, LuFile } from "react-icons/lu";
 import PageObjectActions from "./PageObjectActions";
+import { isEpubFile } from "create/space/epub/epubFile";
+
+const EpubReaderView = lazy(() => import("create/space/epub/EpubReaderView"));
 
 interface FilePageProps {
   pageKey: string;
@@ -65,6 +68,12 @@ function isImageFile(page: FilePreviewMetadata) {
     fileCategory: page.fileCategory,
     fileName: page.originalName || page.title,
   });
+}
+
+function isEpubFileRenderable({ page, isImage, isPdf, isVideo, isAudio, is3dModel }: {
+  page: FilePreviewMetadata; isImage: boolean; isPdf: boolean; isVideo: boolean; isAudio: boolean; is3dModel: boolean;
+}) {
+  return !isImage && !isPdf && !isVideo && !isAudio && !is3dModel && isEpubFile(page);
 }
 
 const SignedInFilePage: React.FC<FilePageProps> = ({ pageKey }) => {
@@ -185,12 +194,14 @@ const SignedInFilePage: React.FC<FilePageProps> = ({ pageKey }) => {
   }
 
   const source = isMedia ? buildDatabaseFileContentUrl(fileMetadata.serverOrigin || currentServer, pageKey) : null;
-  return <FilePreview page={fileMetadata} source={source} localUrl={blob?.key === pageKey ? blob.url : null}
+  return <FilePreview page={fileMetadata} pageKey={pageKey} source={source} localUrl={blob?.key === pageKey ? blob.url : null}
     contentLoading={contentLoading} contentError={contentError} />;
 };
 
 type FilePreviewProps = {
   page: FilePreviewMetadata;
+  /** 路由里的文件 key；EPUB 阅读进度与文件助手上下文都按它归属。 */
+  pageKey?: string;
   source: string | null;
   localUrl?: string | null;
   confirmedPublic?: boolean;
@@ -198,7 +209,7 @@ type FilePreviewProps = {
   contentError?: string | null;
 };
 
-const FilePreview: React.FC<FilePreviewProps> = ({ page, source, localUrl, confirmedPublic, contentLoading, contentError }) => {
+const FilePreview: React.FC<FilePreviewProps> = ({ page, pageKey, source, localUrl, confirmedPublic, contentLoading, contentError }) => {
   const spaceId = useCurrentSpaceId();
   const isImage = isImageFile(page);
   const isPdf = isPdfMimeType(page.mimeType);
@@ -242,6 +253,44 @@ const FilePreview: React.FC<FilePreviewProps> = ({ page, source, localUrl, confi
     originalName: page.originalName,
     mimeType: page.mimeType,
   });
+  // EPUB 阅读器：mime 与 .epub 扩展名都认；与 3D / 图片 / PDF / 音视频互斥。
+  const isEpub = isEpubFileRenderable({ page, isImage, isPdf, isVideo, isAudio, is3dModel });
+
+  const downloadControl = localUrl ?
+  <a
+    href={localUrl}
+    download={page.title || "download"}
+    className="FilePage__download-fab"
+    aria-label="下载源文件">
+
+    <LuDownload size={16} aria-hidden="true" />
+  </a> : source ? (
+  <button type="button" className="FilePage__download-fab" aria-label="下载源文件"
+    disabled={downloadState?.pending} onClick={() => void downloadRemote()}>
+    <LuDownload size={16} aria-hidden="true" />
+  </button>
+  ) : null;
+
+  const showEpubReader = isEpub && !!fileUrl && !contentError;
+  if (showEpubReader) {
+    // 主区域阅读页：占满容器，下载入口与对象动作（文件助手 / 详情）收进阅读器顶栏右侧。
+    return (
+      <div className="FilePage FilePage--reader">
+        <Suspense fallback={<PageLoading message="正在打开书籍..." />}>
+          <EpubReaderView
+            contentKey={pageKey ?? page.id}
+            title={page.title || page.originalName || "EPUB"}
+            fileUrl={fileUrl}
+            trailing={
+              <div className="FilePage__reader-actions">
+                <PageObjectActions />
+                {downloadControl ? <span className="FilePage__reader-download">{downloadControl}</span> : null}
+              </div>
+            } />
+        </Suspense>
+        {downloadState?.error ? <p role="alert" className="FilePage__reader-error">{downloadState.error}</p> : null}
+      </div>);
+  }
 
   return (
     <div className="FilePage">
@@ -314,20 +363,7 @@ const FilePreview: React.FC<FilePreviewProps> = ({ page, source, localUrl, confi
 
         {playback.unavailable && (isAudio || isVideo) && <p role="status">媒体暂不可播放</p>}
         {downloadState?.error && <p role="alert">{downloadState.error}</p>}
-        {localUrl ?
-        <a
-          href={localUrl}
-          download={page.title || "download"}
-          className="FilePage__download-fab"
-          aria-label="下载源文件">
-
-            <LuDownload size={16} aria-hidden="true" />
-          </a> : source ? (
-          <button type="button" className="FilePage__download-fab" aria-label="下载源文件"
-            disabled={downloadState?.pending} onClick={() => void downloadRemote()}>
-            <LuDownload size={16} aria-hidden="true" />
-          </button>
-        ) : null}
+        {downloadControl}
       </div>
 
       
@@ -364,7 +400,7 @@ function GuestFilePage({ pageKey, source }: FilePageProps & { source: string | n
       <div className="FilePage__error" role="status">请登录后查看文件详情</div>
     </div>
   );
-  return <FilePreview page={{ id: pageKey, ...result }} source={source} confirmedPublic />;
+  return <FilePreview page={{ id: pageKey, ...result }} pageKey={pageKey} source={source} confirmedPublic />;
 }
 
 const FilePage: React.FC<FilePageProps> = ({ pageKey }) => {

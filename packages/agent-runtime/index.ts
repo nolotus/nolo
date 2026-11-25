@@ -295,6 +295,7 @@ export {
   SANDBOX_SYSTEM_RO_BINDS,
   SANDBOX_TMP_DIR,
   SHELL_SANDBOX_ENV,
+  SANDBOX_EGRESS_SOCKET,
   buildBwrapArgs,
   buildBwrapCommandPrefix,
   invalidateBwrapProbeCache,
@@ -530,3 +531,5 @@ export {
   type SubtaskSoftBudgetConfig,
   type SubtaskSoftBudgetMilestoneLevel,
 } from "./subtaskBudget";
+
+export { withConfidentialBwrapShell } from "./workspaceShell";

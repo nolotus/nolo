@@ -1,4 +1,13 @@
 
+## 0.276.0-alpha.1 (2026-11-25)
+
+### Features
+
+* **cli:** space upload 支持重命名与个人私有存储，新增纯 Skill 电子书 Agent 脚手架 ([cafa3b5](https://github.com/nolotus/bun-nolo/commit/cafa3b58a90e6ac20ed681a3baa738a9faeb4322))
+* **sandbox:** Web Sandbox 通用底座补齐白名单外网出口、加密 Secret 注入与配额 ([f7cccbc](https://github.com/nolotus/bun-nolo/commit/f7cccbc1c1c15c76314ffcbece8c154e52fac755))
+* **space:** EPUB 阅读器 v2 迁入主区域 FilePage，支持排版主题与文件助手 AI 联动 ([d13da44](https://github.com/nolotus/bun-nolo/commit/d13da4476aa8982fce11e3155aced3d1b0d84ae7))
+
+
 ## 0.275.0-alpha.1 (2026-11-25)
 
 ### Features

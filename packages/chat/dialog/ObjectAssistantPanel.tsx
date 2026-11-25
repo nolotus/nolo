@@ -12,6 +12,7 @@ import {
 } from "render/table/tableStore";
 import type { AgentRuntimeOptions } from "ai/agent/types";
 import StreamingIndicator from "render/web/ui/StreamingIndicator";
+import { useEpubAssistantContext } from "create/space/epub/epubAssistantStore";
 import { useAppDetail } from "app/hooks/useAppDetail";
 import { resolvePreferredAppRuntimeUrl } from "app/utils/appRuntimeUrl";
 import { readAppServerOrigin } from "app/constants/appEditor";
@@ -70,6 +71,8 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
   const appSelectedNode = useAppSelectedNode();
   const tableFocusContext = useTableFocusContext();
   const tableRows = useTableRows();
+  // 主区域正在阅读 EPUB 时，阅读器把「书名 + 目录 + 当前章节正文」发布到这里（仅 kind=file 使用）。
+  const epubContext = useEpubAssistantContext(kind === "file" ? contentKey : null);
   const entity = useAppSelector((state) =>
     contentKey ? selectById(state, contentKey) : null
   );
@@ -185,6 +188,7 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
           type: entity?.type ?? "file",
           url: entity?.url,
           size: entity?.size,
+          ...(epubContext ? { epub: epubContext } : {}),
         },
       });
     }
@@ -202,6 +206,7 @@ const ObjectAssistantPanelBase: React.FC<ObjectAssistantPanelProps> = ({
     tableFocusContext,
     tableRows,
     appSelectedNode,
+    epubContext,
   ]);
 
   if (kind === "app" && appLoading) {

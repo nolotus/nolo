@@ -84,6 +84,7 @@ export const SANDBOX_SYSTEM_RO_BINDS = [
 export const SANDBOX_PATH = "/usr/bin:/bin";
 export const SANDBOX_RUNTIME_BIN_DIR = "/opt/nolo-runtime/bin";
 export const SANDBOX_TMP_DIR = "/tmp";
+export const SANDBOX_EGRESS_SOCKET = "/run/nolo-egress.sock";
 
 const SAFE_RUNTIME_BINARY_NAME = /^[A-Za-z0-9._-]+$/;
 
@@ -99,6 +100,7 @@ export type BwrapResourceLimits = {
   maxFileSizeBytes?: number;
   maxOpenFiles?: number;
   maxProcesses?: number;
+  maxAddressSpaceBytes?: number;
 };
 
 export const DEFAULT_HOSTED_SANDBOX_RESOURCE_LIMITS: Readonly<BwrapResourceLimits> = {
@@ -106,6 +108,7 @@ export const DEFAULT_HOSTED_SANDBOX_RESOURCE_LIMITS: Readonly<BwrapResourceLimit
   maxFileSizeBytes: 64 * 1024 * 1024,
   maxOpenFiles: 256,
   maxProcesses: 256,
+  maxAddressSpaceBytes: 512 * 1024 * 1024,
 };
 
 export type BwrapPrefixArgs = {
@@ -129,6 +132,10 @@ export type BwrapPrefixArgs = {
   readonlySubpaths?: readonly string[];
   /** Optional OS resource limits enforced via `prlimit` inside the sandbox. */
   resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
   /** Absolute path to `prlimit` inside the sandbox (e.g. `/usr/bin/prlimit`). */
   prlimitPath?: string | null;
 };
@@ -221,6 +228,10 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     }
   }
 
+  if (args.egressSocketPath) {
+    argv.push("--ro-bind", args.egressSocketPath, SANDBOX_EGRESS_SOCKET);
+  }
+
   // clearenv is the credential boundary: no SECRET_KEY, no provider keys, no
   // NOLO_* host config reaches the command. Baseline env is re-added explicitly.
   const effectivePath = mountedBinaries.length > 0
@@ -246,6 +257,7 @@ export function buildBwrapArgs(args: BwrapPrefixArgs): string[] {
     argv.push("--setenv", key, value);
   }
 
+  if (args.privateArgsFd !== undefined) argv.push("--args", String(args.privateArgsFd));
   argv.push("--");
 
   const prlimitFlags = buildPrlimitFlags(args.resourceLimits);
@@ -270,6 +282,9 @@ function buildPrlimitFlags(limits: BwrapResourceLimits | undefined): string[] {
   }
   if (typeof limits.maxProcesses === "number" && Number.isFinite(limits.maxProcesses) && limits.maxProcesses > 0) {
     flags.push(`--nproc=${Math.floor(limits.maxProcesses)}`);
+  }
+  if (Number.isSafeInteger(limits.maxAddressSpaceBytes) && limits.maxAddressSpaceBytes! > 0) {
+    flags.push(`--as=${limits.maxAddressSpaceBytes}`);
   }
   return flags;
 }
@@ -480,6 +495,10 @@ export type BuildBwrapCommandPrefixArgs = {
   readonlySubpaths?: readonly string[];
   /** Optional OS resource limits enforced via `prlimit`. */
   resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
   /** Injectable `prlimit` path resolver for tests. */
   prlimitPath?: string | null;
 };
@@ -667,6 +686,8 @@ function buildBwrapPrefixOutcome(args: BuildBwrapCommandPrefixArgs): BwrapPrefix
     prefix: buildBwrapArgs({
       workspaceRoot,
       workspaceWritable: args.workspaceWritable,
+      egressSocketPath: args.egressSocketPath,
+      privateArgsFd: args.privateArgsFd,
       bwrapPath: probe.bwrapPath,
       shadowTargets: shadow.targets,
       ...(args.tmpfsSizeBytes !== undefined ? { tmpfsSizeBytes: args.tmpfsSizeBytes } : {}),
@@ -732,6 +753,10 @@ export type ResolveShellSandboxPrefixArgs = {
   runtimeBinaries?: readonly BwrapRuntimeBinary[];
   readonlySubpaths?: readonly string[];
   resourceLimits?: BwrapResourceLimits;
+  /** Trusted host path to a per-execution Unix socket; never taken from tool arguments. */
+  egressSocketPath?: string;
+  /** Read confidential --setenv options from an inherited descriptor, not argv. */
+  privateArgsFd?: number;
   prlimitPath?: string | null;
   /**
    * Which execution policy asks for this shell.
@@ -803,6 +828,8 @@ export function resolveShellSandboxPlan(args: ResolveShellSandboxPrefixArgs): Sh
   const outcome = buildBwrapPrefixOutcome({
     workspaceRoot: args.workspaceRoot,
     workspaceWritable: args.workspaceWritable ?? true,
+    egressSocketPath: args.egressSocketPath,
+    privateArgsFd: args.privateArgsFd,
     ...(args.probe ? { probe: args.probe } : {}),
     ...(args.warn ? { warn: args.warn } : {}),
     ...(args.tmpfsSizeBytes !== undefined ? { tmpfsSizeBytes: args.tmpfsSizeBytes } : {}),

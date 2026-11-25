@@ -276,6 +276,11 @@ export type AgentRuntimeShellPolicy = {
   mode?: "off" | "worktree";
   commandPolicy?: "denylist" | "allowlist" | "approval";
   networkPolicy?: "default-deny" | "allowed" | "approval";
+  /** Web-hosted shell only; exact DNS domains and their subdomains. */
+  allowedEgressDomains?: string[];
+  /** Web-hosted shell only; names in the authenticated user's hosted secret store. */
+  allowedSecrets?: string[];
+  maxWorkspaceBytes?: number;
   maxOutputBytes?: number;
 };
 

@@ -73,6 +73,10 @@ export function getAgentInternalCommandEntries(): CommandEntry[] {
       const { runSetupOfflineMarxistsAgentCommand } = await import("./offlineMarxistsAgentCommand");
       return runSetupOfflineMarxistsAgentCommand(args, deps);
     }),
+    createEnvCommand(["agent", "setup-ebook-downloader"], "Create or update the ebook downloader agent", async (args, deps) => {
+      const { runSetupEbookDownloaderAgentCommand } = await import("./ebookDownloaderAgentCommand");
+      return runSetupEbookDownloaderAgentCommand(args, deps);
+    }),
     createEnvCommand(["agent", "update"], "Update agent fields", async (args, deps) => {
       const { runAgentUpdateCommand } = await import("./agentRecordCommands");
       return runAgentUpdateCommand(args, deps);
